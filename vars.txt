@@ -1,0 +1,473 @@
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_VOL_NAV_DEC, "VF.G1000_PFD_VOL_NAV_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_VOL_NAV_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_VOL_NAV_INC, "VF.G1000_PFD_VOL_NAV_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_VOL_NAV_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_VOL_NAV_PUSH, "VF.G1000_PFD_VOL_NAV_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_VOL_NAV_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_NAV_SWAP, "VF.G1000_PFD_NAV_SWAP");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_NAV_SWAP, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_NAV_OUTER_DEC, "VF.G1000_PFD_NAV_OUTER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_NAV_OUTER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_NAV_OUTER_INC, "VF.G1000_PFD_NAV_OUTER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_NAV_OUTER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_NAV_INNER_DEC, "VF.G1000_PFD_NAV_INNER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_NAV_INNER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_NAV_INNER_INC, "VF.G1000_PFD_NAV_INNER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_NAV_INNER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_NAV_PUSH, "VF.G1000_PFD_NAV_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_NAV_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_HDG_DEC, "VF.G1000_PFD_HDG_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_HDG_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_HDG_INC, "VF.G1000_PFD_HDG_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_HDG_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_HDG_PUSH, "VF.G1000_PFD_HDG_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_HDG_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_AP_MASTER, "VF.G1000_PFD_AP_MASTER");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_AP_MASTER, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_AP_FD, "VF.G1000_PFD_AP_FD");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_AP_FD, true);
+            
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_AP_HDG, "VF.G1000_PFD_AP_HDG");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_AP_HDG, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_AP_ALT, "VF.G1000_PFD_AP_ALT");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_AP_ALT, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_AP_NAV, "VF.G1000_PFD_AP_NAV");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_AP_NAV, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_AP_VNV, "VF.G1000_PFD_AP_VNV");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_AP_VNV, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_AP_APR, "VF.G1000_PFD_AP_APR");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_AP_APR, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_AP_BC, "VF.G1000_PFD_AP_BC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_AP_BC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_AP_VS, "VF.G1000_PFD_AP_VS");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_AP_VS, true);
+            
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_AP_NOSE_UP, "VF.G1000_PFD_AP_NOSE_UP");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_AP_NOSE_UP, true);
+
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_AP_FLC, "VF.G1000_PFD_AP_FLC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_AP_FLC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_AP_NOSE_DN, "VF.G1000_PFD_AP_NOSE_DN");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_AP_NOSE_DN, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_ALT_OUTER_DEC, "VF.G1000_PFD_ALT_OUTER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_ALT_OUTER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_ALT_OUTER_INC, "VF.G1000_PFD_ALT_OUTER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_ALT_OUTER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_ALT_INNER_DEC, "VF.G1000_PFD_ALT_INNER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_ALT_INNER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_ALT_INNER_INC, "VF.G1000_PFD_ALT_INNER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_ALT_INNER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_ALT_PUSH, "VF.G1000_PFD_ALT_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_ALT_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_SOFTKEY_1, "VF.G1000_PFD_SOFTKEY_1");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_SOFTKEY_1, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_SOFTKEY_2, "VF.G1000_PFD_SOFTKEY_2");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_SOFTKEY_2, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_SOFTKEY_3, "VF.G1000_PFD_SOFTKEY_3");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_SOFTKEY_3, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_SOFTKEY_4, "VF.G1000_PFD_SOFTKEY_4");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_SOFTKEY_4, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_SOFTKEY_5, "VF.G1000_PFD_SOFTKEY_5");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_SOFTKEY_5, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_SOFTKEY_6, "VF.G1000_PFD_SOFTKEY_6");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_SOFTKEY_6, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_SOFTKEY_7, "VF.G1000_PFD_SOFTKEY_7");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_SOFTKEY_7, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_SOFTKEY_8, "VF.G1000_PFD_SOFTKEY_8");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_SOFTKEY_8, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_SOFTKEY_9, "VF.G1000_PFD_SOFTKEY_9");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_SOFTKEY_9, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_SOFTKEY_10, "VF.G1000_PFD_SOFTKEY_10");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_SOFTKEY_10, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_SOFTKEY_11, "VF.G1000_PFD_SOFTKEY_11");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_SOFTKEY_11, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_SOFTKEY_12, "VF.G1000_PFD_SOFTKEY_12");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_SOFTKEY_12, true);
+           
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_FMS_OUTER_DEC, "VF.G1000_PFD_FMS_OUTER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_FMS_OUTER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_FMS_OUTER_INC, "VF.G1000_PFD_FMS_OUTER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_FMS_OUTER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_FMS_INNER_DEC, "VF.G1000_PFD_FMS_INNER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_FMS_INNER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_FMS_INNER_INC, "VF.G1000_PFD_FMS_INNER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_FMS_INNER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_FMS_PUSH, "VF.G1000_PFD_FMS_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_FMS_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_ENT, "VF.G1000_PFD_ENT");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_ENT, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_CLR, "VF.G1000_PFD_CLR");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_CLR, true);
+
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_CLR_LONG, "VF.G1000_PFD_CLR_LONG");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_CLR_LONG, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_PROC, "VF.G1000_PFD_PROC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_PROC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_FPL, "VF.G1000_PFD_FPL");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_FPL, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_MENU, "VF.G1000_PFD_MENU");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_MENU, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_DTO, "VF.G1000_PFD_DTO");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_DTO, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_PAN_LEFT, "VF.G1000_PFD_PAN_LEFT");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_PAN_LEFT, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_PAN_UP, "VF.G1000_PFD_PAN_UP");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_PAN_UP, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_PAN_RIGHT, "VF.G1000_PFD_PAN_RIGHT");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_PAN_RIGHT, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_PAN_DOWN, "VF.G1000_PFD_PAN_DOWN");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_PAN_DOWN, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_PAN_CENTER, "VF.G1000_PFD_PAN_CENTER");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_PAN_CENTER, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_PAN_PUSH, "VF.G1000_PFD_PAN_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_PAN_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_RANGE_DEC, "VF.G1000_PFD_RANGE_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_RANGE_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_RANGE_INC, "VF.G1000_PFD_RANGE_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_RANGE_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_BARO_DEC, "VF.G1000_PFD_BARO_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_BARO_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_BARO_INC, "VF.G1000_PFD_BARO_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_BARO_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_CRS_DEC, "VF.G1000_PFD_CRS_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_CRS_DEC, true);
+
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_CRS_INC, "VF.G1000_PFD_CRS_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_CRS_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_CRS_PUSH, "VF.G1000_PFD_CRS_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_CRS_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_COM_OUTER_DEC, "VF.G1000_PFD_COM_OUTER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_COM_OUTER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_COM_OUTER_INC, "VF.G1000_PFD_COM_OUTER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_COM_OUTER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_COM_INNER_DEC, "VF.G1000_PFD_COM_INNER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_COM_INNER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_COM_INNER_INC, "VF.G1000_PFD_COM_INNER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_COM_INNER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_COM_PUSH, "VF.G1000_PFD_COM_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_COM_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_COM_SWAP, "VF.G1000_PFD_COM_SWAP");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_COM_SWAP, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_COM_SWAP_LONG, "VF.G1000_PFD_COM_SWAP_LONG");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_COM_SWAP_LONG, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_VOL_COM_DEC, "VF.G1000_PFD_VOL_COM_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_VOL_COM_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_VOL_COM_INC, "VF.G1000_PFD_VOL_COM_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_VOL_COM_INC, true);
+
+
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_PFD_VOL_COM_PUSH, "VF.G1000_PFD_VOL_COM_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_PFD_VOL_COM_PUSH, true);
+
+
+
+            // MFD
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_VOL_NAV_DEC, "VF.G1000_MFD_VOL_NAV_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_VOL_NAV_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_VOL_NAV_INC, "VF.G1000_MFD_VOL_NAV_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_VOL_NAV_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_VOL_NAV_PUSH, "VF.G1000_MFD_VOL_NAV_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_VOL_NAV_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_NAV_SWAP, "VF.G1000_MFD_NAV_SWAP");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_NAV_SWAP, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_NAV_OUTER_DEC, "VF.G1000_MFD_NAV_OUTER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_NAV_OUTER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_NAV_OUTER_INC, "VF.G1000_MFD_NAV_OUTER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_NAV_OUTER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_NAV_INNER_DEC, "VF.G1000_MFD_NAV_INNER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_NAV_INNER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_NAV_INNER_INC, "VF.G1000_MFD_NAV_INNER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_NAV_INNER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_NAV_PUSH, "VF.G1000_MFD_NAV_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_NAV_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_HDG_DEC, "VF.G1000_MFD_HDG_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_HDG_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_HDG_INC, "VF.G1000_MFD_HDG_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_HDG_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_HDG_PUSH, "VF.G1000_MFD_HDG_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_HDG_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_AP_MASTER, "VF.G1000_MFD_AP_MASTER");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_AP_MASTER, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_AP_FD, "VF.G1000_MFD_AP_FD");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_AP_FD, true);
+
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_AP_HDG, "VF.G1000_MFD_AP_HDG");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_AP_HDG, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_AP_ALT, "VF.G1000_MFD_AP_ALT");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_AP_ALT, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_AP_NAV, "VF.G1000_MFD_AP_NAV");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_AP_NAV, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_AP_VNV, "VF.G1000_MFD_AP_VNV");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_AP_VNV, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_AP_APR, "VF.G1000_MFD_AP_APR");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_AP_APR, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_AP_BC, "VF.G1000_MFD_AP_BC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_AP_BC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_AP_VS, "VF.G1000_MFD_AP_VS");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_AP_VS, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_AP_NOSE_UP, "VF.G1000_MFD_AP_NOSE_UP");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_AP_NOSE_UP, true);
+
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_AP_FLC, "VF.G1000_MFD_AP_FLC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_AP_FLC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_AP_NOSE_DN, "VF.G1000_MFD_AP_NOSE_DN");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_AP_NOSE_DN, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_ALT_OUTER_DEC, "VF.G1000_MFD_ALT_OUTER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_ALT_OUTER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_ALT_OUTER_INC, "VF.G1000_MFD_ALT_OUTER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_ALT_OUTER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_ALT_INNER_DEC, "VF.G1000_MFD_ALT_INNER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_ALT_INNER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_ALT_INNER_INC, "VF.G1000_MFD_ALT_INNER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_ALT_INNER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_ALT_PUSH, "VF.G1000_MFD_ALT_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_ALT_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_SOFTKEY_1, "VF.G1000_MFD_SOFTKEY_1");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_SOFTKEY_1, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_SOFTKEY_2, "VF.G1000_MFD_SOFTKEY_2");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_SOFTKEY_2, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_SOFTKEY_3, "VF.G1000_MFD_SOFTKEY_3");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_SOFTKEY_3, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_SOFTKEY_4, "VF.G1000_MFD_SOFTKEY_4");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_SOFTKEY_4, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_SOFTKEY_5, "VF.G1000_MFD_SOFTKEY_5");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_SOFTKEY_5, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_SOFTKEY_6, "VF.G1000_MFD_SOFTKEY_6");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_SOFTKEY_6, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_SOFTKEY_7, "VF.G1000_MFD_SOFTKEY_7");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_SOFTKEY_7, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_SOFTKEY_8, "VF.G1000_MFD_SOFTKEY_8");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_SOFTKEY_8, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_SOFTKEY_9, "VF.G1000_MFD_SOFTKEY_9");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_SOFTKEY_9, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_SOFTKEY_10, "VF.G1000_MFD_SOFTKEY_10");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_SOFTKEY_10, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_SOFTKEY_11, "VF.G1000_MFD_SOFTKEY_11");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_SOFTKEY_11, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_SOFTKEY_12, "VF.G1000_MFD_SOFTKEY_12");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_SOFTKEY_12, true);
+
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_FMS_OUTER_DEC, "VF.G1000_MFD_FMS_OUTER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_FMS_OUTER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_FMS_OUTER_INC, "VF.G1000_MFD_FMS_OUTER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_FMS_OUTER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_FMS_INNER_DEC, "VF.G1000_MFD_FMS_INNER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_FMS_INNER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_FMS_INNER_INC, "VF.G1000_MFD_FMS_INNER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_FMS_INNER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_FMS_PUSH, "VF.G1000_MFD_FMS_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_FMS_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_ENT, "VF.G1000_MFD_ENT");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_ENT, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_CLR, "VF.G1000_MFD_CLR");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_CLR, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_CLR_LONG, "VF.G1000_MFD_CLR_LONG");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_CLR_LONG, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_PROC, "VF.G1000_MFD_PROC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_PROC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_FPL, "VF.G1000_MFD_FPL");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_FPL, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_MENU, "VF.G1000_MFD_MENU");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_MENU, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_DTO, "VF.G1000_MFD_DTO");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_DTO, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_PAN_LEFT, "VF.G1000_MFD_PAN_LEFT");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_PAN_LEFT, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_PAN_UP, "VF.G1000_MFD_PAN_UP");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_PAN_UP, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_PAN_RIGHT, "VF.G1000_MFD_PAN_RIGHT");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_PAN_RIGHT, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_PAN_DOWN, "VF.G1000_MFD_PAN_DOWN");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_PAN_DOWN, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_PAN_PUSH, "VF.G1000_MFD_PAN_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_PAN_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_PAN_CENTER, "VF.G1000_MFD_PAN_CENTER");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_PAN_CENTER, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_RANGE_DEC, "VF.G1000_MFD_RANGE_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_RANGE_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_RANGE_INC, "VF.G1000_MFD_RANGE_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_RANGE_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_BARO_DEC, "VF.G1000_MFD_BARO_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_BARO_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_BARO_INC, "VF.G1000_MFD_BARO_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_BARO_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_CRS_DEC, "VF.G1000_MFD_CRS_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_CRS_DEC, true);
+
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_CRS_INC, "VF.G1000_MFD_CRS_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_CRS_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_CRS_PUSH, "VF.G1000_MFD_CRS_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_CRS_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_COM_OUTER_DEC, "VF.G1000_MFD_COM_OUTER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_COM_OUTER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_COM_OUTER_INC, "VF.G1000_MFD_COM_OUTER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_COM_OUTER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_COM_INNER_DEC, "VF.G1000_MFD_COM_INNER_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_COM_INNER_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_COM_INNER_INC, "VF.G1000_MFD_COM_INNER_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_COM_INNER_INC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_COM_PUSH, "VF.G1000_MFD_COM_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_COM_PUSH, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_COM_SWAP, "VF.G1000_MFD_COM_SWAP");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_COM_SWAP, true);
+
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_COM_SWAP_LONG, "VF.G1000_MFD_COM_SWAP_LONG");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_COM_SWAP_LONG, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_VOL_COM_DEC, "VF.G1000_MFD_VOL_COM_DEC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_VOL_COM_DEC, true);
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_VOL_COM_INC, "VF.G1000_MFD_VOL_COM_INC");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_VOL_COM_INC, true);
+
+
+
+            simconnect2020.MapClientEventToSimEvent(EVENTS.G1000_MFD_VOL_COM_PUSH, "VF.G1000_MFD_VOL_COM_PUSH");
+            simconnect2020.AddClientEventToNotificationGroup(groupIds.GROUP_1, EVENTS.G1000_MFD_VOL_COM_PUSH, true);
