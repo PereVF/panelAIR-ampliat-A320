@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build *)",
+      "Bash(mkdir \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\.vscode\")"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\usuario\\Desktop\\panelAIR1000-j"
+    ]
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build",
+      "command": "dotnet",
+      "type": "process",
+      "args": [
+        "build",
+        "${workspaceFolder}/panelAIR1000/CSharpSimConnect/rotAIRmonitor.csproj",
+        "-c", "Debug",
+        "-p:Platform=x64"
+      ],
+      "problemMatcher": "$msCompile"
+    }
+  ]
+}

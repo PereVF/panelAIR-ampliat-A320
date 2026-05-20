@@ -959,8 +959,8 @@ namespace SimConnect3
             mfdRight.Buttons.Add(new UiButton { Name = "MFD_ent",       BasePos = new Point(3775, 922), OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.MFD_ENT,    0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
 
             var cockpitRight = mainSurface;
-            cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-UP",   BasePos = new Point(3450, 1646), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir = -1; flapsPressStart = DateTime.UtcNow; simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
-            cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-DN",   BasePos = new Point(3450, 1776), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir =  1; flapsPressStart = DateTime.UtcNow; simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_DN,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
+            cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-UP",   BasePos = new Point(3450, 1646), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir = -1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
+            cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-DN",   BasePos = new Point(3450, 1776), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir =  1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_DN,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
             cockpitRight.Buttons.Add(new UiButton { Name = "LGEAR-UP",   BasePos = new Point(3105, 1646), W = 110, H = 115, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_UP,         0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             cockpitRight.Buttons.Add(new UiButton { Name = "LGEAR-DN",   BasePos = new Point(3105, 1776), W = 110, H = 115, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_DN,         0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             cockpitRight.Buttons.Add(new UiButton { Name = "P-BRAKE",    BasePos = new Point(3679, 2064), W = 235, H = 145, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PBRAKE,    0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
@@ -968,6 +968,8 @@ namespace SimConnect3
             var swWhiteImg = LoadOverlayImage("SW DN white.png");
             var swGreenImg = LoadOverlayImage("SW DN green.png");
             var swBlueImg  = LoadOverlayImage("SW DN blue.png");
+            var ledGreenImg = LoadOverlayImage("led green.png");
+            var ledRedImg   = LoadOverlayImage("led red.png");
             overlayImages = new List<OverlayImage>
             {
                 // Fila superior (Y=1553) — blanc — ordre E-D: beacon, land, taxi, nav, strobe, recognition
@@ -1003,6 +1005,18 @@ namespace SimConnect3
                 new() { Name="SW_FLAPS", TypeKey="SW flaps", BasePos=new Point(3000, 1500), ZoomWidth=75,
                         Img=LoadOverlayImage("SW flaps.png"),
                         ShowWhen = null, OnClick = null },
+                // GEAR LEDs
+                new() { Name="LED_GEAR_LEFT",    TypeKey="LED_GEAR_LEFT",    BasePos=new Point(2749, 1740), ZoomWidth=43, Img=ledGreenImg,
+                        ShowWhen = () => mainBusVolts >= 5.0 && gearLeftPercent  >= 100 },
+                new() { Name="LED_GEAR_NOSE",    TypeKey="LED_GEAR_NOSE",    BasePos=new Point(2843, 1605), ZoomWidth=43, Img=ledGreenImg,
+                        ShowWhen = () => mainBusVolts >= 5.0 && gearNosePercent  >= 100 },
+                new() { Name="LED_GEAR_RIGHT",   TypeKey="LED_GEAR_RIGHT",   BasePos=new Point(2918, 1740), ZoomWidth=43, Img=ledGreenImg,
+                        ShowWhen = () => mainBusVolts >= 5.0 && gearRightPercent >= 100 },
+                new() { Name="LED_GEAR_TRANSIT", TypeKey="LED_GEAR_TRANSIT", BasePos=new Point(2843, 1585), ZoomWidth=20, Img=ledRedImg,
+                        ShowWhen = () => mainBusVolts >= 5.0 &&
+                                         ((gearLeftPercent  > 0 && gearLeftPercent  < 100) ||
+                                          (gearNosePercent  > 0 && gearNosePercent  < 100) ||
+                                          (gearRightPercent > 0 && gearRightPercent < 100)) },
             };
 
             LoadCalibrationPositions();
@@ -2315,35 +2329,10 @@ namespace SimConnect3
                 }
             }
 
-            // GEAR INDICATOR
-            if (mainBusVolts >= 5.0)
-            {
-                int baseX = 2843;
-                int baseY = 1605;
-                int gearDiameter = 50;
-                DrawGearCircle(e.Graphics, gearLeftPercent,  baseX - 94, baseY + 135, gearDiameter);
-                DrawGearCircle(e.Graphics, gearNosePercent,  baseX,      baseY,       gearDiameter);
-                DrawGearCircle(e.Graphics, gearRightPercent, baseX + 75, baseY + 135, gearDiameter);
-            }
 
-            // Animació SW_FLAPS — calculada directament al paint
+            // SW_FLAPS — posició fixa ±75px mentre es prem, 0 en soltar
             {
-                int newOffset = 0;
-                const double DUR = 500.0; // ms
-                const int DIST = 150;
-                if (flapsAnimDir != 0)
-                {
-                    double ms = (DateTime.UtcNow - flapsPressStart).TotalMilliseconds;
-                    double frac = Math.Min(ms / DUR, 1.0);
-                    newOffset = (int)(flapsAnimDir * DIST * frac);
-                }
-                else if (flapsOffsetAtRelease != 0)
-                {
-                    double ms = (DateTime.UtcNow - flapsReleaseStart).TotalMilliseconds;
-                    double frac = Math.Min(ms / DUR, 1.0);
-                    newOffset = (int)(flapsOffsetAtRelease * (1.0 - frac));
-                    if (ms >= DUR) flapsOffsetAtRelease = 0;
-                }
+                int newOffset = flapsAnimDir != 0 ? flapsAnimDir * 30 : 0;
                 flapsAnimOffsetY = newOffset;
                 var swFlaps = overlayImages.FirstOrDefault(o => o.Name == "SW_FLAPS");
                 if (swFlaps != null) swFlaps.AnimOffsetY = newOffset;
@@ -2727,7 +2716,7 @@ namespace SimConnect3
                 try { ExportCalibrationPositions(silent: true); } catch { }
                 return;
             }
-            if (flapsAnimDir != 0) { flapsOffsetAtRelease = flapsAnimOffsetY; flapsReleaseStart = DateTime.UtcNow; flapsAnimDir = 0; }
+            // flapsAnimDir es reseteja automàticament pel Task.Delay dels OnClick
             trimDragging = false;
             trimLastDir = 0;
             rudderTrimDragging = false;
@@ -2929,8 +2918,9 @@ namespace SimConnect3
             g.FillPolygon(Brushes.Gray, pts);
         }
 
-        private void DrawGearCircle(Graphics g, int percent, int x, int y, int diameter)
+        private void DrawGearCircle(Graphics g, int percent, int x, int y, int diameter, Color deployedColor = default)
         {
+            if (deployedColor == default) deployedColor = Color.LimeGreen;
             Color color;
 
             if (percent <= 0)
@@ -2939,7 +2929,7 @@ namespace SimConnect3
             }
             else if (percent >= 100)
             {
-                color = Color.LimeGreen; // DOWN
+                color = deployedColor; // DOWN
             }
             else
             {
