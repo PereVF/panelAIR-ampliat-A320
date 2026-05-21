@@ -689,6 +689,8 @@ namespace SimConnect3
 
         private int flapsAnimOffsetY = 0;
         private int flapsAnimDir     = 0;
+        private int  lgearAnimOffsetY = 0;
+        private bool lgearHandleUp   = false; // true=UP, false=DN — estat visual de la palanca
         private int flapsIndX        = 3335;
         private int flapsIndYOffset  = 0;
         private bool calibDragFlapsInd = false;
@@ -755,6 +757,7 @@ namespace SimConnect3
             public int flaps_num_handle_positions;
             public int flaps_real_handle_position;
             public int read_parking_brake;
+            public int gear_handle; // GEAR HANDLE POSITION (Bool: 0=UP, 1=DN)
 
 
 
@@ -961,15 +964,29 @@ namespace SimConnect3
             var cockpitRight = mainSurface;
             cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-UP",   BasePos = new Point(3450, 1646), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir = -1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
             cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-DN",   BasePos = new Point(3450, 1776), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir =  1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_DN,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
-            cockpitRight.Buttons.Add(new UiButton { Name = "LGEAR-UP",   BasePos = new Point(3105, 1646), W = 110, H = 115, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_UP,         0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
-            cockpitRight.Buttons.Add(new UiButton { Name = "LGEAR-DN",   BasePos = new Point(3105, 1776), W = 110, H = 115, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_DN,         0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
-            cockpitRight.Buttons.Add(new UiButton { Name = "P-BRAKE",    BasePos = new Point(3679, 2064), W = 235, H = 145, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PBRAKE,    0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
+            cockpitRight.Buttons.Add(new UiButton { Name="LGEAR-UP", BasePos=new Point(2843, 1590), W=110, H=115, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_UP, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
+            cockpitRight.Buttons.Add(new UiButton { Name="LGEAR-DN", BasePos=new Point(2843, 1750), W=110, H=115, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_DN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
+            cockpitRight.Buttons.Add(new UiButton { Name="P-BRAKE", BasePos=new Point(2843, 1820), W=110, H=115, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PBRAKE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
 
             var swWhiteImg = LoadOverlayImage("SW DN white.png");
             var swGreenImg = LoadOverlayImage("SW DN green.png");
             var swBlueImg  = LoadOverlayImage("SW DN blue.png");
             var ledGreenImg = LoadOverlayImage("led green.png");
             var ledRedImg   = LoadOverlayImage("led red.png");
+            var swLgearImg  = LoadOverlayImage("SW landing gear.png");
+            var swPbrakeImg = LoadOverlayImage("Parking Brake switch.png");
             overlayImages = new List<OverlayImage>
             {
                 // Fila superior (Y=1553) — blanc — ordre E-D: beacon, land, taxi, nav, strobe, recognition
@@ -1005,6 +1022,14 @@ namespace SimConnect3
                 new() { Name="SW_FLAPS", TypeKey="SW flaps", BasePos=new Point(3000, 1500), ZoomWidth=75,
                         Img=LoadOverlayImage("SW flaps.png"),
                         ShowWhen = null, OnClick = null },
+                // Landing gear switch
+                new() { Name="SW_LGEAR", TypeKey="SW lgear", BasePos=new Point(2843, 1620), ZoomWidth=75,
+                        Img=swLgearImg, ShowWhen=null, OnClick=null },
+                // Parking brake switch
+                new() { Name="SW_PBRAKE", TypeKey="SW pbrake", BasePos=new Point(2843, 1755), ZoomWidth=75,
+                        Img=swPbrakeImg, ShowWhen=null, OnClick=null },
+                new() { Name="LED_PBRAKE", TypeKey="LED_PBRAKE", BasePos=new Point(2918, 1755), ZoomWidth=32, Img=ledRedImg,
+                        ShowWhen = () => pbrakeActive },
                 // GEAR LEDs
                 new() { Name="LED_GEAR_LEFT",    TypeKey="LED_GEAR_LEFT",    BasePos=new Point(2749, 1740), ZoomWidth=43, Img=ledGreenImg,
                         ShowWhen = () => mainBusVolts >= 5.0 && gearLeftPercent  >= 100 },
@@ -1012,7 +1037,7 @@ namespace SimConnect3
                         ShowWhen = () => mainBusVolts >= 5.0 && gearNosePercent  >= 100 },
                 new() { Name="LED_GEAR_RIGHT",   TypeKey="LED_GEAR_RIGHT",   BasePos=new Point(2918, 1740), ZoomWidth=43, Img=ledGreenImg,
                         ShowWhen = () => mainBusVolts >= 5.0 && gearRightPercent >= 100 },
-                new() { Name="LED_GEAR_TRANSIT", TypeKey="LED_GEAR_TRANSIT", BasePos=new Point(2843, 1585), ZoomWidth=20, Img=ledRedImg,
+                new() { Name="LED_GEAR_TRANSIT", TypeKey="LED_GEAR_TRANSIT", BasePos=new Point(2843, 1585), ZoomWidth=32, Img=ledRedImg,
                         ShowWhen = () => mainBusVolts >= 5.0 &&
                                          ((gearLeftPercent  > 0 && gearLeftPercent  < 100) ||
                                           (gearNosePercent  > 0 && gearNosePercent  < 100) ||
@@ -1743,6 +1768,7 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FLAPS NUM HANDLE POSITIONS", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FLAPS HANDLE INDEX", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "BRAKE PARKING POSITION", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GEAR HANDLE POSITION", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
 
 
                 simconnect.RegisterDataDefineStruct<Struct1>(DEFINITIONS.Struct1);
@@ -1930,6 +1956,13 @@ namespace SimConnect3
                 gearLeftPercent = (int)s1.gear_left;
                 gearRightPercent = (int)s1.gear_right;
                 mainBusVolts = s1.main_bus_volts;
+                bool newGearHandleUp = (s1.gear_handle & 1) == 0; // 0=UP, 1=DN
+                if (newGearHandleUp != lgearHandleUp)
+                {
+                    lgearHandleUp = newGearHandleUp;
+                    if (pbMain.IsHandleCreated)
+                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                }
                 bool newParkingbrake = (s1.read_parking_brake & 1) != 0;
 
 
@@ -2169,14 +2202,6 @@ namespace SimConnect3
                     DrawTriangle(e.Graphics, tri.BasePos, Brushes.White);
 
             // --- COCKPIT RIGHT — origen (2695,1144) ---
-            var rectPbrake    = new Rectangle(3621, 2004, 120, 30);
-
-            DrawLight(e.Graphics, rectPbrake,    false);
-            if (pbrakeActive)
-            {
-                DrawLight(e.Graphics, rectPbrake, true);
-                e.Graphics.FillRectangle(new SolidBrush(Color.FromArgb(160, 220, 0, 0)), rectPbrake);
-            }
 
             // FLAPS MARKERS
             int fmX = flapsIndX - 25;
@@ -2337,11 +2362,43 @@ namespace SimConnect3
                 var swFlaps = overlayImages.FirstOrDefault(o => o.Name == "SW_FLAPS");
                 if (swFlaps != null) swFlaps.AnimOffsetY = newOffset;
             }
+            // SW_LGEAR — toggle: UP=-50px, DN=+50px, sincronitzat amb GEAR HANDLE POSITION
+            {
+                var swLgear = overlayImages.FirstOrDefault(o => o.Name == "SW_LGEAR");
+                if (swLgear != null)
+                    swLgear.AnimOffsetY = lgearHandleUp ? -50 : 50;
+            }
+
+            // SW_PBRAKE — drawn manually below, no AnimOffsetY needed
 
             // Overlays: visibles sempre en calibratge, o quan ShowWhen ho indica
             foreach (var ov in overlayImages)
+            {
+                if (ov.Name == "SW_PBRAKE") continue;
                 if (ov.Img != null && (calibrationMode || (ov.ShowWhen?.Invoke() ?? true)))
                     e.Graphics.DrawImage(ov.Img, ov.AnimatedBounds);
+            }
+
+            // SW_PBRAKE — manual draw amb rotació i escala
+            {
+                var swPbrake = overlayImages.FirstOrDefault(o => o.Name == "SW_PBRAKE");
+                if (swPbrake?.Img != null && (calibrationMode || pbrakeActive || true))
+                {
+                    float baseW = swPbrake.ZoomWidth;
+                    float baseH = baseW / swPbrake.AspectRatio;
+                    float drawW = pbrakeActive ? baseW * 1.15f : baseW;
+                    float drawH = pbrakeActive ? baseH * 1.15f : baseH;
+                    float angle = pbrakeActive ? -30f : 0f;
+                    float cx    = swPbrake.BasePos.X + baseW / 2f;
+                    float cy    = swPbrake.BasePos.Y + baseH / 2f;
+
+                    var state = e.Graphics.Save();
+                    e.Graphics.TranslateTransform(cx, cy);
+                    e.Graphics.RotateTransform(angle);
+                    e.Graphics.DrawImage(swPbrake.Img, -drawW / 2f, -drawH / 2f, drawW, drawH);
+                    e.Graphics.Restore(state);
+                }
+            }
 
             // --- CALIBRATGE OVERLAY (F12 per activar/desactivar) ---
             if (calibrationMode)
