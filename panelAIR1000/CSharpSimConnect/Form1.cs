@@ -167,6 +167,8 @@ namespace SimConnect3
         bool fuelpump1Active;
         bool fuelpump2Active;
         bool pbrakeActive;
+        private int ign1Pos = 2; // 0=OFF, 1=RIGHT, 2=LEFT(default), 3=BOTH, 4=START
+        private int ign2Pos = 2;
 
         int gearNosePercent = 0;
         int gearLeftPercent = 0;
@@ -534,7 +536,11 @@ namespace SimConnect3
             RUDDER_TRIM_RIGHT,
             LGEAR_UP,
             LGEAR_DN,
-            P
+            P,
+            MAGNETO1_INCR,
+            MAGNETO1_DECR,
+            MAGNETO2_INCR,
+            MAGNETO2_DECR,
 
 
 
@@ -758,6 +764,12 @@ namespace SimConnect3
             public int flaps_real_handle_position;
             public int read_parking_brake;
             public int gear_handle; // GEAR HANDLE POSITION (Bool: 0=UP, 1=DN)
+            public int ign1_left;    // RECIP ENG LEFT MAGNETO:1
+            public int ign1_right;   // RECIP ENG RIGHT MAGNETO:1
+            public int ign1_starter; // GENERAL ENG STARTER:1
+            public int ign2_left;
+            public int ign2_right;
+            public int ign2_starter;
 
 
 
@@ -800,7 +812,7 @@ namespace SimConnect3
             imglightOn = rotAIRmonitor.Properties.Resources.light_on;
             trimWheelImg = LoadOverlayImage("trim wheel.png");
 
-            string imagePath = System.IO.Path.Combine(Application.StartupPath, "Resources", "main GA_1000 4K panel_c.png");
+            string imagePath = System.IO.Path.Combine(Application.StartupPath, "Resources", "main GA_1000 4K panel_d.png");
             if (System.IO.File.Exists(imagePath))
                 _bgImage = Image.FromFile(imagePath);
 
@@ -979,6 +991,32 @@ namespace SimConnect3
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PBRAKE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
                 }});
+            // IGN1 rotate right (clockwise = INCR)
+            cockpitRight.Buttons.Add(new UiButton { Name="IGN1-RIGHT", BasePos=new Point(1970, 1080), W=80, H=120, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    if (ign1Pos >= 4) return;
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.MAGNETO1_INCR, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
+            // IGN1 rotate left (counter-clockwise = DECR)
+            cockpitRight.Buttons.Add(new UiButton { Name="IGN1-LEFT", BasePos=new Point(1880, 1080), W=80, H=120, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    if (ign1Pos <= 0) return;
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.MAGNETO1_DECR, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
+            cockpitRight.Buttons.Add(new UiButton { Name="IGN2-RIGHT", BasePos=new Point(2170, 1080), W=80, H=120, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    if (ign2Pos >= 4) return;
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.MAGNETO2_INCR, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
+            cockpitRight.Buttons.Add(new UiButton { Name="IGN2-LEFT", BasePos=new Point(2080, 1080), W=80, H=120, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    if (ign2Pos <= 0) return;
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.MAGNETO2_DECR, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
 
             var swWhiteImg = LoadOverlayImage("SW DN white.png");
             var swGreenImg = LoadOverlayImage("SW DN green.png");
@@ -986,7 +1024,8 @@ namespace SimConnect3
             var ledGreenImg = LoadOverlayImage("led green.png");
             var ledRedImg   = LoadOverlayImage("led red.png");
             var swLgearImg  = LoadOverlayImage("SW landing gear.png");
-            var swPbrakeImg = LoadOverlayImage("Parking Brake switch.png");
+            var swPbrakeImg  = LoadOverlayImage("Parking Brake switch.png");
+            var swIgnitionImg = LoadOverlayImage("SW ignition.png");
             overlayImages = new List<OverlayImage>
             {
                 // Fila superior (Y=1553) — blanc — ordre E-D: beacon, land, taxi, nav, strobe, recognition
@@ -1028,6 +1067,11 @@ namespace SimConnect3
                 // Parking brake switch
                 new() { Name="SW_PBRAKE", TypeKey="SW pbrake", BasePos=new Point(2843, 1755), ZoomWidth=75,
                         Img=swPbrakeImg, ShowWhen=null, OnClick=null },
+                // Ignition switch
+                new() { Name="SW_IGNITION",  TypeKey="SW ignition",  BasePos=new Point(1920, 1080), ZoomWidth=100,
+                        Img=swIgnitionImg, ShowWhen=null, OnClick=null },
+                new() { Name="SW_IGNITION2", TypeKey="SW ignition2", BasePos=new Point(2120, 1080), ZoomWidth=100,
+                        Img=swIgnitionImg, ShowWhen=null, OnClick=null },
                 new() { Name="LED_PBRAKE", TypeKey="LED_PBRAKE", BasePos=new Point(2918, 1755), ZoomWidth=32, Img=ledRedImg,
                         ShowWhen = () => pbrakeActive },
                 // GEAR LEDs
@@ -1716,6 +1760,14 @@ namespace SimConnect3
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SWITCH_PBRAKE, "PARKING_BRAKES");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_PBRAKE, false);
 
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.MAGNETO1_INCR, "MAGNETO1_INCR");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.MAGNETO1_INCR, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.MAGNETO1_DECR, "MAGNETO1_DECR");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.MAGNETO1_DECR, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.MAGNETO2_INCR, "MAGNETO2_INCR");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.MAGNETO2_INCR, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.MAGNETO2_DECR, "MAGNETO2_DECR");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.MAGNETO2_DECR, false);
 
 
 
@@ -1769,6 +1821,12 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FLAPS HANDLE INDEX", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "BRAKE PARKING POSITION", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GEAR HANDLE POSITION", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG LEFT MAGNETO:1",  "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG RIGHT MAGNETO:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG STARTER:1",     "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG LEFT MAGNETO:2",  "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG RIGHT MAGNETO:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG STARTER:2",     "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
 
 
                 simconnect.RegisterDataDefineStruct<Struct1>(DEFINITIONS.Struct1);
@@ -2145,6 +2203,22 @@ namespace SimConnect3
                     if (pbMain.IsHandleCreated)
                         pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
                 }
+                int newIgn1Pos;
+                if      (s1.ign1_left == 0 && s1.ign1_right == 0 && s1.ign1_starter == 0) newIgn1Pos = 0; // OFF
+                else if (s1.ign1_left == 0 && s1.ign1_right == 1 && s1.ign1_starter == 0) newIgn1Pos = 1; // RIGHT
+                else if (s1.ign1_left == 1 && s1.ign1_right == 0 && s1.ign1_starter == 0) newIgn1Pos = 2; // LEFT
+                else if (s1.ign1_left == 1 && s1.ign1_right == 1 && s1.ign1_starter == 0) newIgn1Pos = 3; // BOTH
+                else if (s1.ign1_left == 1 && s1.ign1_right == 1 && s1.ign1_starter == 1) newIgn1Pos = 4; // START
+                else newIgn1Pos = ign1Pos; // mantenim l'últim valor conegut
+                if (newIgn1Pos != ign1Pos) { ign1Pos = newIgn1Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
+                int newIgn2Pos;
+                if      (s1.ign2_left == 0 && s1.ign2_right == 0 && s1.ign2_starter == 0) newIgn2Pos = 0;
+                else if (s1.ign2_left == 0 && s1.ign2_right == 1 && s1.ign2_starter == 0) newIgn2Pos = 1;
+                else if (s1.ign2_left == 1 && s1.ign2_right == 0 && s1.ign2_starter == 0) newIgn2Pos = 2;
+                else if (s1.ign2_left == 1 && s1.ign2_right == 1 && s1.ign2_starter == 0) newIgn2Pos = 3;
+                else if (s1.ign2_left == 1 && s1.ign2_right == 1 && s1.ign2_starter == 1) newIgn2Pos = 4;
+                else newIgn2Pos = ign2Pos;
+                if (newIgn2Pos != ign2Pos) { ign2Pos = newIgn2Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
                 //dmeActive = s1.dme_read == 1; // o la variable que ja estàs llegint
 
                 //com1Tx = s1.com_transmit_1 == 1;
@@ -2375,6 +2449,8 @@ namespace SimConnect3
             foreach (var ov in overlayImages)
             {
                 if (ov.Name == "SW_PBRAKE") continue;
+                if (ov.Name == "SW_IGNITION") continue;
+                if (ov.Name == "SW_IGNITION2") continue;
                 if (ov.Img != null && (calibrationMode || (ov.ShowWhen?.Invoke() ?? true)))
                     e.Graphics.DrawImage(ov.Img, ov.AnimatedBounds);
             }
@@ -2388,7 +2464,7 @@ namespace SimConnect3
                     float baseH = baseW / swPbrake.AspectRatio;
                     float drawW = pbrakeActive ? baseW * 1.15f : baseW;
                     float drawH = pbrakeActive ? baseH * 1.15f : baseH;
-                    float angle = pbrakeActive ? -30f : 0f;
+                    float angle = pbrakeActive ? 30f : 0f;
                     float cx    = swPbrake.BasePos.X + baseW / 2f;
                     float cy    = swPbrake.BasePos.Y + baseH / 2f;
 
@@ -2396,6 +2472,45 @@ namespace SimConnect3
                     e.Graphics.TranslateTransform(cx, cy);
                     e.Graphics.RotateTransform(angle);
                     e.Graphics.DrawImage(swPbrake.Img, -drawW / 2f, -drawH / 2f, drawW, drawH);
+                    e.Graphics.Restore(state);
+                }
+            }
+
+            // SW_IGNITION — manual draw amb rotació segons ign1Pos
+            // 0=OFF(-60°), 1=RIGHT(-30°), 2=LEFT(0°), 3=BOTH(+30°), 4=START(+60°)
+            {
+                var swIgn = overlayImages.FirstOrDefault(o => o.Name == "SW_IGNITION");
+                if (swIgn?.Img != null)
+                {
+                    float angle = (ign1Pos - 2) * 30f; // LEFT=0°, OFF=-60°, START=+60°
+                    float baseW = swIgn.ZoomWidth;
+                    float baseH = baseW / swIgn.AspectRatio;
+                    float cx    = swIgn.BasePos.X + baseW / 2f;
+                    float cy    = swIgn.BasePos.Y + baseH / 2f;
+
+                    var state = e.Graphics.Save();
+                    e.Graphics.TranslateTransform(cx, cy);
+                    e.Graphics.RotateTransform(angle);
+                    e.Graphics.DrawImage(swIgn.Img, -baseW / 2f, -baseH / 2f, baseW, baseH);
+                    e.Graphics.Restore(state);
+                }
+            }
+
+            // SW_IGNITION2 — manual draw amb rotació segons ign2Pos
+            {
+                var swIgn2 = overlayImages.FirstOrDefault(o => o.Name == "SW_IGNITION2");
+                if (swIgn2?.Img != null)
+                {
+                    float angle = (ign2Pos - 2) * 30f;
+                    float baseW = swIgn2.ZoomWidth;
+                    float baseH = baseW / swIgn2.AspectRatio;
+                    float cx    = swIgn2.BasePos.X + baseW / 2f;
+                    float cy    = swIgn2.BasePos.Y + baseH / 2f;
+
+                    var state = e.Graphics.Save();
+                    e.Graphics.TranslateTransform(cx, cy);
+                    e.Graphics.RotateTransform(angle);
+                    e.Graphics.DrawImage(swIgn2.Img, -baseW / 2f, -baseH / 2f, baseW, baseH);
                     e.Graphics.Restore(state);
                 }
             }
