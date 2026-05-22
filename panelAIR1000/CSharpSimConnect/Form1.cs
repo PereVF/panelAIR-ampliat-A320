@@ -1029,16 +1029,17 @@ namespace SimConnect3
                 OnClick = () => {
                     if (fuel1Pos <= 0) return;
                     int newPos = fuel1Pos - 1;
-                    int[] fuel1Enum = { 0, 2, 13 };
-                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, (uint)fuel1Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    // pos0=OFF, pos1=ON(LEFT=2), pos2=CF(RIGHT=3)
+                    uint[] fuel1Enum = { 0, 2, 3 };
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, fuel1Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-RIGHT", BasePos=new Point(1720, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
                     if (fuel1Pos >= 2) return;
                     int newPos = fuel1Pos + 1;
-                    int[] fuel1Enum = { 0, 2, 13 };
-                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, (uint)fuel1Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    uint[] fuel1Enum = { 0, 2, 3 };
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, fuel1Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
                 }});
             // SW_FUEL2 — left and right areas
@@ -2272,13 +2273,17 @@ namespace SimConnect3
                 else if (s1.ign2_left == 1 && s1.ign2_right == 1 && s1.ign2_starter == 1) newIgn2Pos = 4;
                 else newIgn2Pos = ign2Pos;
                 if (newIgn2Pos != ign2Pos) { ign2Pos = newIgn2Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
-                bool crossFeedActive = s1.fuel_cross_feed != 0;
+                int newFuel1Pos;
+                if      (s1.fuel_selector_1 == 0 || s1.fuel_selector_1 == 20) newFuel1Pos = 0; // OFF
+                else if (s1.fuel_selector_1 == 2)                              newFuel1Pos = 1; // ON
+                else if (s1.fuel_selector_1 == 3)                              newFuel1Pos = 2; // CF
+                else                                                           newFuel1Pos = fuel1Pos;
 
-                int newFuel1Pos = crossFeedActive ? 2 :
-                                  s1.fuel_selector_1 == 0 ? 0 : 1;
-
-                int newFuel2Pos = crossFeedActive ? 0 :
-                                  s1.fuel_selector_2 == 0 ? 2 : 1;
+                int newFuel2Pos;
+                if      (s1.fuel_selector_2 == 2)                              newFuel2Pos = 0; // CF
+                else if (s1.fuel_selector_2 == 3)                              newFuel2Pos = 1; // ON
+                else if (s1.fuel_selector_2 == 0 || s1.fuel_selector_2 == 20) newFuel2Pos = 2; // OFF
+                else                                                           newFuel2Pos = fuel2Pos;
 
                 if (newFuel1Pos != fuel1Pos) { fuel1Pos = newFuel1Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
                 if (newFuel2Pos != fuel2Pos) { fuel2Pos = newFuel2Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
