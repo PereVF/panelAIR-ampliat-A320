@@ -169,6 +169,8 @@ namespace SimConnect3
         bool pbrakeActive;
         private int ign1Pos = 2; // 0=OFF, 1=RIGHT, 2=LEFT(default), 3=BOTH, 4=START
         private int ign2Pos = 2;
+        private int fuel1Pos = 0; // 0=OFF(-30°), 1=ON(0°), 2=CROSSFEED(+30°)
+        private int fuel2Pos = 0; // 0=CROSSFEED(-30°), 1=ON(0°), 2=OFF(+30°)
 
         int gearNosePercent = 0;
         int gearLeftPercent = 0;
@@ -541,6 +543,8 @@ namespace SimConnect3
             MAGNETO1_DECR,
             MAGNETO2_INCR,
             MAGNETO2_DECR,
+            FUEL_SELECTOR_SET,
+            FUEL_SELECTOR_2_SET,
 
 
 
@@ -770,6 +774,9 @@ namespace SimConnect3
             public int ign2_left;
             public int ign2_right;
             public int ign2_starter;
+            public int fuel_selector_1; // FUEL TANK SELECTOR:1 (enum)
+            public int fuel_selector_2; // FUEL TANK SELECTOR:2 (enum)
+            public int fuel_cross_feed; // FUEL CROSS FEED (Bool)
 
 
 
@@ -1017,6 +1024,40 @@ namespace SimConnect3
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.MAGNETO2_DECR, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
                 }});
+            // SW_FUEL1 — left and right areas
+            cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-LEFT",  BasePos=new Point(1620, 1080), W=80, H=120, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    if (fuel1Pos <= 0) return;
+                    int newPos = fuel1Pos - 1;
+                    int[] fuel1Enum = { 0, 2, 13 };
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, (uint)fuel1Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
+            cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-RIGHT", BasePos=new Point(1720, 1080), W=80, H=120, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    if (fuel1Pos >= 2) return;
+                    int newPos = fuel1Pos + 1;
+                    int[] fuel1Enum = { 0, 2, 13 };
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, (uint)fuel1Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
+            // SW_FUEL2 — left and right areas
+            cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-LEFT",  BasePos=new Point(2120, 1080), W=80, H=120, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    if (fuel2Pos <= 0) return;
+                    int newPos = fuel2Pos - 1;
+                    int[] fuel2Enum = { 13, 3, 0 };
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_2_SET, (uint)fuel2Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
+            cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-RIGHT", BasePos=new Point(2220, 1080), W=80, H=120, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    if (fuel2Pos >= 2) return;
+                    int newPos = fuel2Pos + 1;
+                    int[] fuel2Enum = { 13, 3, 0 };
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_2_SET, (uint)fuel2Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
 
             var swWhiteImg = LoadOverlayImage("SW DN white.png");
             var swGreenImg = LoadOverlayImage("SW DN green.png");
@@ -1026,6 +1067,7 @@ namespace SimConnect3
             var swLgearImg  = LoadOverlayImage("SW landing gear.png");
             var swPbrakeImg  = LoadOverlayImage("Parking Brake switch.png");
             var swIgnitionImg = LoadOverlayImage("SW ignition.png");
+            var swFuelImg     = LoadOverlayImage("SW fuel.png");
             overlayImages = new List<OverlayImage>
             {
                 // Fila superior (Y=1553) — blanc — ordre E-D: beacon, land, taxi, nav, strobe, recognition
@@ -1072,6 +1114,10 @@ namespace SimConnect3
                         Img=swIgnitionImg, ShowWhen=null, OnClick=null },
                 new() { Name="SW_IGNITION2", TypeKey="SW ignition2", BasePos=new Point(2120, 1080), ZoomWidth=100,
                         Img=swIgnitionImg, ShowWhen=null, OnClick=null },
+                new() { Name="SW_FUEL1", TypeKey="SW fuel1", BasePos=new Point(1670, 1080), ZoomWidth=100,
+                        Img=swFuelImg, ShowWhen=null, OnClick=null },
+                new() { Name="SW_FUEL2", TypeKey="SW fuel2", BasePos=new Point(2170, 1080), ZoomWidth=100,
+                        Img=swFuelImg, ShowWhen=null, OnClick=null },
                 new() { Name="LED_PBRAKE", TypeKey="LED_PBRAKE", BasePos=new Point(2918, 1755), ZoomWidth=32, Img=ledRedImg,
                         ShowWhen = () => pbrakeActive },
                 // GEAR LEDs
@@ -1768,6 +1814,10 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.MAGNETO2_INCR, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.MAGNETO2_DECR, "MAGNETO2_DECR");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.MAGNETO2_DECR, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FUEL_SELECTOR_SET,   "FUEL_SELECTOR_SET");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET,   false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FUEL_SELECTOR_2_SET, "FUEL_SELECTOR_2_SET");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FUEL_SELECTOR_2_SET, false);
 
 
 
@@ -1827,6 +1877,9 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG LEFT MAGNETO:2",  "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG RIGHT MAGNETO:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG STARTER:2",     "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUEL TANK SELECTOR:1", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUEL TANK SELECTOR:2", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUEL CROSS FEED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
 
 
                 simconnect.RegisterDataDefineStruct<Struct1>(DEFINITIONS.Struct1);
@@ -2219,6 +2272,16 @@ namespace SimConnect3
                 else if (s1.ign2_left == 1 && s1.ign2_right == 1 && s1.ign2_starter == 1) newIgn2Pos = 4;
                 else newIgn2Pos = ign2Pos;
                 if (newIgn2Pos != ign2Pos) { ign2Pos = newIgn2Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
+                bool crossFeedActive = s1.fuel_cross_feed != 0;
+
+                int newFuel1Pos = crossFeedActive ? 2 :
+                                  s1.fuel_selector_1 == 0 ? 0 : 1;
+
+                int newFuel2Pos = crossFeedActive ? 0 :
+                                  s1.fuel_selector_2 == 0 ? 2 : 1;
+
+                if (newFuel1Pos != fuel1Pos) { fuel1Pos = newFuel1Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
+                if (newFuel2Pos != fuel2Pos) { fuel2Pos = newFuel2Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
                 //dmeActive = s1.dme_read == 1; // o la variable que ja estàs llegint
 
                 //com1Tx = s1.com_transmit_1 == 1;
@@ -2451,6 +2514,8 @@ namespace SimConnect3
                 if (ov.Name == "SW_PBRAKE") continue;
                 if (ov.Name == "SW_IGNITION") continue;
                 if (ov.Name == "SW_IGNITION2") continue;
+                if (ov.Name == "SW_FUEL1") continue;
+                if (ov.Name == "SW_FUEL2") continue;
                 if (ov.Img != null && (calibrationMode || (ov.ShowWhen?.Invoke() ?? true)))
                     e.Graphics.DrawImage(ov.Img, ov.AnimatedBounds);
             }
@@ -2511,6 +2576,41 @@ namespace SimConnect3
                     e.Graphics.TranslateTransform(cx, cy);
                     e.Graphics.RotateTransform(angle);
                     e.Graphics.DrawImage(swIgn2.Img, -baseW / 2f, -baseH / 2f, baseW, baseH);
+                    e.Graphics.Restore(state);
+                }
+            }
+
+            // SW_FUEL1: pos0=OFF(-30°), pos1=ON(0°), pos2=CROSSFEED(+30°)
+            {
+                var sw = overlayImages.FirstOrDefault(o => o.Name == "SW_FUEL1");
+                if (sw?.Img != null)
+                {
+                    float angle = (fuel1Pos - 1) * 30f + 30f;
+                    float baseW = sw.ZoomWidth;
+                    float baseH = baseW / sw.AspectRatio;
+                    float cx = sw.BasePos.X + baseW / 2f;
+                    float cy = sw.BasePos.Y + baseH / 2f;
+                    var state = e.Graphics.Save();
+                    e.Graphics.TranslateTransform(cx, cy);
+                    e.Graphics.RotateTransform(angle);
+                    e.Graphics.DrawImage(sw.Img, -baseW / 2f, -baseH / 2f, baseW, baseH);
+                    e.Graphics.Restore(state);
+                }
+            }
+            // SW_FUEL2: pos0=CROSSFEED(-30°), pos1=ON(0°), pos2=OFF(+30°)
+            {
+                var sw = overlayImages.FirstOrDefault(o => o.Name == "SW_FUEL2");
+                if (sw?.Img != null)
+                {
+                    float angle = (fuel2Pos - 1) * 30f + 30f;
+                    float baseW = sw.ZoomWidth;
+                    float baseH = baseW / sw.AspectRatio;
+                    float cx = sw.BasePos.X + baseW / 2f;
+                    float cy = sw.BasePos.Y + baseH / 2f;
+                    var state = e.Graphics.Save();
+                    e.Graphics.TranslateTransform(cx, cy);
+                    e.Graphics.RotateTransform(angle);
+                    e.Graphics.DrawImage(sw.Img, -baseW / 2f, -baseH / 2f, baseW, baseH);
                     e.Graphics.Restore(state);
                 }
             }
