@@ -163,6 +163,11 @@ namespace SimConnect3
         bool taxiActive;
         bool navActive;
         bool strobeActive;
+        bool recognActive;
+        bool starter1Active;
+        bool starter2Active;
+        bool ignition1Active; // true = AUTO or ON (1 or 2)
+        bool ignition2Active;
         bool pitotheatActive;
         bool fuelpump1Active;
         bool fuelpump2Active;
@@ -509,6 +514,11 @@ namespace SimConnect3
             SWITCH_TAXI,
             SWITCH_NAV,
             SWITCH_STROBE,
+            SWITCH_RECOGN,
+            TOGGLE_STARTER1,
+            TOGGLE_STARTER2,
+            TURBINE_IGNITION_SWITCH_SET1,
+            TURBINE_IGNITION_SWITCH_SET2,
             SWITCH_PITOTHEAT,
             SWITCH_FUELPUMP1,
             SWITCH_FUELPUMP2,
@@ -775,6 +785,11 @@ namespace SimConnect3
             public int read_taxi;
             public int read_nav;
             public int read_strobe;
+            public int read_recogn;
+            public int starter1;      // GENERAL ENG STARTER:1
+            public int starter2;      // GENERAL ENG STARTER:2
+            public int ignition1;     // TURB ENG IGNITION SWITCH EX1:1
+            public int ignition2;     // TURB ENG IGNITION SWITCH EX1:2
             public int read_pitotheat;
             public int read_fuelpump1;
             public int read_fuelpump2;
@@ -1130,6 +1145,14 @@ namespace SimConnect3
                     }
                     pbMain.Invalidate();
                 }});
+            cockpitRight.Buttons.Add(new UiButton { Name="BTN_STARTER1",  BasePos=new Point(1564, 1653), W=75, H=75, Resizable=true, NoShadow=true,
+                OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_STARTER1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
+            cockpitRight.Buttons.Add(new UiButton { Name="BTN_IGNITION1", BasePos=new Point(1624, 1653), W=75, H=75, Resizable=true, NoShadow=true,
+                OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TURBINE_IGNITION_SWITCH_SET1, ignition1Active ? 0u : 2u, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
+            cockpitRight.Buttons.Add(new UiButton { Name="BTN_STARTER2",  BasePos=new Point(1684, 1653), W=75, H=75, Resizable=true, NoShadow=true,
+                OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_STARTER2, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
+            cockpitRight.Buttons.Add(new UiButton { Name="BTN_IGNITION2", BasePos=new Point(1744, 1653), W=75, H=75, Resizable=true, NoShadow=true,
+                OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TURBINE_IGNITION_SWITCH_SET2, ignition2Active ? 0u : 2u, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
 
             var swWhiteImg = LoadOverlayImage("SW DN white.png");
             var swGreenImg = LoadOverlayImage("SW DN green.png");
@@ -1137,7 +1160,7 @@ namespace SimConnect3
             var ledGreenImg = LoadOverlayImage("led green.png");
             var ledRedImg   = LoadOverlayImage("led red.png");
             var swLgearImg  = LoadOverlayImage("SW landing gear.png");
-            var swPbrakeImg  = LoadOverlayImage("Parking Brake switch.png");
+            var swPbrakeImg  = LoadOverlayImage("Parking Brake switch_b.png");
             var swIgnitionImg = LoadOverlayImage("SW ignition.png");
             var swFuelImg     = LoadOverlayImage("SW fuel_r.png");
             var swBatteryImg  = LoadOverlayImage("SW battery.png");
@@ -1162,7 +1185,20 @@ namespace SimConnect3
                         ShowWhen = () => !strobeActive,
                         OnClick  = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_STROBE,    0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
                 new() { Name="SW_DN_RECOGN",    TypeKey="SW DN white", BasePos=new Point(1864, 1553), ZoomWidth=75, Img=swWhiteImg,
-                        ShowWhen = null, OnClick = null },  // pendent assignació MSFS
+                        ShowWhen = () => !recognActive,
+                        OnClick  = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_RECOGN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+                new() { Name="SW_DN_STARTER1",   TypeKey="SW DN white", BasePos=new Point(1564, 1653), ZoomWidth=75, Img=swWhiteImg,
+                        ShowWhen = () => !starter1Active,
+                        OnClick  = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_STARTER1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+                new() { Name="SW_DN_IGNITION1",  TypeKey="SW DN white", BasePos=new Point(1624, 1653), ZoomWidth=75, Img=swWhiteImg,
+                        ShowWhen = () => !ignition1Active,
+                        OnClick  = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TURBINE_IGNITION_SWITCH_SET1, ignition1Active ? 0u : 2u, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+                new() { Name="SW_DN_STARTER2",   TypeKey="SW DN white", BasePos=new Point(1684, 1653), ZoomWidth=75, Img=swWhiteImg,
+                        ShowWhen = () => !starter2Active,
+                        OnClick  = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_STARTER2, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+                new() { Name="SW_DN_IGNITION2",  TypeKey="SW DN white", BasePos=new Point(1744, 1653), ZoomWidth=75, Img=swWhiteImg,
+                        ShowWhen = () => !ignition2Active,
+                        OnClick  = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TURBINE_IGNITION_SWITCH_SET2, ignition2Active ? 0u : 2u, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
                 // Verd — pitot heat, 60px a la dreta de recognition
                 new() { Name="SW_DN_PITOTHEAT", TypeKey="SW DN green", BasePos=new Point(1924, 1553), ZoomWidth=75, Img=swGreenImg,
                         ShowWhen = () => !pitotheatActive,
@@ -1182,7 +1218,7 @@ namespace SimConnect3
                 new() { Name="SW_LGEAR", TypeKey="SW lgear", BasePos=new Point(2843, 1620), ZoomWidth=75,
                         Img=swLgearImg, ShowWhen=null, OnClick=null },
                 // Parking brake switch
-                new() { Name="SW_PBRAKE", TypeKey="SW pbrake", BasePos=new Point(2843, 1755), ZoomWidth=75,
+                new() { Name="SW_PBRAKE", TypeKey="SW pbrake", BasePos=new Point(2843, 1755), ZoomWidth=42,
                         Img=swPbrakeImg, ShowWhen=null, OnClick=null },
                 // Ignition switch
                 new() { Name="SW_IGNITION",  TypeKey="SW ignition",  BasePos=new Point(1920, 1080), ZoomWidth=100,
@@ -1858,6 +1894,18 @@ namespace SimConnect3
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SWITCH_STROBE, "STROBES_TOGGLE");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_STROBE, false);
 
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SWITCH_RECOGN, "RECOGNITION_LIGHTS_TOGGLE");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_RECOGN, false);
+
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TOGGLE_STARTER1,             "TOGGLE_STARTER1");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TOGGLE_STARTER1, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TOGGLE_STARTER2,             "TOGGLE_STARTER2");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TOGGLE_STARTER2, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TURBINE_IGNITION_SWITCH_SET1, "TURBINE_IGNITION_SWITCH_SET1");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TURBINE_IGNITION_SWITCH_SET1, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TURBINE_IGNITION_SWITCH_SET2, "TURBINE_IGNITION_SWITCH_SET2");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TURBINE_IGNITION_SWITCH_SET2, false);
+
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SWITCH_PITOTHEAT, "PITOT_HEAT_TOGGLE");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_PITOTHEAT, false);
 
@@ -1962,11 +2010,16 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "NAV1 SOUND", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "ADF SOUND", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "NAV2 SOUND", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT BEACON ON", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT LANDING ON", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT TAXI ON", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT NAV ON", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT STROBE ON", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT BEACON",      "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT LANDING",     "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT TAXI",        "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT NAV",         "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT STROBE",      "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT RECOGNITION", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG STARTER:1",          "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG STARTER:2",          "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "TURB ENG IGNITION SWITCH EX1:1", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "TURB ENG IGNITION SWITCH EX1:2", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "PITOT HEAT", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL PUMP SWITCH:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL PUMP SWITCH:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -2169,6 +2222,7 @@ namespace SimConnect3
                 bool newTaxi = (s1.read_taxi & 1) != 0;
                 bool newNav = (s1.read_nav & 1) != 0;
                 bool newStrobe = (s1.read_strobe & 1) != 0;
+                bool newRecogn = (s1.read_recogn & 1) != 0;
                 bool newPitotheat = (s1.read_pitotheat & 1) != 0;
                 bool newFuelpump1 = (s1.read_fuelpump1 & 1) != 0;
                 bool newFuelpump2 = (s1.read_fuelpump2 & 1) != 0;
@@ -2333,6 +2387,20 @@ namespace SimConnect3
                     if (pbMain.IsHandleCreated)
                         pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
                 }
+                if (newRecogn != recognActive)
+                {
+                    recognActive = newRecogn;
+                    if (pbMain.IsHandleCreated)
+                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                }
+                bool newStarter1   = s1.starter1 != 0;
+                bool newStarter2   = s1.starter2 != 0;
+                bool newIgnition1  = s1.ignition1 != 0; // 0=OFF → false, 1=AUTO or 2=ON → true
+                bool newIgnition2  = s1.ignition2 != 0;
+                if (newStarter1  != starter1Active)  { starter1Active  = newStarter1;  pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
+                if (newStarter2  != starter2Active)  { starter2Active  = newStarter2;  pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
+                if (newIgnition1 != ignition1Active) { ignition1Active = newIgnition1; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
+                if (newIgnition2 != ignition2Active) { ignition2Active = newIgnition2; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
                 if (newPitotheat != pitotheatActive)
                 {
                     pitotheatActive = newPitotheat;
