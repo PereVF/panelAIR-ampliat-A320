@@ -167,10 +167,16 @@ namespace SimConnect3
         bool fuelpump1Active;
         bool fuelpump2Active;
         bool pbrakeActive;
+        bool masterBatteryOff;
+        bool avionics1Off;
+        bool avionics2Off;
+        bool altGen1Off;
+        bool altGen2Off;
         private int ign1Pos = 2; // 0=OFF, 1=RIGHT, 2=LEFT(default), 3=BOTH, 4=START
         private int ign2Pos = 2;
         private int fuel1Pos = 0; // 0=OFF(-30°), 1=ON(0°), 2=CROSSFEED(+30°)
         private int fuel2Pos = 0; // 0=CROSSFEED(-30°), 1=ON(0°), 2=OFF(+30°)
+        private int numEngines = 2; // detectat automàticament de MSFS
 
         int gearNosePercent = 0;
         int gearLeftPercent = 0;
@@ -507,6 +513,14 @@ namespace SimConnect3
             SWITCH_FUELPUMP1,
             SWITCH_FUELPUMP2,
             SWITCH_PBRAKE,
+            MASTER_BATTERY_ON,
+            MASTER_BATTERY_OFF,
+            AVIONICS_MASTER_1_ON,
+            AVIONICS_MASTER_1_OFF,
+            AVIONICS_MASTER_2_ON,
+            AVIONICS_MASTER_2_OFF,
+            TOGGLE_ALTERNATOR1,
+            TOGGLE_ALTERNATOR2,
             //softkeys MFD
             MFD_SK_1,
             MFD_SK_2,
@@ -777,6 +791,12 @@ namespace SimConnect3
             public int fuel_selector_1; // FUEL TANK SELECTOR:1 (enum)
             public int fuel_selector_2; // FUEL TANK SELECTOR:2 (enum)
             public int fuel_cross_feed; // FUEL CROSS FEED (Bool)
+            public int num_engines;         // NUMBER OF ENGINES
+            public int elec_master_battery; // ELECTRICAL MASTER BATTERY (Bool)
+            public int avionics_master_1;   // AVIONICS MASTER SWITCH:1 (Bool)
+            public int avionics_master_2;   // AVIONICS MASTER SWITCH:2 (Bool)
+            public int gen_master_alt_1;    // GENERAL ENG MASTER ALTERNATOR:1 (Bool)
+            public int gen_master_alt_2;    // GENERAL ENG MASTER ALTERNATOR:2 (Bool)
 
 
 
@@ -993,6 +1013,38 @@ namespace SimConnect3
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_DN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
                 }});
+            // Avionics switches — single toggle area each
+            cockpitRight.Buttons.Add(new UiButton { Name="AVIONICS1-TOGGLE", BasePos=new Point(1770, 1220), W=100, H=120, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    var ev = avionics1Off ? SIMCONNECT_EVENTS.AVIONICS_MASTER_1_ON : SIMCONNECT_EVENTS.AVIONICS_MASTER_1_OFF;
+                    simconnect?.TransmitClientEvent(0, ev, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
+            cockpitRight.Buttons.Add(new UiButton { Name="AVIONICS2-TOGGLE", BasePos=new Point(1970, 1220), W=100, H=120, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    var ev = avionics2Off ? SIMCONNECT_EVENTS.AVIONICS_MASTER_2_ON : SIMCONNECT_EVENTS.AVIONICS_MASTER_2_OFF;
+                    simconnect?.TransmitClientEvent(0, ev, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
+            // ALT/GEN switch 1 — single toggle area
+            cockpitRight.Buttons.Add(new UiButton { Name="ALTGEN1-TOGGLE", BasePos=new Point(1420, 1220), W=100, H=120, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_ALTERNATOR1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
+            // ALT/GEN switch 2 — single toggle area
+            cockpitRight.Buttons.Add(new UiButton { Name="ALTGEN2-TOGGLE", BasePos=new Point(1620, 1220), W=100, H=120, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_ALTERNATOR2, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
+            // Master Battery switch — single toggle area
+            cockpitRight.Buttons.Add(new UiButton { Name="BATTERY-TOGGLE", BasePos=new Point(1320, 1020), W=100, H=120, Resizable=true, NoShadow=true,
+                OnClick = () => {
+                    var ev = masterBatteryOff ? SIMCONNECT_EVENTS.MASTER_BATTERY_ON : SIMCONNECT_EVENTS.MASTER_BATTERY_OFF;
+                    simconnect?.TransmitClientEvent(0, ev, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
             cockpitRight.Buttons.Add(new UiButton { Name="P-BRAKE", BasePos=new Point(2843, 1820), W=110, H=115, Resizable=true, NoShadow=true,
                 OnClick = () => {
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PBRAKE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
@@ -1025,38 +1077,57 @@ namespace SimConnect3
                     pbMain.Invalidate();
                 }});
             // SW_FUEL1 — left and right areas
-            cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-LEFT",  BasePos=new Point(1620, 1080), W=80, H=120, Resizable=true, NoShadow=true,
+            cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-LEFT", BasePos=new Point(1620, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
                     if (fuel1Pos <= 0) return;
                     int newPos = fuel1Pos - 1;
-                    // pos0=OFF, pos1=ON(LEFT=2), pos2=CF(RIGHT=3)
-                    uint[] fuel1Enum = { 0, 2, 3 };
-                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, fuel1Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    if (numEngines >= 2) {
+                        uint[] fuel1Enum = { 0, 2, 3 };
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, fuel1Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    } else {
+                        uint msfsVal = SingleEngineFuelVal(newPos, fuel2Pos);
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, msfsVal, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    }
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-RIGHT", BasePos=new Point(1720, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
                     if (fuel1Pos >= 2) return;
                     int newPos = fuel1Pos + 1;
-                    uint[] fuel1Enum = { 0, 2, 3 };
-                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, fuel1Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    if (numEngines >= 2) {
+                        uint[] fuel1Enum = { 0, 2, 3 };
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, fuel1Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    } else {
+                        uint msfsVal = SingleEngineFuelVal(newPos, fuel2Pos);
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, msfsVal, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    }
                     pbMain.Invalidate();
                 }});
             // SW_FUEL2 — left and right areas
-            cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-LEFT",  BasePos=new Point(2120, 1080), W=80, H=120, Resizable=true, NoShadow=true,
+            cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-LEFT", BasePos=new Point(2120, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
                     if (fuel2Pos <= 0) return;
                     int newPos = fuel2Pos - 1;
-                    int[] fuel2Enum = { 13, 3, 0 };
-                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_2_SET, (uint)fuel2Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    if (numEngines >= 2) {
+                        uint[] fuel2Enum = { 13, 3, 0 };
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_2_SET, fuel2Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    } else {
+                        uint msfsVal = SingleEngineFuelVal(fuel1Pos, newPos);
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, msfsVal, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    }
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-RIGHT", BasePos=new Point(2220, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
                     if (fuel2Pos >= 2) return;
                     int newPos = fuel2Pos + 1;
-                    int[] fuel2Enum = { 13, 3, 0 };
-                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_2_SET, (uint)fuel2Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    if (numEngines >= 2) {
+                        uint[] fuel2Enum = { 13, 3, 0 };
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_2_SET, fuel2Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    } else {
+                        uint msfsVal = SingleEngineFuelVal(fuel1Pos, newPos);
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, msfsVal, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    }
                     pbMain.Invalidate();
                 }});
 
@@ -1068,7 +1139,10 @@ namespace SimConnect3
             var swLgearImg  = LoadOverlayImage("SW landing gear.png");
             var swPbrakeImg  = LoadOverlayImage("Parking Brake switch.png");
             var swIgnitionImg = LoadOverlayImage("SW ignition.png");
-            var swFuelImg     = LoadOverlayImage("SW fuel.png");
+            var swFuelImg     = LoadOverlayImage("SW fuel_r.png");
+            var swBatteryImg  = LoadOverlayImage("SW battery.png");
+            var swAvionicsImg = LoadOverlayImage("SW avionics.png");
+            var swDnRedImg    = LoadOverlayImage("SW DN red.png");
             overlayImages = new List<OverlayImage>
             {
                 // Fila superior (Y=1553) — blanc — ordre E-D: beacon, land, taxi, nav, strobe, recognition
@@ -1119,6 +1193,16 @@ namespace SimConnect3
                         Img=swFuelImg, ShowWhen=null, OnClick=null },
                 new() { Name="SW_FUEL2", TypeKey="SW fuel2", BasePos=new Point(2170, 1080), ZoomWidth=100,
                         Img=swFuelImg, ShowWhen=null, OnClick=null },
+                new() { Name="SW_BATTERY",    TypeKey="SW battery",    BasePos=new Point(1320, 1080), ZoomWidth=100,
+                        Img=swBatteryImg,  ShowWhen = () => masterBatteryOff, OnClick=null },
+                new() { Name="SW_AVIONICS1",  TypeKey="SW avionics1",  BasePos=new Point(1770, 1280), ZoomWidth=100,
+                        Img=swAvionicsImg, ShowWhen = () => avionics1Off,     OnClick=null },
+                new() { Name="SW_AVIONICS2",  TypeKey="SW avionics2",  BasePos=new Point(1970, 1280), ZoomWidth=100,
+                        Img=swAvionicsImg, ShowWhen = () => avionics2Off,     OnClick=null },
+                new() { Name="SW_ALT1", TypeKey="SW altgen1", BasePos=new Point(1420, 1280), ZoomWidth=100,
+                        Img=swDnRedImg, ShowWhen = () => altGen1Off, OnClick=null },
+                new() { Name="SW_ALT2", TypeKey="SW altgen2", BasePos=new Point(1620, 1280), ZoomWidth=100,
+                        Img=swDnRedImg, ShowWhen = () => altGen2Off, OnClick=null },
                 new() { Name="LED_PBRAKE", TypeKey="LED_PBRAKE", BasePos=new Point(2918, 1755), ZoomWidth=32, Img=ledRedImg,
                         ShowWhen = () => pbrakeActive },
                 // GEAR LEDs
@@ -1807,6 +1891,24 @@ namespace SimConnect3
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SWITCH_PBRAKE, "PARKING_BRAKES");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_PBRAKE, false);
 
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.MASTER_BATTERY_ON,  "MASTER_BATTERY_ON");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.MASTER_BATTERY_ON,  false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.MASTER_BATTERY_OFF, "MASTER_BATTERY_OFF");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.MASTER_BATTERY_OFF, false);
+
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AVIONICS_MASTER_1_ON,  "AVIONICS_MASTER_1_ON");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AVIONICS_MASTER_1_ON,  false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AVIONICS_MASTER_1_OFF, "AVIONICS_MASTER_1_OFF");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AVIONICS_MASTER_1_OFF, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AVIONICS_MASTER_2_ON,  "AVIONICS_MASTER_2_ON");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AVIONICS_MASTER_2_ON,  false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AVIONICS_MASTER_2_OFF, "AVIONICS_MASTER_2_OFF");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AVIONICS_MASTER_2_OFF, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TOGGLE_ALTERNATOR1, "TOGGLE_ALTERNATOR1");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TOGGLE_ALTERNATOR1, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TOGGLE_ALTERNATOR2, "TOGGLE_ALTERNATOR2");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TOGGLE_ALTERNATOR2, false);
+
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.MAGNETO1_INCR, "MAGNETO1_INCR");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.MAGNETO1_INCR, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.MAGNETO1_DECR, "MAGNETO1_DECR");
@@ -1881,6 +1983,12 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUEL TANK SELECTOR:1", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUEL TANK SELECTOR:2", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUEL CROSS FEED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "NUMBER OF ENGINES", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "ELECTRICAL MASTER BATTERY", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AVIONICS MASTER SWITCH:1",   "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AVIONICS MASTER SWITCH:2",   "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG MASTER ALTERNATOR:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG MASTER ALTERNATOR:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
 
 
                 simconnect.RegisterDataDefineStruct<Struct1>(DEFINITIONS.Struct1);
@@ -2257,6 +2365,39 @@ namespace SimConnect3
                     if (pbMain.IsHandleCreated)
                         pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
                 }
+                bool newMasterBatteryOff = s1.elec_master_battery == 0;
+                if (newMasterBatteryOff != masterBatteryOff)
+                {
+                    masterBatteryOff = newMasterBatteryOff;
+                    if (pbMain.IsHandleCreated)
+                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                }
+                bool newAvionics1Off = s1.avionics_master_1 == 0;
+                if (newAvionics1Off != avionics1Off)
+                {
+                    avionics1Off = newAvionics1Off;
+                    if (pbMain.IsHandleCreated)
+                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                }
+                bool newAvionics2Off = s1.avionics_master_2 == 0;
+                if (newAvionics2Off != avionics2Off)
+                {
+                    avionics2Off = newAvionics2Off;
+                    if (pbMain.IsHandleCreated)
+                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                }
+                bool newAltGen1Off = s1.gen_master_alt_1 == 0;
+                bool newAltGen2Off = s1.gen_master_alt_2 == 0;
+                if (newAltGen1Off != altGen1Off)
+                {
+                    altGen1Off = newAltGen1Off;
+                    if (pbMain.IsHandleCreated) pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                }
+                if (newAltGen2Off != altGen2Off)
+                {
+                    altGen2Off = newAltGen2Off;
+                    if (pbMain.IsHandleCreated) pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                }
                 int newIgn1Pos;
                 if      (s1.ign1_left == 0 && s1.ign1_right == 0 && s1.ign1_starter == 0) newIgn1Pos = 0; // OFF
                 else if (s1.ign1_left == 0 && s1.ign1_right == 1 && s1.ign1_starter == 0) newIgn1Pos = 1; // RIGHT
@@ -2273,17 +2414,41 @@ namespace SimConnect3
                 else if (s1.ign2_left == 1 && s1.ign2_right == 1 && s1.ign2_starter == 1) newIgn2Pos = 4;
                 else newIgn2Pos = ign2Pos;
                 if (newIgn2Pos != ign2Pos) { ign2Pos = newIgn2Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
-                int newFuel1Pos;
-                if      (s1.fuel_selector_1 == 0 || s1.fuel_selector_1 == 20) newFuel1Pos = 0; // OFF
-                else if (s1.fuel_selector_1 == 2)                              newFuel1Pos = 1; // ON
-                else if (s1.fuel_selector_1 == 3)                              newFuel1Pos = 2; // CF
-                else                                                           newFuel1Pos = fuel1Pos;
+                numEngines = s1.num_engines;
 
-                int newFuel2Pos;
-                if      (s1.fuel_selector_2 == 2)                              newFuel2Pos = 0; // CF
-                else if (s1.fuel_selector_2 == 3)                              newFuel2Pos = 1; // ON
-                else if (s1.fuel_selector_2 == 0 || s1.fuel_selector_2 == 20) newFuel2Pos = 2; // OFF
-                else                                                           newFuel2Pos = fuel2Pos;
+                int newFuel1Pos, newFuel2Pos;
+
+                if (numEngines >= 2)
+                {
+                    // TWIN ENGINE — selectors independents
+                    if      (s1.fuel_selector_1 == 0 || s1.fuel_selector_1 == 20) newFuel1Pos = 0; // OFF
+                    else if (s1.fuel_selector_1 == 2)                              newFuel1Pos = 1; // ON
+                    else if (s1.fuel_selector_1 == 3)                              newFuel1Pos = 2; // CF
+                    else                                                           newFuel1Pos = fuel1Pos;
+
+                    if      (s1.fuel_selector_2 == 2)                              newFuel2Pos = 0; // CF
+                    else if (s1.fuel_selector_2 == 3)                              newFuel2Pos = 1; // ON
+                    else if (s1.fuel_selector_2 == 0 || s1.fuel_selector_2 == 20) newFuel2Pos = 2; // OFF
+                    else                                                           newFuel2Pos = fuel2Pos;
+                }
+                else
+                {
+                    // SINGLE ENGINE — 1 selector, 2 knobs sincronitzats
+                    // MSFS: 0=OFF, 1=ALL/BOTH, 2=LEFT, 3=RIGHT, 16=BOTH
+                    switch (s1.fuel_selector_1)
+                    {
+                        case 0: case 20:                    // OFF → ambdós OFF
+                            newFuel1Pos = 0; newFuel2Pos = 2; break;
+                        case 2:                             // LEFT → esquerre ON, dret OFF
+                            newFuel1Pos = 1; newFuel2Pos = 2; break;
+                        case 3:                             // RIGHT → esquerre OFF, dret ON
+                            newFuel1Pos = 0; newFuel2Pos = 1; break;
+                        case 1: case 16:                    // BOTH → ambdós ON
+                            newFuel1Pos = 1; newFuel2Pos = 1; break;
+                        default:
+                            newFuel1Pos = fuel1Pos; newFuel2Pos = fuel2Pos; break;
+                    }
+                }
 
                 if (newFuel1Pos != fuel1Pos) { fuel1Pos = newFuel1Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
                 if (newFuel2Pos != fuel2Pos) { fuel2Pos = newFuel2Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
@@ -3193,6 +3358,17 @@ namespace SimConnect3
             else         // ←
                 pts = new[] { new Point(x - height, y), new Point(x + height, y - halfWidth), new Point(x + height, y + halfWidth) };
             g.FillPolygon(Brushes.Gray, pts);
+        }
+
+        private uint SingleEngineFuelVal(int f1, int f2)
+        {
+            // f1: 0=OFF,1=ON,2=CF(→OFF)   f2: 0=CF(→OFF),1=ON,2=OFF
+            bool left  = f1 == 1;          // esquerre ON
+            bool right = f2 == 1;          // dret ON
+            if  (left && right)  return 1; // BOTH
+            if  (left)           return 2; // LEFT
+            if  (right)          return 3; // RIGHT
+            return 0;                      // OFF
         }
 
         private void DrawGearCircle(Graphics g, int percent, int x, int y, int diameter, Color deployedColor = default)
