@@ -166,6 +166,9 @@ namespace SimConnect3
         bool recognActive;
         bool panelLightActive;
         bool deiceActive;
+        bool isTurboprop;
+        int cowlFlapL; // 0=closed, 1=center, 2=open
+        int cowlFlapR;
         bool pitotheatActive;
         bool fuelpump1Active;
         bool fuelpump2Active;
@@ -519,6 +522,10 @@ namespace SimConnect3
             SWITCH_RECOGN,
             SWITCH_PANELLIGHT,
             SWITCH_DEICE,
+            COWL_FLAP_L_INC,
+            COWL_FLAP_L_DEC,
+            COWL_FLAP_R_INC,
+            COWL_FLAP_R_DEC,
             SWITCH_PITOTHEAT,
             SWITCH_FUELPUMP1,
             SWITCH_FUELPUMP2,
@@ -813,6 +820,9 @@ namespace SimConnect3
             public int fuel_selector_2; // FUEL TANK SELECTOR:2 (enum)
             public int fuel_cross_feed; // FUEL CROSS FEED (Bool)
             public int num_engines;         // NUMBER OF ENGINES
+            public int engine_type;
+            public double read_cowlflap_l;
+            public double read_cowlflap_r;
             public int elec_master_battery; // ELECTRICAL MASTER BATTERY (Bool)
             public int avionics_master_1;   // AVIONICS MASTER SWITCH:1 (Bool)
             public int avionics_master_2;   // AVIONICS MASTER SWITCH:2 (Bool)
@@ -1170,6 +1180,14 @@ namespace SimConnect3
                 OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PANELLIGHT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_DEICE", BasePos=new Point(1984, 1653), W=75, H=75, Resizable=true, NoShadow=true,
                 OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_DEICE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
+            cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_L_INC", BasePos=new Point(1500, 1560), W=75, H=40, Resizable=true, NoShadow=true,
+                OnClick = () => { if (!isTurboprop) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_L_INC, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
+            cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_L_DEC", BasePos=new Point(1500, 1640), W=75, H=40, Resizable=true, NoShadow=true,
+                OnClick = () => { if (!isTurboprop) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_L_DEC, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
+            cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_R_INC", BasePos=new Point(1600, 1560), W=75, H=40, Resizable=true, NoShadow=true,
+                OnClick = () => { if (!isTurboprop) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_R_INC, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
+            cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_R_DEC", BasePos=new Point(1600, 1640), W=75, H=40, Resizable=true, NoShadow=true,
+                OnClick = () => { if (!isTurboprop) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_R_DEC, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
 
             var swWhiteImg = LoadOverlayImage("SW DN white.png");
             var swGreenImg = LoadOverlayImage("SW DN green.png");
@@ -1183,6 +1201,10 @@ namespace SimConnect3
             var swBatteryImg  = LoadOverlayImage("SW battery.png");
             var swAvionicsImg = LoadOverlayImage("SW avionics.png");
             var swDnRedImg    = LoadOverlayImage("SW DN red.png");
+            var swCenterWhiteImg = Image.FromFile(@"C:\Users\usuario\Desktop\panelAIR1000-j\panelAIR1000\CSharpSimConnect\Resources\SW CENTER white_b.png");
+            var turbopropImg = System.IO.File.Exists(@"C:\Users\usuario\Desktop\panelAIR1000-j\panelAIR1000\CSharpSimConnect\Resources\turboprop.png")
+                ? Image.FromFile(@"C:\Users\usuario\Desktop\panelAIR1000-j\panelAIR1000\CSharpSimConnect\Resources\turboprop.png")
+                : null;
             overlayImages = new List<OverlayImage>
             {
                 // Fila superior (Y=1553) — blanc — ordre E-D: beacon, land, taxi, nav, strobe, recognition
@@ -1215,6 +1237,20 @@ namespace SimConnect3
                         OnClick  = null },
                 new() { Name="SW_DN_DEICE", TypeKey="SW DN green", BasePos=new Point(1984, 1653), ZoomWidth=75, Img=swGreenImg,
                         ShowWhen = () => !deiceActive,
+                        OnClick  = null },
+                // Cowl Flap L
+                new() { Name="SW_CN_COWLFLAP_L", TypeKey="SW CN cowlflap", BasePos=new Point(1500, 1600), ZoomWidth=75,
+                        Img=swCenterWhiteImg, ShowWhen=() => !isTurboprop && cowlFlapL == 1, OnClick=null },
+                new() { Name="SW_DN_COWLFLAP_L", TypeKey="SW DN cowlflap", BasePos=new Point(1500, 1600), ZoomWidth=75,
+                        Img=swWhiteImg,       ShowWhen=() => !isTurboprop && cowlFlapL == 2, OnClick=null },
+                // Cowl Flap R
+                new() { Name="SW_CN_COWLFLAP_R", TypeKey="SW CN cowlflap", BasePos=new Point(1600, 1600), ZoomWidth=75,
+                        Img=swCenterWhiteImg, ShowWhen=() => !isTurboprop && cowlFlapR == 1, OnClick=null },
+                new() { Name="SW_DN_COWLFLAP_R", TypeKey="SW DN cowlflap", BasePos=new Point(1600, 1600), ZoomWidth=75,
+                        Img=swWhiteImg,       ShowWhen=() => !isTurboprop && cowlFlapR == 2, OnClick=null },
+                new() { Name="OV_TURBOPROP", TypeKey="OV turboprop", BasePos=new Point(1500, 1000), ZoomWidth=200,
+                        Img=turbopropImg,
+                        ShowWhen = () => isTurboprop,
                         OnClick  = null },
                 // Verd — pitot heat, 60px a la dreta de recognition
                 new() { Name="SW_DN_PITOTHEAT", TypeKey="SW DN green", BasePos=new Point(1924, 1553), ZoomWidth=75, Img=swGreenImg,
@@ -1921,6 +1957,14 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_PANELLIGHT, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SWITCH_DEICE, "TOGGLE_STRUCTURAL_DEICE");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_DEICE, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.COWL_FLAP_L_INC, "COWL_FLAPS_INC");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.COWL_FLAP_L_INC, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.COWL_FLAP_L_DEC, "COWL_FLAPS_DEC");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.COWL_FLAP_L_DEC, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.COWL_FLAP_R_INC, "COWL_FLAPS_INC");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.COWL_FLAP_R_INC, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.COWL_FLAP_R_DEC, "COWL_FLAPS_DEC");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.COWL_FLAP_R_DEC, false);
 
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SWITCH_FUELPUMP1, "TOGGLE_ELECT_FUEL_PUMP1");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_FUELPUMP1, false);
@@ -2066,6 +2110,9 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUEL TANK SELECTOR:2", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUEL CROSS FEED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "NUMBER OF ENGINES", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "ENGINE TYPE:1", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG COWL FLAP POSITION:1", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG COWL FLAP POSITION:2", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "ELECTRICAL MASTER BATTERY", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AVIONICS MASTER SWITCH:1",   "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AVIONICS MASTER SWITCH:2",   "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -2438,6 +2485,15 @@ namespace SimConnect3
                     if (pbMain.IsHandleCreated)
                         pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
                 }
+                int newCowlL = s1.read_cowlflap_l < 10 ? 0 : s1.read_cowlflap_l < 70 ? 1 : 2;
+                int newCowlR = s1.read_cowlflap_r < 10 ? 0 : s1.read_cowlflap_r < 70 ? 1 : 2;
+                if (newCowlL != cowlFlapL || newCowlR != cowlFlapR)
+                {
+                    cowlFlapL = newCowlL;
+                    cowlFlapR = newCowlR;
+                    if (pbMain.IsHandleCreated)
+                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                }
                 if (newPitotheat != pitotheatActive)
                 {
                     pitotheatActive = newPitotheat;
@@ -2526,6 +2582,13 @@ namespace SimConnect3
                 else newIgn2Pos = ign2Pos;
                 if (newIgn2Pos != ign2Pos) { ign2Pos = newIgn2Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
                 numEngines = s1.num_engines;
+                bool newIsTurboprop = s1.engine_type == 5;
+                if (newIsTurboprop != isTurboprop)
+                {
+                    isTurboprop = newIsTurboprop;
+                    if (pbMain.IsHandleCreated)
+                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                }
 
                 int newFuel1Pos, newFuel2Pos;
 
