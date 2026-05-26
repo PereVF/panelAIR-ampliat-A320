@@ -522,10 +522,8 @@ namespace SimConnect3
             SWITCH_RECOGN,
             SWITCH_PANELLIGHT,
             SWITCH_DEICE,
-            COWL_FLAP_L_INC,
-            COWL_FLAP_L_DEC,
-            COWL_FLAP_R_INC,
-            COWL_FLAP_R_DEC,
+            COWL_FLAP_L_SET,
+            COWL_FLAP_R_SET,
             SWITCH_PITOTHEAT,
             SWITCH_FUELPUMP1,
             SWITCH_FUELPUMP2,
@@ -1181,13 +1179,17 @@ namespace SimConnect3
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_DEICE", BasePos=new Point(1984, 1653), W=75, H=75, Resizable=true, NoShadow=true,
                 OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_DEICE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_L_INC", BasePos=new Point(1500, 1560), W=75, H=40, Resizable=true, NoShadow=true,
-                OnClick = () => { if (!isTurboprop) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_L_INC, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
+                OnClick = () => { if (!isTurboprop) { uint target = cowlFlapL == 0 ? 8191u : 16383u;
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_L_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } } });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_L_DEC", BasePos=new Point(1500, 1640), W=75, H=40, Resizable=true, NoShadow=true,
-                OnClick = () => { if (!isTurboprop) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_L_DEC, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
+                OnClick = () => { if (!isTurboprop) { uint target = cowlFlapL == 2 ? 8191u : 0u;
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_L_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } } });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_R_INC", BasePos=new Point(1600, 1560), W=75, H=40, Resizable=true, NoShadow=true,
-                OnClick = () => { if (!isTurboprop) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_R_INC, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
+                OnClick = () => { if (!isTurboprop) { uint target = cowlFlapR == 0 ? 8191u : 16383u;
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_R_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } } });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_R_DEC", BasePos=new Point(1600, 1640), W=75, H=40, Resizable=true, NoShadow=true,
-                OnClick = () => { if (!isTurboprop) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_R_DEC, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
+                OnClick = () => { if (!isTurboprop) { uint target = cowlFlapR == 2 ? 8191u : 0u;
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_R_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } } });
 
             var swWhiteImg = LoadOverlayImage("SW DN white.png");
             var swGreenImg = LoadOverlayImage("SW DN green.png");
@@ -1957,14 +1959,10 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_PANELLIGHT, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SWITCH_DEICE, "TOGGLE_STRUCTURAL_DEICE");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_DEICE, false);
-                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.COWL_FLAP_L_INC, "COWL_FLAPS_INC");
-                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.COWL_FLAP_L_INC, false);
-                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.COWL_FLAP_L_DEC, "COWL_FLAPS_DEC");
-                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.COWL_FLAP_L_DEC, false);
-                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.COWL_FLAP_R_INC, "COWL_FLAPS_INC");
-                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.COWL_FLAP_R_INC, false);
-                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.COWL_FLAP_R_DEC, "COWL_FLAPS_DEC");
-                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.COWL_FLAP_R_DEC, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.COWL_FLAP_L_SET, "COWLFLAP1_SET");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.COWL_FLAP_L_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.COWL_FLAP_R_SET, "COWLFLAP2_SET");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.COWL_FLAP_R_SET, false);
 
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SWITCH_FUELPUMP1, "TOGGLE_ELECT_FUEL_PUMP1");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_FUELPUMP1, false);
