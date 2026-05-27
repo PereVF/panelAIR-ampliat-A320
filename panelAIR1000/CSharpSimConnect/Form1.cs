@@ -166,6 +166,8 @@ namespace SimConnect3
         bool recognActive;
         bool panelLightActive;
         bool deiceActive;
+        private System.Windows.Forms.Timer? trialTimer;
+        private System.Threading.Timer? trialBgTimer;
         int cowlFlapL; // 0=closed, 1=center, 2=open
         int cowlFlapR;
         bool pitotheatActive;
@@ -1358,6 +1360,81 @@ namespace SimConnect3
         }
         private void frmMain_Load(object sender, EventArgs e)
         {
+            // Level 1 — 4K screen check
+            bool has4K = Screen.AllScreens.Any(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
+            if (!has4K)
+            {
+                MessageBox.Show("A 4K screen (3840x2160) is required to run this application.", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                Application.Exit();
+                return;
+            }
+
+            // Level 2 — Touch screen HID check (VID=0457, PID=0819)
+            bool hasPanel = false;
+            using (var searcher = new System.Management.ManagementObjectSearcher(
+                @"SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%VID_0457%PID_0819%' AND ConfigManagerErrorCode = 0 AND Present = TRUE"))
+            {
+                hasPanel = searcher.Get().Count > 0;
+            }
+            if (!hasPanel)
+            {
+                var screen4K = Screen.AllScreens.First(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
+                using (var msgHelper = new Form { StartPosition = FormStartPosition.Manual, TopMost = true, Size = new Size(1, 1), ShowInTaskbar = false })
+                {
+                    msgHelper.Location = new Point(screen4K.Bounds.X + screen4K.Bounds.Width / 2, screen4K.Bounds.Y + screen4K.Bounds.Height / 2);
+                    msgHelper.Show();
+                    MessageBox.Show(msgHelper, "This application requires the panelAIR1000 by SFS.\nThe app will be functional for 10 minutes only.", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
+                var countdownForm = new Form
+                {
+                    Text = "panelAIR1000 - Trial Mode",
+                    Size = new Size(400, 150),
+                    FormBorderStyle = FormBorderStyle.FixedDialog,
+                    StartPosition = FormStartPosition.Manual,
+                    TopMost = true,
+                    ControlBox = false
+                };
+                countdownForm.Location = new Point(
+                    screen4K.Bounds.X + (screen4K.Bounds.Width - countdownForm.Width) / 2,
+                    screen4K.Bounds.Y + (screen4K.Bounds.Height - countdownForm.Height) / 2
+                );
+                var label = new Label
+                {
+                    Text = "No panelAIR1000 detected.\nClosing in 20 seconds...",
+                    Dock = DockStyle.Fill,
+                    TextAlign = ContentAlignment.MiddleCenter,
+                    Font = new Font("Arial", 12)
+                };
+                countdownForm.Controls.Add(label);
+                countdownForm.Show();   // no-modal: l'app principal continua inicialitzant-se
+
+                var startTime = DateTime.Now;
+                int totalSeconds = 20;
+                bool expiryHandled = false;   // guard contra callbacks duplicats
+
+                trialBgTimer = new System.Threading.Timer(_ => {
+                    int elapsed = (int)(DateTime.Now - startTime).TotalSeconds;
+                    int secondsLeft = totalSeconds - elapsed;
+                    if (countdownForm.IsDisposed) return;
+                    try
+                    {
+                        countdownForm.BeginInvoke(new Action(() => {
+                            if (expiryHandled) return;   // descarta callbacks duplicats
+                            if (secondsLeft <= 0)
+                            {
+                                expiryHandled = true;
+                                System.Diagnostics.Process.GetCurrentProcess().Kill();
+                            }
+                            else
+                            {
+                                label.Text = $"No panelAIR1000 detected.\nClosing in {secondsLeft} seconds...";
+                            }
+                        }));
+                    }
+                    catch { }
+                }, null, 0, 200);
+            }
+
             //flapsTimer.Interval = 30; // ~33 FPS, suau
             //flapsTimer.Tick += (s, e) =>
             {
