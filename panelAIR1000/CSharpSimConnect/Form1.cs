@@ -922,8 +922,8 @@ namespace SimConnect3
                 new() { Name="ADF_MUTE", BasePos=new Point(1867, 562), IsActive=()=>adfMute },
             };
 
-            var screen4k = Screen.AllScreens
-                .First(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
+            var screen4k = Screen.AllScreens.FirstOrDefault(s => !s.Primary && s.Bounds.Width == 3840 && s.Bounds.Height == 2160)
+                ?? Screen.AllScreens.First(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
 
             this.StartPosition = FormStartPosition.Manual;
             this.Location = screen4k.Bounds.Location;
@@ -1378,7 +1378,8 @@ namespace SimConnect3
             }
             if (!hasPanel)
             {
-                var screen4K = Screen.AllScreens.First(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
+                var screen4K = Screen.AllScreens.FirstOrDefault(s => !s.Primary && s.Bounds.Width == 3840 && s.Bounds.Height == 2160)
+                    ?? Screen.AllScreens.First(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
                 using (var msgHelper = new Form { StartPosition = FormStartPosition.Manual, TopMost = true, Size = new Size(1, 1), ShowInTaskbar = false })
                 {
                     msgHelper.Location = new Point(screen4K.Bounds.X + screen4K.Bounds.Width / 2, screen4K.Bounds.Y + screen4K.Bounds.Height / 2);
