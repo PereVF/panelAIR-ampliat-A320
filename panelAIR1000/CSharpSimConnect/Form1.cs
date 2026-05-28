@@ -45,6 +45,7 @@ namespace SimConnect3
         private System.Windows.Forms.Timer simReconnectTimer;
         private bool simReconnectPending = false;
         private bool _suppressCloseOnConnectFail = false;
+        private bool showAllClickAreas = false;
         private UiSurface mainSurface;
 
 
@@ -634,6 +635,7 @@ namespace SimConnect3
             public PictureBox Pb;
             public List<UiButton> Buttons = new();
             public Func<bool>? SuppressInput;
+            public bool ShowAllAreas = false;
 
             public UiSurface(PictureBox pb)
             {
@@ -672,10 +674,15 @@ namespace SimConnect3
             private void OnPaint(object? sender, PaintEventArgs e)
             {
                 using var brush = new SolidBrush(Color.FromArgb(90, Color.White));
+                using var allAreasBrush = new SolidBrush(Color.FromArgb(60, Color.Gray));
                 var now = DateTime.UtcNow;
                 foreach (var b in Buttons)
                 {
-                    if (b.IsVisuallyPressed(now))
+                    if (ShowAllAreas)
+                    {
+                        e.Graphics.FillRectangle(allAreasBrush, b.ClickRect);
+                    }
+                    else if (b.IsVisuallyPressed(now))
                     {
                         using var path = frmMain.CreateRoundedRect(b.ShadowRect, BTN_RADIUS);
                         e.Graphics.FillPath(brush, path);
@@ -1203,6 +1210,20 @@ namespace SimConnect3
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_R_DEC", BasePos=new Point(1600, 1640), W=75, H=40, Resizable=true, NoShadow=true,
                 OnClick = () => { uint target = cowlFlapR == 2 ? 8191u : 0u;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_R_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
+
+            pfdLeft.Buttons.Add(new UiButton
+            {
+                Name = "SHOW_AREAS",
+                BasePos = new Point(3725, 1200),
+                W = 60,
+                H = 50,
+                NoShadow = true,
+                OnClick = () =>
+                {
+                    mainSurface.ShowAllAreas = !mainSurface.ShowAllAreas;
+                    pbMain.Invalidate();
+                }
+            });
 
             var swWhiteImg = LoadOverlayImage("SW DN white.png");
             var swGreenImg = LoadOverlayImage("SW DN green.png");
@@ -3029,6 +3050,35 @@ namespace SimConnect3
                     e.Graphics.DrawImage(sw.Img, -baseW / 2f, -baseH / 2f, baseW, baseH);
                     e.Graphics.Restore(state);
                 }
+            }
+
+            if (mainSurface.ShowAllAreas)
+            {
+                using var overlayBrush = new SolidBrush(Color.FromArgb(60, Color.Gray));
+
+                // OverlayImages amb OnClick
+                foreach (var ov in overlayImages)
+                {
+                    if (ov.OnClick != null)
+                        e.Graphics.FillRectangle(overlayBrush, ov.Bounds);
+                }
+
+                // Trim wheel vertical
+                e.Graphics.FillRectangle(overlayBrush, trimZone);
+
+                // Rudder trim wheel horitzontal
+                e.Graphics.FillRectangle(overlayBrush, rudderTrimZone);
+            }
+
+            // Draw SHOW_AREAS toggle button
+            var showBtn = mainSurface.Buttons.FirstOrDefault(b => b.Name == "SHOW_AREAS");
+            if (showBtn != null)
+            {
+                using var btnBrush = new SolidBrush(mainSurface.ShowAllAreas ? Color.LimeGreen : Color.DimGray);
+                e.Graphics.FillEllipse(btnBrush, showBtn.ClickRect);
+                using var font = new Font("Segoe UI Emoji", 16f);
+                TextRenderer.DrawText(e.Graphics, "👆", font, showBtn.ClickRect, Color.White,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }
 
             // --- CALIBRATGE OVERLAY (F12 per activar/desactivar) ---
