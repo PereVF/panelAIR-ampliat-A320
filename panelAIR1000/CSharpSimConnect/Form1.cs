@@ -48,6 +48,11 @@ namespace SimConnect3
         private bool showAllClickAreas = false;
         private UiSurface mainSurface;
 
+        private bool sfsMonitorRunning = false;
+        private bool warningBlink = false;
+        private System.Windows.Forms.Timer sfsCheckTimer = new System.Windows.Forms.Timer();
+        private System.Windows.Forms.Timer sfsBlinkTimer = new System.Windows.Forms.Timer();
+
 
 
         // Estat connexió RotAIR
@@ -1482,6 +1487,32 @@ namespace SimConnect3
             {
                 if (simReconnectPending) { TryReconnectSim(); }
             };
+
+            // SFSmonitor check timer - every 3 seconds
+            sfsCheckTimer.Interval = 3000;
+            sfsCheckTimer.Tick += (s, e) =>
+            {
+                bool wasRunning = sfsMonitorRunning;
+                sfsMonitorRunning = Process.GetProcesses().Any(p => p.ProcessName.StartsWith("SFSmonitor"));
+                if (wasRunning != sfsMonitorRunning)
+                    pbMain.Invalidate();
+            };
+            sfsCheckTimer.Start();
+
+            // Blink timer for warning triangle - every 600ms
+            sfsBlinkTimer.Interval = 600;
+            sfsBlinkTimer.Tick += (s, e) =>
+            {
+                if (!sfsMonitorRunning)
+                {
+                    warningBlink = !warningBlink;
+                    pbMain.Invalidate();
+                }
+            };
+            sfsBlinkTimer.Start();
+
+            // Initial check
+            sfsMonitorRunning = Process.GetProcesses().Any(p => p.ProcessName.StartsWith("SFSmonitor"));
 
             ConnectToSimConnect();
 
@@ -3140,6 +3171,41 @@ namespace SimConnect3
                 e.Graphics.FillRectangle(new SolidBrush(Color.DarkGreen), calibExportBtnRect);
                 e.Graphics.DrawString("EXPORTA\ncoordenades", font, textBrush, calibExportBtnRect, centerFmt);
                 e.Graphics.DrawString("CALIBRATGE ACTIU — F12 per sortir", font, Brushes.Red, new Point(200, 15));
+            }
+
+            // SFSmonitor warning overlay
+            if (!sfsMonitorRunning)
+            {
+                int pw = pbMain.Width;
+                int ph = pbMain.Height;
+
+                // Dark grey background rectangle
+                int rw = 900, rh = 120;
+                int rx = (pw - rw) / 2;
+                int ry = (ph - rh) / 2;
+                Rectangle warningRect = new Rectangle(rx, ry, rw, rh);
+
+                using var bgBrush = new SolidBrush(Color.FromArgb(220, 50, 50, 50));
+                e.Graphics.FillRectangle(bgBrush, warningRect);
+
+                // Blinking yellow triangle ⚠️
+                if (warningBlink)
+                {
+                    using var triFont = new Font("Segoe UI Emoji", 36f);
+                    TextRenderer.DrawText(e.Graphics, "⚠️", triFont,
+                        new Rectangle(rx + 20, ry + 10, 80, 100),
+                        Color.Yellow,
+                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+                }
+
+                // Static yellow text
+                using var textFont = new Font("Segoe UI", 18f, FontStyle.Bold);
+                TextRenderer.DrawText(e.Graphics,
+                    "Please activate the SFSmonitor plugin to complete the functionality of this panelAIR1000 App.",
+                    textFont,
+                    new Rectangle(rx + 110, ry, rw - 130, rh),
+                    Color.Yellow,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
             }
             }
             catch (OverflowException) { }
