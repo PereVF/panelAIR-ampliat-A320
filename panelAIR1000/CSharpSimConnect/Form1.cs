@@ -877,7 +877,7 @@ namespace SimConnect3
             imglightOn = rotAIRmonitor.Properties.Resources.light_on;
             trimWheelImg = LoadOverlayImage("trim wheel.png");
 
-            string imagePath = System.IO.Path.Combine(Application.StartupPath, "Resources", "main GA_1000 4K panel_d.png");
+            string imagePath = System.IO.Path.Combine(Application.StartupPath, "Resources", "main GA_1000 4K panel_f.png");
             if (System.IO.File.Exists(imagePath))
                 _bgImage = Image.FromFile(imagePath);
 
@@ -2782,63 +2782,69 @@ namespace SimConnect3
             e.Graphics.FillRectangle(Brushes.White, new Rectangle(fmX, 1589 + flapsIndYOffset, 20, 5));
             e.Graphics.FillRectangle(Brushes.White, new Rectangle(fmX, 1824 + flapsIndYOffset, 20, 5));
 
-            int intermediatePositions = flapsNumPositions - 1;
-            int spaces = intermediatePositions + 1;
-            int totalRange = 680 - 445;
-            float stepY = totalRange / (float)spaces;
-            for (int i = 0; i <= spaces; i++)
+            if (flapsNumPositions > 0)
             {
-                int rectY = (int)(445 + stepY * i) + 1144 + flapsIndYOffset;
-                e.Graphics.FillRectangle(Brushes.White, new Rectangle(fmX, rectY, 20, 5));
+                int intermediatePositions = flapsNumPositions - 1;
+                int spaces = intermediatePositions + 1;
+                int totalRange = 680 - 445;
+                float stepY = totalRange / (float)spaces;
+                for (int i = 0; i <= spaces; i++)
+                {
+                    int rectY = (int)(445 + stepY * i) + 1144 + flapsIndYOffset;
+                    e.Graphics.FillRectangle(Brushes.White, new Rectangle(fmX, rectY, 20, 5));
+                }
             }
 
             // TRIM TAKEOFF MARKER
             e.Graphics.FillRectangle(new SolidBrush(Color.FromArgb(180, 180, 180)), new Rectangle(trimIndX - 32, 1758 + trimIndYOffset, 20, 2));
 
             // FLAPS CIRCLE
-            int yUp = 450 + 1144;   // 1594
-            int yFull = 680 + 1144; // 1824
-            float stepYIndicator = (yFull - yUp) / (float)flapsNumPositions;
-            flapsCircleY_Target = yUp + stepYIndicator * flapsPoscPalanca;
-
-            if (flapsPoscPalanca != flapsPoscPalanca_Last)
+            if (flapsNumPositions > 0)
             {
-                if (flapsPoscPalanca_Last < 0)
+                int yUp = 450 + 1144;   // 1594
+                int yFull = 680 + 1144; // 1824
+                float stepYIndicator = (yFull - yUp) / (float)flapsNumPositions;
+                flapsCircleY_Target = yUp + stepYIndicator * flapsPoscPalanca;
+
+                if (flapsPoscPalanca != flapsPoscPalanca_Last)
                 {
-                    flapsCircleY_Current = flapsCircleY_Target;
-                    flapsAnimDurationSec = 0f;
+                    if (flapsPoscPalanca_Last < 0)
+                    {
+                        flapsCircleY_Current = flapsCircleY_Target;
+                        flapsAnimDurationSec = 0f;
+                    }
+                    else
+                    {
+                        flapsCircleY_Start = flapsCircleY_Current;
+                        flapsAnimStartTime = DateTime.Now;
+                        float distance = Math.Abs(flapsCircleY_Target - flapsCircleY_Current);
+                        flapsAnimDurationSec = 8f * (distance / (yFull - yUp));
+                    }
+                    flapsPoscPalanca_Last = flapsPoscPalanca;
+                }
+
+                if (flapsAnimDurationSec > 0f)
+                {
+                    float t = Math.Min((float)(DateTime.Now - flapsAnimStartTime).TotalSeconds / flapsAnimDurationSec, 1f);
+                    flapsCircleY_Current = flapsCircleY_Start + (flapsCircleY_Target - flapsCircleY_Start) * t;
+                    if (t >= 1f) flapsAnimDurationSec = 0f;
                 }
                 else
                 {
-                    flapsCircleY_Start = flapsCircleY_Current;
-                    flapsAnimStartTime = DateTime.Now;
-                    float distance = Math.Abs(flapsCircleY_Target - flapsCircleY_Current);
-                    flapsAnimDurationSec = 8f * (distance / (yFull - yUp));
+                    flapsCircleY_Current = flapsCircleY_Target;
                 }
-                flapsPoscPalanca_Last = flapsPoscPalanca;
-            }
 
-            if (flapsAnimDurationSec > 0f)
-            {
-                float t = Math.Min((float)(DateTime.Now - flapsAnimStartTime).TotalSeconds / flapsAnimDurationSec, 1f);
-                flapsCircleY_Current = flapsCircleY_Start + (flapsCircleY_Target - flapsCircleY_Start) * t;
-                if (t >= 1f) flapsAnimDurationSec = 0f;
-            }
-            else
-            {
-                flapsCircleY_Current = flapsCircleY_Target;
-            }
-
-            int diameter = 20;
-            int drawY = (int)Math.Round(flapsCircleY_Current) - diameter / 2 + flapsIndYOffset;
-            e.Graphics.FillEllipse(Brushes.White, new Rectangle(flapsIndX, drawY, diameter, diameter));
-            // F12: mostrar track arrossegable
-            if (calibrationMode)
-            {
-                int trackTop = yUp + flapsIndYOffset;
-                int trackH   = yFull - yUp + diameter;
-                e.Graphics.DrawRectangle(new Pen(Color.Lime, 2), new Rectangle(flapsIndX - 2, trackTop - 2, diameter + 4, trackH + 4));
-                e.Graphics.DrawString("FLI", new Font("Arial", 7), Brushes.Lime, new PointF(flapsIndX, trackTop - 16));
+                int diameter = 20;
+                int drawY = (int)Math.Round(flapsCircleY_Current) - diameter / 2 + flapsIndYOffset;
+                e.Graphics.FillEllipse(Brushes.White, new Rectangle(flapsIndX, drawY, diameter, diameter));
+                // F12: mostrar track arrossegable
+                if (calibrationMode)
+                {
+                    int trackTop = yUp + flapsIndYOffset;
+                    int trackH   = yFull - yUp + diameter;
+                    e.Graphics.DrawRectangle(new Pen(Color.Lime, 2), new Rectangle(flapsIndX - 2, trackTop - 2, diameter + 4, trackH + 4));
+                    e.Graphics.DrawString("FLI", new Font("Arial", 7), Brushes.Lime, new PointF(flapsIndX, trackTop - 16));
+                }
             }
 
             if (flapsAnimDurationSec > 0f)
@@ -3527,7 +3533,8 @@ namespace SimConnect3
             sb.AppendLine($"TRIMZ:tz:{trimZoneBaseX}:{trimZoneBaseY}");
             sb.AppendLine($"RRI:rri:{rudderTrimIndXOffset}:{rudderTrimIndY}");
             sb.AppendLine($"RRZ:rrz:{rudderTrimZoneBaseX}:{rudderTrimZoneBaseY}");
-            string path = System.IO.Path.Combine(Application.StartupPath, "calibration_export.txt");
+            string projectDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.StartupPath, @"..\..\..\..\.."));
+            string path = System.IO.Path.Combine(projectDir, "calibration_export.txt");
             System.IO.File.WriteAllText(path, sb.ToString());
             if (!silent)
                 MessageBox.Show($"Exportat a:\n{path}", "Calibratge", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -3535,7 +3542,8 @@ namespace SimConnect3
 
         private void LoadCalibrationPositions()
         {
-            string path = System.IO.Path.Combine(Application.StartupPath, "calibration_export.txt");
+            string projectDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.StartupPath, @"..\..\..\..\.."));
+            string path = System.IO.Path.Combine(projectDir, "calibration_export.txt");
             if (!System.IO.File.Exists(path)) return;
             foreach (var line in System.IO.File.ReadAllLines(path))
             {
