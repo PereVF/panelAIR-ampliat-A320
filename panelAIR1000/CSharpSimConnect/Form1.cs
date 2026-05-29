@@ -24,6 +24,8 @@ namespace SimConnect3
 {
     public partial class frmMain : Form
     {
+        private const bool enableHidReading = false;
+
         Thread hidThread1;
         bool stopHidThread1 = false;
 
@@ -52,6 +54,7 @@ namespace SimConnect3
         private Form? _sfsMissingForm;
         private System.Threading.Timer? _sfsCheckTimer;
         private System.Windows.Forms.Button _tactileBtn = null!;
+        private System.Windows.Forms.Button _showAreasBtn = null!;
 
 
 
@@ -731,6 +734,10 @@ namespace SimConnect3
         private bool calibrationMode = false;
         private bool  _tactilebtnDragging = false;
         private Point _tactilebtnDragOffset;
+        private bool  _closeBtnDragging = false;
+        private Point _closeBtnDragOffset;
+        private bool  _showAreasBtnDragging = false;
+        private Point _showAreasBtnDragOffset;
         private UiButton? calibDragBtn = null;
         private AudioTriangle? calibDragTri = null;
         private UiButton? calibSelectedBtn = null;
@@ -998,6 +1005,57 @@ namespace SimConnect3
             this.Controls.Add(_tactileBtn);
             _tactileBtn.BringToFront();
 
+            closeButton.MouseDown += (s, e) =>
+            {
+                if (!calibrationMode) return;
+                _closeBtnDragging = true;
+                _closeBtnDragOffset = e.Location;
+            };
+            closeButton.MouseMove += (s, e) =>
+            {
+                if (!_closeBtnDragging) return;
+                var screenPt = closeButton.PointToScreen(e.Location);
+                var formPt = this.PointToClient(screenPt);
+                closeButton.Location = new Point(formPt.X - _closeBtnDragOffset.X, formPt.Y - _closeBtnDragOffset.Y);
+            };
+            closeButton.MouseUp += (s, e) => { _closeBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+
+            _showAreasBtn = new System.Windows.Forms.Button
+            {
+                Text = "👆  show the clickable areas",
+                Location = new Point(3477, 1170),
+                Size = new Size(363, 63),
+                BackColor = Color.DimGray,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            _showAreasBtn.FlatAppearance.BorderSize = 0;
+            _showAreasBtn.Click += (s, e) =>
+            {
+                if (calibrationMode) return;
+                mainSurface.ShowAllAreas = !mainSurface.ShowAllAreas;
+                _showAreasBtn.BackColor = mainSurface.ShowAllAreas ? Color.LimeGreen : Color.DimGray;
+                pbMain.Invalidate();
+            };
+            _showAreasBtn.MouseDown += (s, e) =>
+            {
+                if (!calibrationMode) return;
+                _showAreasBtnDragging = true;
+                _showAreasBtnDragOffset = e.Location;
+            };
+            _showAreasBtn.MouseMove += (s, e) =>
+            {
+                if (!_showAreasBtnDragging) return;
+                var screenPt = _showAreasBtn.PointToScreen(e.Location);
+                var formPt = this.PointToClient(screenPt);
+                _showAreasBtn.Location = new Point(formPt.X - _showAreasBtnDragOffset.X, formPt.Y - _showAreasBtnDragOffset.Y);
+            };
+            _showAreasBtn.MouseUp += (s, e) => { _showAreasBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            this.Controls.Add(_showAreasBtn);
+            _showAreasBtn.BringToFront();
+
             //this.TopMost = true;
             this.Load += frmMain_Load;
             //EnableFormDragging(this);
@@ -1259,19 +1317,6 @@ namespace SimConnect3
                 OnClick = () => { uint target = cowlFlapR == 2 ? 8191u : 0u;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_R_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
 
-            pfdLeft.Buttons.Add(new UiButton
-            {
-                Name = "SHOW_AREAS",
-                BasePos = new Point(3725, 1200),
-                W = 90,
-                H = 75,
-                NoShadow = true,
-                OnClick = () =>
-                {
-                    mainSurface.ShowAllAreas = !mainSurface.ShowAllAreas;
-                    pbMain.Invalidate();
-                }
-            });
 
             var swWhiteImg = LoadOverlayImage("SW DN white.png");
             var swGreenImg = LoadOverlayImage("SW DN green.png");
@@ -1403,6 +1448,7 @@ namespace SimConnect3
         }
         private void closeButton_Click(object sender, EventArgs e)
         {
+            if (calibrationMode) return;
             this.Close(); // Això dispara Form1_FormClosing i para els threads
         }
 
@@ -1581,18 +1627,20 @@ namespace SimConnect3
 
             this.Text = "rotAIRmonitor";
 
-            hidThread1 = new Thread(ReadHidButtons1);
-            hidThread1.IsBackground = true;
-            hidThread1.Start();
+            if (enableHidReading)
+            {
+                hidThread1 = new Thread(ReadHidButtons1);
+                hidThread1.IsBackground = true;
+                hidThread1.Start();
 
-            hidThread2 = new Thread(ReadHidButtons2);
-            hidThread2.IsBackground = true;
-            hidThread2.Start();
+                hidThread2 = new Thread(ReadHidButtons2);
+                hidThread2.IsBackground = true;
+                hidThread2.Start();
 
-            
-            hidThread5 = new Thread(ReadHidButtons5);
-            hidThread5.IsBackground = true;
-            hidThread5.Start();
+                hidThread5 = new Thread(ReadHidButtons5);
+                hidThread5.IsBackground = true;
+                hidThread5.Start();
+            }
 
             this.FormClosing += Form1_FormClosing;
 
@@ -3198,16 +3246,6 @@ namespace SimConnect3
                 e.Graphics.FillRectangle(overlayBrush, rudderTrimZone);
             }
 
-            // Draw SHOW_AREAS toggle button
-            var showBtn = mainSurface.Buttons.FirstOrDefault(b => b.Name == "SHOW_AREAS");
-            if (showBtn != null)
-            {
-                using var btnBrush = new SolidBrush(mainSurface.ShowAllAreas ? Color.LimeGreen : Color.DimGray);
-                e.Graphics.FillEllipse(btnBrush, showBtn.ClickRect);
-                using var font = new Font("Segoe UI Emoji", 24f);
-                TextRenderer.DrawText(e.Graphics, "👆", font, showBtn.ClickRect, Color.White,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-            }
 
             // --- CALIBRATGE OVERLAY (F12 per activar/desactivar) ---
             if (calibrationMode)
@@ -3657,6 +3695,8 @@ namespace SimConnect3
             sb.AppendLine($"RRI:rri:{rudderTrimIndXOffset}:{rudderTrimIndY}");
             sb.AppendLine($"RRZ:rrz:{rudderTrimZoneBaseX}:{rudderTrimZoneBaseY}");
             sb.AppendLine($"TACBTN:tactile:{_tactileBtn.Location.X}:{_tactileBtn.Location.Y}");
+            sb.AppendLine($"CLOSEBTN:close:{closeButton.Location.X}:{closeButton.Location.Y}");
+            sb.AppendLine($"SHOWBTN:show:{_showAreasBtn.Location.X}:{_showAreasBtn.Location.Y}");
             string projectDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.StartupPath, @"..\..\..\..\.."));
             string path = System.IO.Path.Combine(projectDir, "calibration_export.txt");
             System.IO.File.WriteAllText(path, sb.ToString());
@@ -3737,6 +3777,14 @@ namespace SimConnect3
                 else if (type == "TACBTN")
                 {
                     _tactileBtn.Location = new Point(x, y);
+                }
+                else if (type == "CLOSEBTN")
+                {
+                    closeButton.Location = new Point(x, y);
+                }
+                else if (type == "SHOWBTN")
+                {
+                    _showAreasBtn.Location = new Point(x, y);
                 }
             }
         }

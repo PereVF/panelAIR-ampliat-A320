@@ -122,13 +122,13 @@ namespace SimConnect3
             closeButton.BackColor = Color.DarkRed;
             closeButton.FlatAppearance.BorderSize = 0;
             closeButton.FlatStyle = FlatStyle.Flat;
-            closeButton.Font = new Font("Segoe UI", 15F, FontStyle.Bold, GraphicsUnit.Point);
+            closeButton.Font = new Font("Segoe UI Emoji", 17.5F, FontStyle.Bold, GraphicsUnit.Point);
             closeButton.ForeColor = Color.White;
-            closeButton.Location = new Point(3765, 1170);
+            closeButton.Location = new Point(3477, 1100);
             closeButton.Name = "closeButton";
-            closeButton.Size = new Size(75, 75);
+            closeButton.Size = new Size(363, 63);
             closeButton.TabIndex = 0;
-            closeButton.Text = "X";
+            closeButton.Text = "✕  close this cockpit panel";
             closeButton.UseVisualStyleBackColor = false;
             closeButton.Click += closeButton_Click;
             //
