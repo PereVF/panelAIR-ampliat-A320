@@ -2267,10 +2267,9 @@ namespace SimConnect3
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false, MinimizeBox = false,
                 StartPosition = FormStartPosition.Manual,
-                Size = new Size(1640, 240),
+                Size = new Size(1640, 180),
                 BackColor = Color.FromArgb(40, 40, 40),
-                TopMost = true,
-                Padding = new Padding(10, 90, 10, 0)
+                TopMost = true
             };
             var rtb = new RichTextBox
             {
@@ -2278,10 +2277,11 @@ namespace SimConnect3
                 ForeColor = Color.White,
                 BorderStyle = BorderStyle.None,
                 ReadOnly = true,
-                Dock = DockStyle.Fill,
-                Font = new Font("Segoe UI", 17f, FontStyle.Bold),
+                Bounds = new Rectangle(10, 55, 1608, 45),
+                Font = new Font("Segoe UI", 16f, FontStyle.Bold),
                 ScrollBars = RichTextBoxScrollBars.None,
-                TabStop = false
+                TabStop = false,
+                WordWrap = false
             };
             const string msg = "Please activate the SFSmonitor plugin to complete the functionality of this panelAIR1000 App.";
             rtb.Text = msg;
