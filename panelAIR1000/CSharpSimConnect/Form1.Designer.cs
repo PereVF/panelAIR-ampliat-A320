@@ -122,11 +122,11 @@ namespace SimConnect3
             closeButton.BackColor = Color.DarkRed;
             closeButton.FlatAppearance.BorderSize = 0;
             closeButton.FlatStyle = FlatStyle.Flat;
-            closeButton.Font = new Font("Segoe UI", 10F, FontStyle.Bold, GraphicsUnit.Point);
+            closeButton.Font = new Font("Segoe UI", 15F, FontStyle.Bold, GraphicsUnit.Point);
             closeButton.ForeColor = Color.White;
-            closeButton.Location = new Point(3790, 1200);
+            closeButton.Location = new Point(3765, 1170);
             closeButton.Name = "closeButton";
-            closeButton.Size = new Size(50, 50);
+            closeButton.Size = new Size(75, 75);
             closeButton.TabIndex = 0;
             closeButton.Text = "X";
             closeButton.UseVisualStyleBackColor = false;

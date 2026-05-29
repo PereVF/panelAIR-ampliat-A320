@@ -51,6 +51,7 @@ namespace SimConnect3
         private bool sfsMonitorRunning = false;
         private Form? _sfsMissingForm;
         private System.Threading.Timer? _sfsCheckTimer;
+        private System.Windows.Forms.Button _tactileBtn = null!;
 
 
 
@@ -728,6 +729,8 @@ namespace SimConnect3
         private List<OverlayImage> overlayImages = new();
 
         private bool calibrationMode = false;
+        private bool  _tactilebtnDragging = false;
+        private Point _tactilebtnDragOffset;
         private UiButton? calibDragBtn = null;
         private AudioTriangle? calibDragTri = null;
         private UiButton? calibSelectedBtn = null;
@@ -954,6 +957,46 @@ namespace SimConnect3
             };
 
             this.Icon = Resources.logo;
+
+            _tactileBtn = new System.Windows.Forms.Button
+            {
+                Text = "🖐  Make this screen touch",
+                Location = new Point(3477, 1230),
+                Size = new Size(363, 63),
+                BackColor = Color.Black,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            _tactileBtn.FlatAppearance.BorderSize = 2;
+            _tactileBtn.FlatAppearance.BorderColor = Color.White;
+            _tactileBtn.Click += (s, e) =>
+            {
+                if (calibrationMode) return;
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = "shell:::{80F3F1D5-FECA-45F3-BC32-752C152E456E}",
+                    UseShellExecute = true
+                });
+            };
+            _tactileBtn.MouseDown += (s, e) =>
+            {
+                if (!calibrationMode) return;
+                _tactilebtnDragging = true;
+                _tactilebtnDragOffset = e.Location;
+            };
+            _tactileBtn.MouseMove += (s, e) =>
+            {
+                if (!_tactilebtnDragging) return;
+                var screenPt = _tactileBtn.PointToScreen(e.Location);
+                var formPt = this.PointToClient(screenPt);
+                _tactileBtn.Location = new Point(formPt.X - _tactilebtnDragOffset.X, formPt.Y - _tactilebtnDragOffset.Y);
+            };
+            _tactileBtn.MouseUp += (s, e) => { _tactilebtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            this.Controls.Add(_tactileBtn);
+            _tactileBtn.BringToFront();
 
             //this.TopMost = true;
             this.Load += frmMain_Load;
@@ -1220,8 +1263,8 @@ namespace SimConnect3
             {
                 Name = "SHOW_AREAS",
                 BasePos = new Point(3725, 1200),
-                W = 60,
-                H = 50,
+                W = 90,
+                H = 75,
                 NoShadow = true,
                 OnClick = () =>
                 {
@@ -1423,12 +1466,12 @@ namespace SimConnect3
                 {
                     msgHelper.Location = new Point(screen4K.Bounds.X + screen4K.Bounds.Width / 2, screen4K.Bounds.Y + screen4K.Bounds.Height / 2);
                     msgHelper.Show();
-                    MessageBox.Show(msgHelper, "This application requires the panelAIR1000 by SFS.\nThe app will be functional for 10 minutes only.", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(msgHelper, "This application requires the panelAIR1000 by SFS.\nThe app will be functional for 10 minutes only.\n\n(Please connect the touch screen USB cable and restart the app)", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 var countdownForm = new Form
                 {
                     Text = "panelAIR1000 - Trial Mode",
-                    Size = new Size(400, 150),
+                    Size = new Size(800, 300),
                     FormBorderStyle = FormBorderStyle.FixedDialog,
                     StartPosition = FormStartPosition.Manual,
                     TopMost = true,
@@ -1443,7 +1486,7 @@ namespace SimConnect3
                     Text = "No panelAIR1000 detected.\nClosing in 20 seconds...",
                     Dock = DockStyle.Fill,
                     TextAlign = ContentAlignment.MiddleCenter,
-                    Font = new Font("Arial", 12)
+                    Font = new Font("Arial", 24)
                 };
                 countdownForm.Controls.Add(label);
                 countdownForm.Show();   // no-modal: l'app principal continua inicialitzant-se
@@ -2267,9 +2310,10 @@ namespace SimConnect3
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false, MinimizeBox = false,
                 StartPosition = FormStartPosition.Manual,
-                Size = new Size(1640, 180),
+                Size = new Size(1640, 360),
                 BackColor = Color.FromArgb(40, 40, 40),
-                TopMost = true
+                TopMost = true,
+                Icon = Resources.logo
             };
             var rtb = new RichTextBox
             {
@@ -2277,22 +2321,28 @@ namespace SimConnect3
                 ForeColor = Color.White,
                 BorderStyle = BorderStyle.None,
                 ReadOnly = true,
-                Bounds = new Rectangle(10, 55, 1608, 45),
-                Font = new Font("Segoe UI", 16f, FontStyle.Bold),
+                Bounds = new Rectangle(10, 145, 1608, 90),
+                Font = new Font("Segoe UI", 24f, FontStyle.Bold),
                 ScrollBars = RichTextBoxScrollBars.None,
                 TabStop = false,
                 WordWrap = false
             };
             const string msg = "Please activate the SFSmonitor plugin to complete the functionality of this panelAIR1000 App.";
             rtb.Text = msg;
-            rtb.SelectAll();
-            rtb.SelectionColor = Color.White;
-            rtb.SelectionAlignment = HorizontalAlignment.Center;
-            int idx = msg.IndexOf("SFSmonitor");
-            rtb.Select(idx, "SFSmonitor".Length);
-            rtb.SelectionColor = Color.DeepSkyBlue;
-            rtb.Select(msg.Length, 0);
             _sfsMissingForm.Controls.Add(rtb);
+            _sfsMissingForm.Shown += (s, ev) =>
+            {
+                var f = new Font("Segoe UI", 24f, FontStyle.Bold);
+                rtb.SelectAll();
+                rtb.SelectionFont = f;
+                rtb.SelectionColor = Color.White;
+                rtb.SelectionAlignment = HorizontalAlignment.Center;
+                int idx = msg.IndexOf("SFSmonitor");
+                rtb.Select(idx, "SFSmonitor".Length);
+                rtb.SelectionFont = f;
+                rtb.SelectionColor = Color.DeepSkyBlue;
+                rtb.DeselectAll();
+            };
 
             var screen = Screen.FromControl(this).Bounds;
             _sfsMissingForm.Location = new Point(
@@ -3154,7 +3204,7 @@ namespace SimConnect3
             {
                 using var btnBrush = new SolidBrush(mainSurface.ShowAllAreas ? Color.LimeGreen : Color.DimGray);
                 e.Graphics.FillEllipse(btnBrush, showBtn.ClickRect);
-                using var font = new Font("Segoe UI Emoji", 16f);
+                using var font = new Font("Segoe UI Emoji", 24f);
                 TextRenderer.DrawText(e.Graphics, "👆", font, showBtn.ClickRect, Color.White,
                     TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
             }
@@ -3606,6 +3656,7 @@ namespace SimConnect3
             sb.AppendLine($"TRIMZ:tz:{trimZoneBaseX}:{trimZoneBaseY}");
             sb.AppendLine($"RRI:rri:{rudderTrimIndXOffset}:{rudderTrimIndY}");
             sb.AppendLine($"RRZ:rrz:{rudderTrimZoneBaseX}:{rudderTrimZoneBaseY}");
+            sb.AppendLine($"TACBTN:tactile:{_tactileBtn.Location.X}:{_tactileBtn.Location.Y}");
             string projectDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.StartupPath, @"..\..\..\..\.."));
             string path = System.IO.Path.Combine(projectDir, "calibration_export.txt");
             System.IO.File.WriteAllText(path, sb.ToString());
@@ -3682,6 +3733,10 @@ namespace SimConnect3
                     rudderTrimZone       = new Rectangle(rudderTrimZoneBaseX, rudderTrimZoneBaseY, 507, 100);
                     rudderTrimArrowLeftPos  = new Point(rudderTrimZoneBaseX + 42,  rudderTrimZoneBaseY + 50);
                     rudderTrimArrowRightPos = new Point(rudderTrimZoneBaseX + 465, rudderTrimZoneBaseY + 50);
+                }
+                else if (type == "TACBTN")
+                {
+                    _tactileBtn.Location = new Point(x, y);
                 }
             }
         }

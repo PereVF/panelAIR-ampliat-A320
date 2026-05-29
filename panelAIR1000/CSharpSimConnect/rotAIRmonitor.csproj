@@ -9,7 +9,7 @@
     <Platforms>x64</Platforms>
     <AssemblyName>rotAIRmonitor</AssemblyName>
     <RootNamespace>rotAIRmonitor</RootNamespace>
-    <ApplicationIcon>logo.ico</ApplicationIcon>
+    <ApplicationIcon>panel.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,7 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="logo.ico" />
+    <Content Include="panel.ico" />
     <Content Include="Resources\light_off.png">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </Content>
