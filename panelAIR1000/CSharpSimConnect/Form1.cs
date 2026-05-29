@@ -49,9 +49,9 @@ namespace SimConnect3
         private UiSurface mainSurface;
 
         private bool sfsMonitorRunning = false;
-        private bool warningBlink = false;
-        private System.Windows.Forms.Timer sfsCheckTimer = new System.Windows.Forms.Timer();
-        private System.Windows.Forms.Timer sfsBlinkTimer = new System.Windows.Forms.Timer();
+        private Form? _sfsMissingForm;
+        private System.Threading.Timer? _sfsCheckTimer;
+
 
 
 
@@ -1488,33 +1488,19 @@ namespace SimConnect3
                 if (simReconnectPending) { TryReconnectSim(); }
             };
 
-            // SFSmonitor check timer - every 3 seconds
-            sfsCheckTimer.Interval = 3000;
-            sfsCheckTimer.Tick += (s, e) =>
-            {
-                bool wasRunning = sfsMonitorRunning;
-                sfsMonitorRunning = Process.GetProcesses().Any(p => p.ProcessName.StartsWith("SFSmonitor"));
-                if (wasRunning != sfsMonitorRunning)
-                    pbMain.Invalidate();
-            };
-            sfsCheckTimer.Start();
-
-            // Blink timer for warning triangle - every 600ms
-            sfsBlinkTimer.Interval = 600;
-            sfsBlinkTimer.Tick += (s, e) =>
-            {
-                if (!sfsMonitorRunning)
-                {
-                    warningBlink = !warningBlink;
-                    pbMain.Invalidate();
-                }
-            };
-            sfsBlinkTimer.Start();
-
-            // Initial check
-            sfsMonitorRunning = Process.GetProcesses().Any(p => p.ProcessName.StartsWith("SFSmonitor"));
 
             ConnectToSimConnect();
+
+            // SFSmonitor detection
+            sfsMonitorRunning = Process.GetProcesses().Any(p => p.ProcessName.StartsWith("SFSmonitor"));
+            if (!sfsMonitorRunning) ShowSfsWarning();
+            _sfsCheckTimer = new System.Threading.Timer(_ =>
+            {
+                if (IsDisposed || !IsHandleCreated) return;
+                bool running = Process.GetProcesses().Any(p => p.ProcessName.StartsWith("SFSmonitor"));
+                try { Invoke(() => { sfsMonitorRunning = running; if (running) HideSfsWarning(); else ShowSfsWarning(); }); }
+                catch (ObjectDisposedException) { }
+            }, null, 3000, 3000);
 
             // Si s'ha obert RAM abans que MSFS, quedem en "waiting" i reintentem sols.
             if (simconnect == null)
@@ -1575,6 +1561,7 @@ namespace SimConnect3
         }
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
+            _sfsCheckTimer?.Dispose();
             stopHidThread1 = true;
             stopHidThread2 = true;
             stopHidThread3 = true;
@@ -2271,6 +2258,60 @@ namespace SimConnect3
                 }
             }
         }
+        private void ShowSfsWarning()
+        {
+            if (_sfsMissingForm != null && !_sfsMissingForm.IsDisposed) return;
+            _sfsMissingForm = new Form
+            {
+                Text = "panelAIR1000 - WARNING",
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false, MinimizeBox = false,
+                StartPosition = FormStartPosition.Manual,
+                Size = new Size(1640, 240),
+                BackColor = Color.FromArgb(40, 40, 40),
+                TopMost = true,
+                Padding = new Padding(10, 90, 10, 0)
+            };
+            var rtb = new RichTextBox
+            {
+                BackColor = Color.FromArgb(40, 40, 40),
+                ForeColor = Color.White,
+                BorderStyle = BorderStyle.None,
+                ReadOnly = true,
+                Dock = DockStyle.Fill,
+                Font = new Font("Segoe UI", 17f, FontStyle.Bold),
+                ScrollBars = RichTextBoxScrollBars.None,
+                TabStop = false
+            };
+            const string msg = "Please activate the SFSmonitor plugin to complete the functionality of this panelAIR1000 App.";
+            rtb.Text = msg;
+            rtb.SelectAll();
+            rtb.SelectionColor = Color.White;
+            rtb.SelectionAlignment = HorizontalAlignment.Center;
+            int idx = msg.IndexOf("SFSmonitor");
+            rtb.Select(idx, "SFSmonitor".Length);
+            rtb.SelectionColor = Color.DeepSkyBlue;
+            rtb.Select(msg.Length, 0);
+            _sfsMissingForm.Controls.Add(rtb);
+
+            var screen = Screen.FromControl(this).Bounds;
+            _sfsMissingForm.Location = new Point(
+                screen.X + (screen.Width - _sfsMissingForm.Width) / 2,
+                screen.Y
+            );
+            _sfsMissingForm.Show(this);
+        }
+
+        private void HideSfsWarning()
+        {
+            if (_sfsMissingForm != null && !_sfsMissingForm.IsDisposed)
+            {
+                _sfsMissingForm.Hide();
+                _sfsMissingForm.Close();
+                _sfsMissingForm = null;
+            }
+        }
+
         private void TryReconnectSim()
         {
             try
@@ -3173,40 +3214,6 @@ namespace SimConnect3
                 e.Graphics.DrawString("CALIBRATGE ACTIU — F12 per sortir", font, Brushes.Red, new Point(200, 15));
             }
 
-            // SFSmonitor warning overlay
-            if (!sfsMonitorRunning)
-            {
-                int pw = pbMain.Width;
-                int ph = pbMain.Height;
-
-                // Dark grey background rectangle
-                int rw = 900, rh = 120;
-                int rx = (pw - rw) / 2;
-                int ry = (ph - rh) / 2;
-                Rectangle warningRect = new Rectangle(rx, ry, rw, rh);
-
-                using var bgBrush = new SolidBrush(Color.FromArgb(220, 50, 50, 50));
-                e.Graphics.FillRectangle(bgBrush, warningRect);
-
-                // Blinking yellow triangle ⚠️
-                if (warningBlink)
-                {
-                    using var triFont = new Font("Segoe UI Emoji", 36f);
-                    TextRenderer.DrawText(e.Graphics, "⚠️", triFont,
-                        new Rectangle(rx + 20, ry + 10, 80, 100),
-                        Color.Yellow,
-                        TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
-                }
-
-                // Static yellow text
-                using var textFont = new Font("Segoe UI", 18f, FontStyle.Bold);
-                TextRenderer.DrawText(e.Graphics,
-                    "Please activate the SFSmonitor plugin to complete the functionality of this panelAIR1000 App.",
-                    textFont,
-                    new Rectangle(rx + 110, ry, rw - 130, rh),
-                    Color.Yellow,
-                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
-            }
             }
             catch (OverflowException) { }
         }
