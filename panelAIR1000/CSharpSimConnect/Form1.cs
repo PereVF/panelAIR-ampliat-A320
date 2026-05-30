@@ -398,10 +398,6 @@ namespace SimConnect3
         private const byte VK_VOLUME_DOWN  = 0xAE;
         private const byte VK_MENU         = 0x12;
         private const byte VK_RETURN       = 0x0D;
-        private const byte VK_UP           = 0x26;
-        private const byte VK_DOWN         = 0x28;
-        private const byte VK_LEFT         = 0x25;
-        private const byte VK_RIGHT        = 0x27;
         private const uint KEYEVENTF_KEYUP = 0x0002;
 
         private System.Windows.Forms.Timer hideTimer;
@@ -768,6 +764,7 @@ namespace SimConnect3
         private System.Windows.Forms.Button _fullscreenBtn = null!;
         private bool  _fullscreenBtnDragging;
         private Point _fullscreenBtnDragOffset;
+
         private UiButton? calibDragBtn = null;
         private AudioTriangle? calibDragTri = null;
         private UiButton? calibSelectedBtn = null;
@@ -1160,7 +1157,6 @@ namespace SimConnect3
                 _volGrpDragging = false;
                 try { ExportCalibrationPositions(silent: true); } catch { }
             }
-
             // ── Factory de botó ────────────────────────────────────────────
             System.Windows.Forms.Button MakeGroupBtn(string text, int w = 90, int h = 63)
             {
@@ -1236,7 +1232,6 @@ namespace SimConnect3
             _volUpBtn.Visible      = false; _volUpBtn.Enabled      = false;
             _volDownBtn.Visible    = false; _volDownBtn.Enabled    = false;
             _fullscreenBtn.Visible = false; _fullscreenBtn.Enabled = false;
-
             //this.TopMost = true;
             this.Load += frmMain_Load;
             //EnableFormDragging(this);
@@ -1685,7 +1680,13 @@ namespace SimConnect3
             {
                 hasPanel = searcher.Get().Count > 0;
             }
-            if (!hasPanel)
+            bool hasMonitor = false;
+            using (var searcher = new System.Management.ManagementObjectSearcher(
+                @"SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%RTK1B1A%' AND ConfigManagerErrorCode = 0"))
+            {
+                hasMonitor = searcher.Get().Count > 0;
+            }
+            if (!hasPanel || !hasMonitor)
             {
                 var screen4K = Screen.AllScreens.FirstOrDefault(s => !s.Primary && s.Bounds.Width == 3840 && s.Bounds.Height == 2160)
                     ?? Screen.AllScreens.First(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
@@ -1693,7 +1694,7 @@ namespace SimConnect3
                 {
                     msgHelper.Location = new Point(screen4K.Bounds.X + screen4K.Bounds.Width / 2, screen4K.Bounds.Y + screen4K.Bounds.Height / 2);
                     msgHelper.Show();
-                    MessageBox.Show(msgHelper, "panelAIR verification failed.\n\nThis application requires an SFS panelAIR device to operate.\n\nIf you own a panelAIR device, please ensure that the panelAIR USB touch cable is connected and restart the application.\n\n(If you do not own a panelAIR device, the application will remain functional for 10 minutes only.)", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(msgHelper, "panelAIR verification failed.\n\nThis application requires an SFS panelAIR device to operate.\n\nIf you own a panelAIR device, please ensure that:\n\n  • The panelAIR display is connected to the computer and powered on.\n  • The panelAIR USB touch cable is connected to the computer.\n\nThen restart the application.\n\n(If you do not own a panelAIR device, the application will remain functional for 10 minutes only.)", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 var countdownForm = new Form
                 {
