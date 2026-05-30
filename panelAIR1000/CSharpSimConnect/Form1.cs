@@ -738,6 +738,10 @@ namespace SimConnect3
         private Point _closeBtnDragOffset;
         private bool  _showAreasBtnDragging = false;
         private Point _showAreasBtnDragOffset;
+        private System.Windows.Forms.Button _gearBtn = null!;
+        private bool  _gearBtnDragging = false;
+        private Point _gearBtnDragOffset;
+        private bool  _panelVisible = false;
         private UiButton? calibDragBtn = null;
         private AudioTriangle? calibDragTri = null;
         private UiButton? calibSelectedBtn = null;
@@ -1055,6 +1059,49 @@ namespace SimConnect3
             _showAreasBtn.MouseUp += (s, e) => { _showAreasBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             this.Controls.Add(_showAreasBtn);
             _showAreasBtn.BringToFront();
+
+            _gearBtn = new System.Windows.Forms.Button
+            {
+                Text = "⚙",
+                Location = new Point(3477, 1040),
+                Size = new Size(63, 63),
+                BackColor = Color.Black,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Emoji", 28f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            _gearBtn.FlatAppearance.BorderSize = 0;
+            _gearBtn.Click += (s, e) =>
+            {
+                if (calibrationMode) return;
+                _panelVisible = !_panelVisible;
+                _gearBtn.BackColor = _panelVisible ? Color.LimeGreen : Color.Black;
+                closeButton.Visible   = _panelVisible; closeButton.Enabled   = _panelVisible;
+                _showAreasBtn.Visible = _panelVisible; _showAreasBtn.Enabled = _panelVisible;
+                _tactileBtn.Visible   = _panelVisible; _tactileBtn.Enabled   = _panelVisible;
+            };
+            _gearBtn.MouseDown += (s, e) =>
+            {
+                if (!calibrationMode) return;
+                _gearBtnDragging = true;
+                _gearBtnDragOffset = e.Location;
+            };
+            _gearBtn.MouseMove += (s, e) =>
+            {
+                if (!_gearBtnDragging) return;
+                var screenPt = _gearBtn.PointToScreen(e.Location);
+                var formPt = this.PointToClient(screenPt);
+                _gearBtn.Location = new Point(formPt.X - _gearBtnDragOffset.X, formPt.Y - _gearBtnDragOffset.Y);
+            };
+            _gearBtn.MouseUp += (s, e) => { _gearBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            this.Controls.Add(_gearBtn);
+            _gearBtn.BringToFront();
+
+            // Els 3 botons comencen amagats (estat inicial: engranatge negre)
+            closeButton.Visible   = false; closeButton.Enabled   = false;
+            _showAreasBtn.Visible = false; _showAreasBtn.Enabled = false;
+            _tactileBtn.Visible   = false; _tactileBtn.Enabled   = false;
 
             //this.TopMost = true;
             this.Load += frmMain_Load;
@@ -1512,7 +1559,7 @@ namespace SimConnect3
                 {
                     msgHelper.Location = new Point(screen4K.Bounds.X + screen4K.Bounds.Width / 2, screen4K.Bounds.Y + screen4K.Bounds.Height / 2);
                     msgHelper.Show();
-                    MessageBox.Show(msgHelper, "No panelAIR device detected.\n\nThis application requires an SFS panelAIR device to operate.\nThe application will remain functional for 10 minutes only.\n\n(Please connect the panelAIR USB touch interface and restart the application.)", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(msgHelper, "panelAIR verification failed.\n\nThis application requires an SFS panelAIR device to operate.\n\nIf you own a panelAIR device, please ensure that the panelAIR USB touch cable is connected and restart the application.\n\n(If you do not own a panelAIR device, the application will remain functional for 10 minutes only.)", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 var countdownForm = new Form
                 {
@@ -1529,7 +1576,7 @@ namespace SimConnect3
                 );
                 var label = new Label
                 {
-                    Text = "No panelAIR1000 detected.\nClosing in 20 seconds...",
+                    Text = "No panelAIR1000 detected.\nClosing in 10:00...",
                     Dock = DockStyle.Fill,
                     TextAlign = ContentAlignment.MiddleCenter,
                     Font = new Font("Arial", 24)
@@ -1538,7 +1585,7 @@ namespace SimConnect3
                 countdownForm.Show();   // no-modal: l'app principal continua inicialitzant-se
 
                 var startTime = DateTime.Now;
-                int totalSeconds = 20;
+                int totalSeconds = 600;
                 bool expiryHandled = false;   // guard contra callbacks duplicats
 
                 trialBgTimer = new System.Threading.Timer(_ => {
@@ -1556,7 +1603,7 @@ namespace SimConnect3
                             }
                             else
                             {
-                                label.Text = $"No panelAIR1000 detected.\nClosing in {secondsLeft} seconds...";
+                                label.Text = $"No panelAIR1000 detected.\nClosing in {secondsLeft / 60}:{secondsLeft % 60:D2}...";
                             }
                         }));
                     }
@@ -3697,6 +3744,7 @@ namespace SimConnect3
             sb.AppendLine($"TACBTN:tactile:{_tactileBtn.Location.X}:{_tactileBtn.Location.Y}");
             sb.AppendLine($"CLOSEBTN:close:{closeButton.Location.X}:{closeButton.Location.Y}");
             sb.AppendLine($"SHOWBTN:show:{_showAreasBtn.Location.X}:{_showAreasBtn.Location.Y}");
+            sb.AppendLine($"GEARBTN:gear:{_gearBtn.Location.X}:{_gearBtn.Location.Y}");
             string projectDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.StartupPath, @"..\..\..\..\.."));
             string path = System.IO.Path.Combine(projectDir, "calibration_export.txt");
             System.IO.File.WriteAllText(path, sb.ToString());
@@ -3785,6 +3833,10 @@ namespace SimConnect3
                 else if (type == "SHOWBTN")
                 {
                     _showAreasBtn.Location = new Point(x, y);
+                }
+                else if (type == "GEARBTN")
+                {
+                    _gearBtn.Location = new Point(x, y);
                 }
             }
         }

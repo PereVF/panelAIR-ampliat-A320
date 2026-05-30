@@ -18,8 +18,8 @@ namespace SimConnect3
             if (!has4K)
             {
                 MessageBox.Show(
-                    "No 4K monitor detected.\n\nPlease connect a 4K monitor (3840×2160) to your computer and restart the panelAIR1000 app.",
-                    "panelAIR1000 — Monitor required",
+                    "No compatible 4K display detected.\n\npanelAIR1000 requires a 3840 × 2160 (4K UHD) display to operate.\n\nPlease connect a compatible 4K monitor and restart the application.",
+                    "panelAIR1000",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
                 return;
