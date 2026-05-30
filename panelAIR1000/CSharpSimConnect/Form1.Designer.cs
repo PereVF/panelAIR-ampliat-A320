@@ -120,7 +120,8 @@ namespace SimConnect3
             //
             closeButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             closeButton.BackColor = Color.DarkRed;
-            closeButton.FlatAppearance.BorderSize = 0;
+            closeButton.FlatAppearance.BorderSize = 1;
+            closeButton.FlatAppearance.BorderColor = Color.White;
             closeButton.FlatStyle = FlatStyle.Flat;
             closeButton.Font = new Font("Segoe UI Emoji", 17.5F, FontStyle.Bold, GraphicsUnit.Point);
             closeButton.ForeColor = Color.White;

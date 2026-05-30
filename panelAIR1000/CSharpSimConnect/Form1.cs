@@ -385,8 +385,24 @@ namespace SimConnect3
         [DllImport("user32.dll")]
         private static extern int SendMessage(IntPtr hWnd, int Msg, int wParam, int lParam);
 
+        [DllImport("user32.dll")]
+        private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+        [DllImport("user32.dll")]
+        private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+
         private const int WM_NCLBUTTONDOWN = 0xA1;
         private const int HTCAPTION = 0x2;
+
+        private const byte VK_VOLUME_UP    = 0xAF;
+        private const byte VK_VOLUME_DOWN  = 0xAE;
+        private const byte VK_MENU         = 0x12;
+        private const byte VK_RETURN       = 0x0D;
+        private const byte VK_UP           = 0x26;
+        private const byte VK_DOWN         = 0x28;
+        private const byte VK_LEFT         = 0x25;
+        private const byte VK_RIGHT        = 0x27;
+        private const uint KEYEVENTF_KEYUP = 0x0002;
 
         private System.Windows.Forms.Timer hideTimer;
         private Struct1 lastData;
@@ -596,8 +612,6 @@ namespace SimConnect3
 
 
 
-
-
         }
         enum SIMCONNECT_GROUPS
         {
@@ -742,6 +756,18 @@ namespace SimConnect3
         private bool  _gearBtnDragging = false;
         private Point _gearBtnDragOffset;
         private bool  _panelVisible = false;
+
+        // Volum
+        private System.Windows.Forms.Button _volUpBtn   = null!;
+        private System.Windows.Forms.Button _volDownBtn = null!;
+        private Point _volGrpAnchor = new Point(1920, 1100);
+        private bool  _volGrpDragging;
+        private Point _volGrpDragStartScreen;
+
+        // Fullscreen
+        private System.Windows.Forms.Button _fullscreenBtn = null!;
+        private bool  _fullscreenBtnDragging;
+        private Point _fullscreenBtnDragOffset;
         private UiButton? calibDragBtn = null;
         private AudioTriangle? calibDragTri = null;
         private UiButton? calibSelectedBtn = null;
@@ -1035,7 +1061,8 @@ namespace SimConnect3
                 Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold),
                 Cursor = Cursors.Hand
             };
-            _showAreasBtn.FlatAppearance.BorderSize = 0;
+            _showAreasBtn.FlatAppearance.BorderSize = 1;
+            _showAreasBtn.FlatAppearance.BorderColor = Color.White;
             _showAreasBtn.Click += (s, e) =>
             {
                 if (calibrationMode) return;
@@ -1071,7 +1098,8 @@ namespace SimConnect3
                 Font = new Font("Segoe UI Emoji", 28f, FontStyle.Bold),
                 Cursor = Cursors.Hand
             };
-            _gearBtn.FlatAppearance.BorderSize = 0;
+            _gearBtn.FlatAppearance.BorderSize = 1;
+            _gearBtn.FlatAppearance.BorderColor = Color.White;
             _gearBtn.Click += (s, e) =>
             {
                 if (calibrationMode) return;
@@ -1080,6 +1108,9 @@ namespace SimConnect3
                 closeButton.Visible   = _panelVisible; closeButton.Enabled   = _panelVisible;
                 _showAreasBtn.Visible = _panelVisible; _showAreasBtn.Enabled = _panelVisible;
                 _tactileBtn.Visible   = _panelVisible; _tactileBtn.Enabled   = _panelVisible;
+                _volUpBtn.Visible      = _panelVisible; _volUpBtn.Enabled      = _panelVisible;
+                _volDownBtn.Visible    = _panelVisible; _volDownBtn.Enabled    = _panelVisible;
+                _fullscreenBtn.Visible = _panelVisible; _fullscreenBtn.Enabled = _panelVisible;
             };
             _gearBtn.MouseDown += (s, e) =>
             {
@@ -1098,10 +1129,113 @@ namespace SimConnect3
             this.Controls.Add(_gearBtn);
             _gearBtn.BringToFront();
 
-            // Els 3 botons comencen amagats (estat inicial: engranatge negre)
+            // ── Helpers de posicionament de grups ──────────────────────────
+            void UpdateVolGroupPositions()
+            {
+                _volUpBtn.Location   = new Point(_volGrpAnchor.X, _volGrpAnchor.Y);
+                _volDownBtn.Location = new Point(_volGrpAnchor.X, _volGrpAnchor.Y + 70);
+            }
+            // ── Helpers MSFS focus + tecles ────────────────────────────────
+            System.Diagnostics.Process? GetMSFSProcess() =>
+                System.Diagnostics.Process.GetProcessesByName("FlightSimulator").FirstOrDefault();
+
+            // ── Drag handlers — grup volum ─────────────────────────────────
+            void OnVolGrpMouseDown(object? s, MouseEventArgs e)
+            {
+                if (!calibrationMode) return;
+                _volGrpDragging = true;
+                _volGrpDragStartScreen = ((Control)s!).PointToScreen(e.Location);
+            }
+            void OnVolGrpMouseMove(object? s, MouseEventArgs e)
+            {
+                if (!_volGrpDragging) return;
+                var cur = ((Control)s!).PointToScreen(e.Location);
+                _volGrpAnchor = new Point(_volGrpAnchor.X + cur.X - _volGrpDragStartScreen.X,
+                                          _volGrpAnchor.Y + cur.Y - _volGrpDragStartScreen.Y);
+                _volGrpDragStartScreen = cur;
+                UpdateVolGroupPositions();
+            }
+            void OnVolGrpMouseUp(object? s, MouseEventArgs e)
+            {
+                _volGrpDragging = false;
+                try { ExportCalibrationPositions(silent: true); } catch { }
+            }
+
+            // ── Factory de botó ────────────────────────────────────────────
+            System.Windows.Forms.Button MakeGroupBtn(string text, int w = 90, int h = 63)
+            {
+                var b = new System.Windows.Forms.Button
+                {
+                    Text = text, Size = new Size(w, h),
+                    BackColor = Color.Black, ForeColor = Color.White,
+                    FlatStyle = FlatStyle.Flat,
+                    Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold),
+                    Cursor = Cursors.Hand
+                };
+                b.FlatAppearance.BorderSize = 1;
+                b.FlatAppearance.BorderColor = Color.White;
+                return b;
+            }
+
+            // ── Grup VOLUM ─────────────────────────────────────────────────
+            _volUpBtn   = MakeGroupBtn("🔊+");
+            _volDownBtn = MakeGroupBtn("🔊-");
+            _volUpBtn.Click   += (s, e) => { if (!calibrationMode) keybd_event(VK_VOLUME_UP,   0, 0, UIntPtr.Zero); };
+            _volDownBtn.Click += (s, e) => { if (!calibrationMode) keybd_event(VK_VOLUME_DOWN, 0, 0, UIntPtr.Zero); };
+            foreach (var b in new[] { _volUpBtn, _volDownBtn })
+            {
+                b.MouseDown += OnVolGrpMouseDown;
+                b.MouseMove += OnVolGrpMouseMove;
+                b.MouseUp   += OnVolGrpMouseUp;
+                this.Controls.Add(b); b.BringToFront();
+            }
+            UpdateVolGroupPositions();
+
+            // ── Botó FULLSCREEN ────────────────────────────────────────────
+            _fullscreenBtn = MakeGroupBtn("[Full Screen]", 220, 63);
+            _fullscreenBtn.Location = new Point(1920, 1300);
+            _fullscreenBtn.Click += (s, e) =>
+            {
+                if (calibrationMode) return;
+                var msfs = GetMSFSProcess();
+                if (msfs == null) return;
+                SetForegroundWindow(msfs.MainWindowHandle);
+                System.Threading.Thread.Sleep(80);
+                keybd_event(VK_MENU,   0, 0,                UIntPtr.Zero);
+                keybd_event(VK_RETURN, 0, 0,                UIntPtr.Zero);
+                keybd_event(VK_RETURN, 0, KEYEVENTF_KEYUP,  UIntPtr.Zero);
+                keybd_event(VK_MENU,   0, KEYEVENTF_KEYUP,  UIntPtr.Zero);
+                var t = new System.Windows.Forms.Timer { Interval = 500 };
+                t.Tick += (ts, te) => { ((System.Windows.Forms.Timer)ts!).Stop(); SetForegroundWindow(this.Handle); };
+                t.Start();
+            };
+            _fullscreenBtn.MouseDown += (s, e) =>
+            {
+                if (!calibrationMode) return;
+                _fullscreenBtnDragging = true;
+                _fullscreenBtnDragOffset = e.Location;
+            };
+            _fullscreenBtn.MouseMove += (s, e) =>
+            {
+                if (!_fullscreenBtnDragging) return;
+                var sp = _fullscreenBtn.PointToScreen(e.Location);
+                var fp = this.PointToClient(sp);
+                _fullscreenBtn.Location = new Point(fp.X - _fullscreenBtnDragOffset.X, fp.Y - _fullscreenBtnDragOffset.Y);
+            };
+            _fullscreenBtn.MouseUp += (s, e) =>
+            {
+                _fullscreenBtnDragging = false;
+                try { ExportCalibrationPositions(silent: true); } catch { }
+            };
+            this.Controls.Add(_fullscreenBtn); _fullscreenBtn.BringToFront();
+
+            // Els botons comencen amagats (estat inicial: engranatge negre)
             closeButton.Visible   = false; closeButton.Enabled   = false;
             _showAreasBtn.Visible = false; _showAreasBtn.Enabled = false;
             _tactileBtn.Visible   = false; _tactileBtn.Enabled   = false;
+            _volUpBtn.Visible      = false; _volUpBtn.Enabled      = false;
+            _volDownBtn.Visible    = false; _volDownBtn.Enabled    = false;
+            _fullscreenBtn.Visible = false; _fullscreenBtn.Enabled = false;
 
             //this.TopMost = true;
             this.Load += frmMain_Load;
@@ -1984,6 +2118,7 @@ namespace SimConnect3
                 //panelAIR1000-------------------------------------------------------------------------
                 //simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.NAV_SWAP, "AP_MASTER");
                 //simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.NAV_SWAP, false);
+
 
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AP_MASTER, "AP_MASTER");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AP_MASTER, false);
@@ -3745,6 +3880,8 @@ namespace SimConnect3
             sb.AppendLine($"CLOSEBTN:close:{closeButton.Location.X}:{closeButton.Location.Y}");
             sb.AppendLine($"SHOWBTN:show:{_showAreasBtn.Location.X}:{_showAreasBtn.Location.Y}");
             sb.AppendLine($"GEARBTN:gear:{_gearBtn.Location.X}:{_gearBtn.Location.Y}");
+            sb.AppendLine($"VOLGRP:vg:{_volGrpAnchor.X}:{_volGrpAnchor.Y}");
+            sb.AppendLine($"FSBTN:fs:{_fullscreenBtn.Location.X}:{_fullscreenBtn.Location.Y}");
             string projectDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.StartupPath, @"..\..\..\..\.."));
             string path = System.IO.Path.Combine(projectDir, "calibration_export.txt");
             System.IO.File.WriteAllText(path, sb.ToString());
@@ -3837,6 +3974,16 @@ namespace SimConnect3
                 else if (type == "GEARBTN")
                 {
                     _gearBtn.Location = new Point(x, y);
+                }
+                else if (type == "VOLGRP")
+                {
+                    _volGrpAnchor = new Point(x, y);
+                    _volUpBtn.Location   = new Point(x, y);
+                    _volDownBtn.Location = new Point(x, y + 70);
+                }
+                else if (type == "FSBTN")
+                {
+                    _fullscreenBtn.Location = new Point(x, y);
                 }
             }
         }
