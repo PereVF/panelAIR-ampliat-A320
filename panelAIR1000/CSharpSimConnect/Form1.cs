@@ -14,7 +14,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Drawing;
-using rotAIRmonitor.Properties;
+using panelAIR1000.Properties;
 using System.Drawing.Drawing2D;
 using System.Diagnostics;
 using Microsoft.VisualBasic.Devices;
@@ -888,8 +888,8 @@ namespace SimConnect3
         {
             InitializeComponent();
 
-            imglightOff = rotAIRmonitor.Properties.Resources.light_off;
-            imglightOn = rotAIRmonitor.Properties.Resources.light_on;
+            imglightOff = panelAIR1000.Properties.Resources.light_off;
+            imglightOn = panelAIR1000.Properties.Resources.light_on;
             trimWheelImg = LoadOverlayImage("trim wheel.png");
 
             string imagePath = System.IO.Path.Combine(Application.StartupPath, "Resources", "main GA_1000 4K panel_f.png");
@@ -956,11 +956,11 @@ namespace SimConnect3
 
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
             {
-                try { System.IO.File.WriteAllText("rotAIRmonitor_crash.txt", e.ExceptionObject.ToString()); } catch { }
+                try { System.IO.File.WriteAllText("panelAIR1000_crash.txt", e.ExceptionObject.ToString()); } catch { }
             };
             Application.ThreadException += (s, e) =>
             {
-                try { System.IO.File.AppendAllText("rotAIRmonitor_crash.txt", "\r\n[UI] " + e.Exception.ToString()); } catch { }
+                try { System.IO.File.AppendAllText("panelAIR1000_crash.txt", "\r\n[UI] " + e.Exception.ToString()); } catch { }
             };
 
             this.Icon = Resources.logo;
@@ -1512,7 +1512,7 @@ namespace SimConnect3
                 {
                     msgHelper.Location = new Point(screen4K.Bounds.X + screen4K.Bounds.Width / 2, screen4K.Bounds.Y + screen4K.Bounds.Height / 2);
                     msgHelper.Show();
-                    MessageBox.Show(msgHelper, "This application requires the panelAIR1000 by SFS.\nThe app will be functional for 10 minutes only.\n\n(Please connect the touch screen USB cable and restart the app)", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(msgHelper, "No panelAIR device detected.\n\nThis application requires an SFS panelAIR device to operate.\nThe application will remain functional for 10 minutes only.\n\n(Please connect the panelAIR USB touch interface and restart the application.)", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 var countdownForm = new Form
                 {
@@ -1625,7 +1625,7 @@ namespace SimConnect3
             if (!checkBox1.Checked) hideTimer.Start();
 
 
-            this.Text = "rotAIRmonitor";
+            this.Text = "panelAIR1000";
 
             if (enableHidReading)
             {
@@ -2429,7 +2429,7 @@ namespace SimConnect3
 
                     try
                     {
-                        System.IO.File.AppendAllText("rotAIRmonitor_crash.txt",
+                        System.IO.File.AppendAllText("panelAIR1000_crash.txt",
                             "\r\n[SimConnect] Reconnected OK.");
                     }
                     catch { }
@@ -2469,7 +2469,7 @@ namespace SimConnect3
                         // Ignorem els Key '27' repetits per evitar logs massius
                         if (!ex.Message.Contains("'27'"))
                         {
-                            try { System.IO.File.AppendAllText("rotAIRmonitor_crash.txt", "\r\n[SIMCONNECT KeyNotFound] " + ex.Message); } catch { }
+                            try { System.IO.File.AppendAllText("panelAIR1000_crash.txt", "\r\n[SIMCONNECT KeyNotFound] " + ex.Message); } catch { }
                         }
                     }
                     catch (System.Runtime.InteropServices.COMException ex)
@@ -2477,7 +2477,7 @@ namespace SimConnect3
                         // Desconnexió brusc (0xC000014B): no tanquem; marquem "disconnected" i reintentem
                         try
                         {
-                            System.IO.File.AppendAllText("rotAIRmonitor_crash.txt",
+                            System.IO.File.AppendAllText("panelAIR1000_crash.txt",
                             "\r\n[SIMCONNECT Dispatch] " + ex.ToString());
                         }
                         catch { }
@@ -2493,7 +2493,7 @@ namespace SimConnect3
                     catch (System.Exception ex)
                     {
                         // Altres errors del dispatcher SimConnect
-                        try { System.IO.File.AppendAllText("rotAIRmonitor_crash.txt", "\r\n[SIMCONNECT Dispatch] " + ex.ToString()); } catch { }
+                        try { System.IO.File.AppendAllText("panelAIR1000_crash.txt", "\r\n[SIMCONNECT Dispatch] " + ex.ToString()); } catch { }
                     }
                 }
             }
@@ -2542,7 +2542,7 @@ namespace SimConnect3
 
             try
             {
-                System.IO.File.AppendAllText("rotAIRmonitor_crash.txt",
+                System.IO.File.AppendAllText("panelAIR1000_crash.txt",
                 "\r\n[SimConnect] Quit received -> will try reconnect...");
             }
             catch { }

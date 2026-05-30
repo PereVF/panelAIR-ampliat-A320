@@ -7,7 +7,7 @@
       "type": "process",
       "args": [
         "build",
-        "${workspaceFolder}/panelAIR1000/CSharpSimConnect/rotAIRmonitor.csproj",
+        "${workspaceFolder}/panelAIR1000/CSharpSimConnect/panelAIR1000.csproj",
         "-c", "Debug",
         "-p:Platform=x64"
       ],

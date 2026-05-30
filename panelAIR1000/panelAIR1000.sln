@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.9.34728.123
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "rotAIRmonitor", "CSharpSimConnect\rotAIRmonitor.csproj", "{EDBED78B-55AE-4CF0-BB46-54C24A418661}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "panelAIR1000", "CSharpSimConnect\panelAIR1000.csproj", "{EDBED78B-55AE-4CF0-BB46-54C24A418661}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

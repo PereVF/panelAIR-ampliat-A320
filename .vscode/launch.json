@@ -2,11 +2,11 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "rotAIRmonitor",
+      "name": "panelAIR1000",
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
-      "program": "${workspaceFolder}/panelAIR1000/CSharpSimConnect/bin/x64/Debug/net6.0-windows7.0/rotAIRmonitor.exe",
+      "program": "${workspaceFolder}/panelAIR1000/CSharpSimConnect/bin/x64/Debug/net6.0-windows7.0/panelAIR1000.exe",
       "args": [],
       "cwd": "${workspaceFolder}/panelAIR1000/CSharpSimConnect/bin/x64/Debug/net6.0-windows7.0",
       "stopAtEntry": false,
