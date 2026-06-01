@@ -919,9 +919,9 @@ namespace SimConnect3
             imglightOn = panelAIR1000.Properties.Resources.light_on;
             trimWheelImg = LoadOverlayImage("trim wheel.png");
 
-            string imagePath = System.IO.Path.Combine(Application.StartupPath, "Resources", "main GA_1000 4K panel_f.png");
-            if (System.IO.File.Exists(imagePath))
-                _bgImage = Image.FromFile(imagePath);
+            var asm = System.Reflection.Assembly.GetExecutingAssembly();
+            using var bgStream = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_1000 4K panel_f.png");
+            if (bgStream != null) _bgImage = Image.FromStream(bgStream);
 
             pbMain.Paint += PbMain_Paint;
             pbMain.MouseDown += PbMain_MouseDown;
@@ -1506,7 +1506,7 @@ namespace SimConnect3
             var swBatteryImg  = LoadOverlayImage("SW battery.png");
             var swAvionicsImg = LoadOverlayImage("SW avionics.png");
             var swDnRedImg    = LoadOverlayImage("SW DN red.png");
-            var swCenterWhiteImg = Image.FromFile(@"C:\Users\usuario\Desktop\panelAIR1000-j\panelAIR1000\CSharpSimConnect\Resources\SW CENTER white_b.png");
+            var swCenterWhiteImg = LoadOverlayImage("SW CENTER white_b.png");
             overlayImages = new List<OverlayImage>
             {
                 // Fila superior (Y=1553) — blanc — ordre E-D: beacon, land, taxi, nav, strobe, recognition
@@ -3991,8 +3991,9 @@ namespace SimConnect3
 
         private Image? LoadOverlayImage(string filename)
         {
-            string path = System.IO.Path.Combine(Application.StartupPath, "Resources", filename);
-            return System.IO.File.Exists(path) ? Image.FromFile(path) : null;
+            var asm = System.Reflection.Assembly.GetExecutingAssembly();
+            using var stream = asm.GetManifestResourceStream($"panelAIR1000.Resources.{filename}");
+            return stream != null ? Image.FromStream(stream) : null;
         }
 
         private void DrawTrimArrow(Graphics g, int x, int y, int dir)

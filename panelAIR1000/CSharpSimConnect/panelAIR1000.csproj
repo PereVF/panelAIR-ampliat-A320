@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
@@ -10,6 +10,7 @@
     <AssemblyName>panelAIR1000</AssemblyName>
     <RootNamespace>panelAIR1000</RootNamespace>
     <ApplicationIcon>panel.ico</ApplicationIcon>
+    <PublishSingleFile>true</PublishSingleFile>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,58 +23,22 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="panel.ico" />
-    <Content Include="Resources\light_off.png">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\light_on.png">
-      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\main GA_1000 4K panel_f.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\SW DN white.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\SW DN green.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\SW DN blue.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\SW DN red.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\SW flaps.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\trim wheel.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\led green.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\led red.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\SW landing gear.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\Parking Brake switch_b.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\SW ignition.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\SW fuel_r.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\SW battery.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
-    <Content Include="Resources\SW avionics.png">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </Content>
+    <EmbeddedResource Include="Resources\main GA_1000 4K panel_f.png" />
+    <EmbeddedResource Include="Resources\SW DN white.png" />
+    <EmbeddedResource Include="Resources\SW DN green.png" />
+    <EmbeddedResource Include="Resources\SW DN blue.png" />
+    <EmbeddedResource Include="Resources\SW DN red.png" />
+    <EmbeddedResource Include="Resources\SW flaps.png" />
+    <EmbeddedResource Include="Resources\SW CENTER white_b.png" />
+    <EmbeddedResource Include="Resources\trim wheel.png" />
+    <EmbeddedResource Include="Resources\led green.png" />
+    <EmbeddedResource Include="Resources\led red.png" />
+    <EmbeddedResource Include="Resources\SW landing gear.png" />
+    <EmbeddedResource Include="Resources\Parking Brake switch_b.png" />
+    <EmbeddedResource Include="Resources\SW ignition.png" />
+    <EmbeddedResource Include="Resources\SW fuel_r.png" />
+    <EmbeddedResource Include="Resources\SW battery.png" />
+    <EmbeddedResource Include="Resources\SW avionics.png" />
   </ItemGroup>
 
   <ItemGroup>
@@ -110,5 +75,6 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
   </ItemGroup>
+
 
 </Project>
