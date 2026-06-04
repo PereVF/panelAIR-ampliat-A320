@@ -10,6 +10,7 @@
     <AssemblyName>panelAIR1000</AssemblyName>
     <RootNamespace>panelAIR1000</RootNamespace>
     <ApplicationIcon>panel.ico</ApplicationIcon>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
     <PublishSingleFile>true</PublishSingleFile>
   </PropertyGroup>
 

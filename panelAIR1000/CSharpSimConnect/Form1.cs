@@ -389,16 +389,28 @@ namespace SimConnect3
         private static extern bool SetForegroundWindow(IntPtr hWnd);
 
         [DllImport("user32.dll")]
+        private static extern IntPtr GetForegroundWindow();
+
+        [DllImport("user32.dll")]
+        private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+        [DllImport("kernel32.dll")]
+        private static extern uint GetCurrentThreadId();
+
+        [DllImport("user32.dll")]
+        private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+
+        [DllImport("user32.dll")]
         private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
         private const int WM_NCLBUTTONDOWN = 0xA1;
         private const int HTCAPTION = 0x2;
-
         private const byte VK_VOLUME_UP    = 0xAF;
         private const byte VK_VOLUME_DOWN  = 0xAE;
         private const byte VK_MENU         = 0x12;
         private const byte VK_RETURN       = 0x0D;
-        private const uint KEYEVENTF_KEYUP = 0x0002;
+        private const byte VK_ESCAPE       = 0x1B;
+        private const uint KEYEVENTF_KEYUP      = 0x0002;
 
         private System.Windows.Forms.Timer hideTimer;
         private Struct1 lastData;
@@ -410,6 +422,7 @@ namespace SimConnect3
         {
             Struct1,
             XPNDR_SET,
+            CameraState,
         }
 
         enum REQUESTS
@@ -605,8 +618,8 @@ namespace SimConnect3
             MAGNETO2_DECR,
             FUEL_SELECTOR_SET,
             FUEL_SELECTOR_2_SET,
-
-
+            ENGINE_AUTO_START,
+            ENGINE_AUTO_SHUTDOWN,
 
         }
         enum SIMCONNECT_GROUPS
@@ -765,6 +778,25 @@ namespace SimConnect3
         private bool  _fullscreenBtnDragging;
         private Point _fullscreenBtnDragOffset;
 
+        // MSFS End key
+        private System.Windows.Forms.Button _msfsEndBtn = null!;
+        private bool  _msfsEndBtnDragging;
+        private Point _msfsEndBtnDragOffset;
+
+        // MSFS Focus button
+        private System.Windows.Forms.Button _focusBtn = null!;
+        private bool  _focusBtnDragging;
+        private Point _focusBtnDragOffset;
+
+        // Engine Start/Stop buttons
+        private System.Windows.Forms.Button _engineStartBtn = null!;
+        private bool  _engineStartBtnDragging;
+        private Point _engineStartBtnDragOffset;
+
+        private System.Windows.Forms.Button _engineStopBtn = null!;
+        private bool  _engineStopBtnDragging;
+        private Point _engineStopBtnDragOffset;
+
         private UiButton? calibDragBtn = null;
         private AudioTriangle? calibDragTri = null;
         private UiButton? calibSelectedBtn = null;
@@ -877,6 +909,7 @@ namespace SimConnect3
             public int gen_master_alt_2;    // GENERAL ENG MASTER ALTERNATOR:2 (Bool)
             public int starter1;            // GENERAL ENG STARTER:1
             public int starter2;            // GENERAL ENG STARTER:2
+            public double cameraState;
 
 
 
@@ -911,6 +944,7 @@ namespace SimConnect3
         {
             public int xpdr_state;   // 0=OFF,1=STBY,2=TEST,3=ON,4=ALT
         }
+        struct CameraStateWrite { public double value; }
         public frmMain()
         {
             InitializeComponent();
@@ -1108,6 +1142,10 @@ namespace SimConnect3
                 _volUpBtn.Visible      = _panelVisible; _volUpBtn.Enabled      = _panelVisible;
                 _volDownBtn.Visible    = _panelVisible; _volDownBtn.Enabled    = _panelVisible;
                 _fullscreenBtn.Visible = _panelVisible; _fullscreenBtn.Enabled = _panelVisible;
+                _msfsEndBtn.Visible    = _panelVisible; _msfsEndBtn.Enabled    = _panelVisible;
+                _focusBtn.Visible      = _panelVisible; _focusBtn.Enabled      = _panelVisible;
+                _engineStartBtn.Visible = _panelVisible; _engineStartBtn.Enabled = _panelVisible;
+                _engineStopBtn.Visible  = _panelVisible; _engineStopBtn.Enabled  = _panelVisible;
             };
             _gearBtn.MouseDown += (s, e) =>
             {
@@ -1225,6 +1263,126 @@ namespace SimConnect3
             };
             this.Controls.Add(_fullscreenBtn); _fullscreenBtn.BringToFront();
 
+            // ── Botó MSFS END KEY ──────────────────────────────────────────
+            _msfsEndBtn = MakeGroupBtn("CAM IN/EXT", 220, 63);
+            _msfsEndBtn.Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold);
+            _msfsEndBtn.Location = new Point(1920, 1380);
+            _msfsEndBtn.Click += (s, e) =>
+            {
+                if (calibrationMode) return;
+                if (simconnect == null) return;
+                int currentCam = (int)lastData.cameraState;
+                System.Diagnostics.Debug.WriteLine($"CAMERA STATE actual: {lastData.cameraState}");
+                int newCam = (currentCam == 2) ? 3 : 2;
+                var cs = new CameraStateWrite { value = (double)newCam };
+                simconnect.SetDataOnSimObject(DEFINITIONS.CameraState, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, cs);
+            };
+            _msfsEndBtn.MouseDown += (s, e) =>
+            {
+                if (!calibrationMode) return;
+                _msfsEndBtnDragging = true;
+                _msfsEndBtnDragOffset = e.Location;
+            };
+            _msfsEndBtn.MouseMove += (s, e) =>
+            {
+                if (!_msfsEndBtnDragging) return;
+                var sp = _msfsEndBtn.PointToScreen(e.Location);
+                var fp = this.PointToClient(sp);
+                _msfsEndBtn.Location = new Point(fp.X - _msfsEndBtnDragOffset.X, fp.Y - _msfsEndBtnDragOffset.Y);
+            };
+            _msfsEndBtn.MouseUp += (s, e) =>
+            {
+                _msfsEndBtnDragging = false;
+                try { ExportCalibrationPositions(silent: true); } catch { }
+            };
+            this.Controls.Add(_msfsEndBtn); _msfsEndBtn.BringToFront();
+
+            // ── Botó FOCUS MSFS ──────────────────────────────────────────
+            _focusBtn = MakeGroupBtn("FOCUS", 220, 63);
+            _focusBtn.Location = new Point(1920 + 120, 1380);
+            _focusBtn.Click += (s, e) =>
+            {
+                if (calibrationMode) return;
+                var msfs = GetMSFSProcess();
+                if (msfs == null) return;
+                SetForegroundWindow(msfs.MainWindowHandle);
+            };
+            _focusBtn.MouseDown += (s, e) =>
+            {
+                if (!calibrationMode) return;
+                _focusBtnDragging = true;
+                _focusBtnDragOffset = e.Location;
+            };
+            _focusBtn.MouseMove += (s, e) =>
+            {
+                if (!_focusBtnDragging) return;
+                var sp = _focusBtn.PointToScreen(e.Location);
+                var fp = this.PointToClient(sp);
+                _focusBtn.Location = new Point(fp.X - _focusBtnDragOffset.X, fp.Y - _focusBtnDragOffset.Y);
+            };
+            _focusBtn.MouseUp += (s, e) =>
+            {
+                _focusBtnDragging = false;
+                try { ExportCalibrationPositions(silent: true); } catch { }
+            };
+            this.Controls.Add(_focusBtn); _focusBtn.BringToFront();
+
+            // ── Botó ENGINE START ──────────────────────────────────────────
+            _engineStartBtn = MakeGroupBtn("ENG START", 220, 63);
+            _engineStartBtn.Location = new Point(1920 + 120 + 120, 1380);
+            _engineStartBtn.Click += (s, e) =>
+            {
+                if (calibrationMode) return;
+                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.ENGINE_AUTO_START, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            };
+            _engineStartBtn.MouseDown += (s, e) =>
+            {
+                if (!calibrationMode) return;
+                _engineStartBtnDragging = true;
+                _engineStartBtnDragOffset = e.Location;
+            };
+            _engineStartBtn.MouseMove += (s, e) =>
+            {
+                if (!_engineStartBtnDragging) return;
+                var sp = _engineStartBtn.PointToScreen(e.Location);
+                var fp = this.PointToClient(sp);
+                _engineStartBtn.Location = new Point(fp.X - _engineStartBtnDragOffset.X, fp.Y - _engineStartBtnDragOffset.Y);
+            };
+            _engineStartBtn.MouseUp += (s, e) =>
+            {
+                _engineStartBtnDragging = false;
+                try { ExportCalibrationPositions(silent: true); } catch { }
+            };
+            this.Controls.Add(_engineStartBtn); _engineStartBtn.BringToFront();
+
+            // ── Botó ENGINE STOP ──────────────────────────────────────────
+            _engineStopBtn = MakeGroupBtn("ENG STOP", 220, 63);
+            _engineStopBtn.Location = new Point(1920 + 120 + 120 + 120, 1380);
+            _engineStopBtn.Click += (s, e) =>
+            {
+                if (calibrationMode) return;
+                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.ENGINE_AUTO_SHUTDOWN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            };
+            _engineStopBtn.MouseDown += (s, e) =>
+            {
+                if (!calibrationMode) return;
+                _engineStopBtnDragging = true;
+                _engineStopBtnDragOffset = e.Location;
+            };
+            _engineStopBtn.MouseMove += (s, e) =>
+            {
+                if (!_engineStopBtnDragging) return;
+                var sp = _engineStopBtn.PointToScreen(e.Location);
+                var fp = this.PointToClient(sp);
+                _engineStopBtn.Location = new Point(fp.X - _engineStopBtnDragOffset.X, fp.Y - _engineStopBtnDragOffset.Y);
+            };
+            _engineStopBtn.MouseUp += (s, e) =>
+            {
+                _engineStopBtnDragging = false;
+                try { ExportCalibrationPositions(silent: true); } catch { }
+            };
+            this.Controls.Add(_engineStopBtn); _engineStopBtn.BringToFront();
+
             // Els botons comencen amagats (estat inicial: engranatge negre)
             closeButton.Visible   = false; closeButton.Enabled   = false;
             _showAreasBtn.Visible = false; _showAreasBtn.Enabled = false;
@@ -1232,6 +1390,10 @@ namespace SimConnect3
             _volUpBtn.Visible      = false; _volUpBtn.Enabled      = false;
             _volDownBtn.Visible    = false; _volDownBtn.Enabled    = false;
             _fullscreenBtn.Visible = false; _fullscreenBtn.Enabled = false;
+            _msfsEndBtn.Visible    = false; _msfsEndBtn.Enabled    = false;
+            _focusBtn.Visible      = false; _focusBtn.Enabled      = false;
+            _engineStartBtn.Visible = false; _engineStartBtn.Enabled = false;
+            _engineStopBtn.Visible  = false; _engineStopBtn.Enabled  = false;
             //this.TopMost = true;
             this.Load += frmMain_Load;
             //EnableFormDragging(this);
@@ -1591,7 +1753,7 @@ namespace SimConnect3
                 new() { Name="SW_ALT2", TypeKey="SW altgen2", BasePos=new Point(1620, 1280), ZoomWidth=100,
                         Img=swDnRedImg, ShowWhen = () => altGen2Off, OnClick=null },
                 new() { Name="LED_PBRAKE", TypeKey="LED_PBRAKE", BasePos=new Point(2918, 1755), ZoomWidth=32, Img=ledRedImg,
-                        ShowWhen = () => pbrakeActive },
+                        ShowWhen = () => mainBusVolts >= 5.0 && pbrakeActive },
                 // GEAR LEDs
                 new() { Name="LED_GEAR_LEFT",    TypeKey="LED_GEAR_LEFT",    BasePos=new Point(2749, 1740), ZoomWidth=43, Img=ledGreenImg,
                         ShowWhen = () => mainBusVolts >= 5.0 && gearLeftPercent  >= 100 },
@@ -2412,6 +2574,10 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TOGGLE_STARTER1, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TOGGLE_STARTER2, "TOGGLE_STARTER2");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TOGGLE_STARTER2, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.ENGINE_AUTO_START, "ENGINE_AUTO_START");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.ENGINE_AUTO_START, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.ENGINE_AUTO_SHUTDOWN, "ENGINE_AUTO_SHUTDOWN");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.ENGINE_AUTO_SHUTDOWN, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TURBINE_IGNITION_SWITCH_TOGGLE, "TURBINE_IGNITION_SWITCH_TOGGLE");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TURBINE_IGNITION_SWITCH_TOGGLE, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TURBINE_IGNITION_SWITCH_SET1, "TURBINE_IGNITION_SWITCH_SET1");
@@ -2437,9 +2603,6 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET,   false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FUEL_SELECTOR_2_SET, "FUEL_SELECTOR_2_SET");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FUEL_SELECTOR_2_SET, false);
-
-
-
                 simconnect.SetNotificationGroupPriority(SIMCONNECT_GROUPS.GROUP0, SimConnect.SIMCONNECT_GROUP_PRIORITY_HIGHEST);
 
 
@@ -2512,7 +2675,9 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG MASTER ALTERNATOR:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG STARTER:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG STARTER:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
 
                 simconnect.RegisterDataDefineStruct<Struct1>(DEFINITIONS.Struct1);
                 simconnect.RequestDataOnSimObject(REQUESTS.Request1, DEFINITIONS.Struct1, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.VISUAL_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
@@ -3105,10 +3270,10 @@ namespace SimConnect3
 
 
 
-                    lastData = s1;
-                   
+
                 }
-                
+
+                lastData = s1;
 
                 previousNavSel = s1.nav_sel;
                 firstNavSelReceived = true;             
@@ -3883,6 +4048,10 @@ namespace SimConnect3
             sb.AppendLine($"GEARBTN:gear:{_gearBtn.Location.X}:{_gearBtn.Location.Y}");
             sb.AppendLine($"VOLGRP:vg:{_volGrpAnchor.X}:{_volGrpAnchor.Y}");
             sb.AppendLine($"FSBTN:fs:{_fullscreenBtn.Location.X}:{_fullscreenBtn.Location.Y}");
+            sb.AppendLine($"ENDBTN:end:{_msfsEndBtn.Location.X}:{_msfsEndBtn.Location.Y}");
+            sb.AppendLine($"FOCUSBTN:focus:{_focusBtn.Location.X}:{_focusBtn.Location.Y}");
+            sb.AppendLine($"ENGSTARTBTN:engstart:{_engineStartBtn.Location.X}:{_engineStartBtn.Location.Y}");
+            sb.AppendLine($"ENGSTOPBTN:engstop:{_engineStopBtn.Location.X}:{_engineStopBtn.Location.Y}");
             string projectDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.StartupPath, @"..\..\..\..\.."));
             string path = System.IO.Path.Combine(projectDir, "calibration_export.txt");
             System.IO.File.WriteAllText(path, sb.ToString());
@@ -3985,6 +4154,22 @@ namespace SimConnect3
                 else if (type == "FSBTN")
                 {
                     _fullscreenBtn.Location = new Point(x, y);
+                }
+                else if (type == "ENDBTN")
+                {
+                    _msfsEndBtn.Location = new Point(x, y);
+                }
+                else if (type == "FOCUSBTN")
+                {
+                    _focusBtn.Location = new Point(x, y);
+                }
+                else if (type == "ENGSTARTBTN")
+                {
+                    _engineStartBtn.Location = new Point(x, y);
+                }
+                else if (type == "ENGSTOPBTN")
+                {
+                    _engineStopBtn.Location = new Point(x, y);
                 }
             }
         }
