@@ -238,6 +238,10 @@ namespace SimConnect3
 
         private bool trimDragging = false;
         private int trimLastMouseY;
+        private Image[] trimFrames = new Image[26];
+        private float trimFramePos = 0f;
+        private const float TRIM_PIXELS_PER_FRAME = 9f;
+        private const int TRIM_FRAME_COUNT = 26;
 
         // ================= RUDDER TRIM =================
         private double rudderTrim = 0;
@@ -245,6 +249,10 @@ namespace SimConnect3
         private bool rudderTrimDragging = false;
         private int  rudderTrimLastMouseX;
         private int  rudderTrimLastDir = 0;
+        private Image[] rudderTrimFrames = new Image[26];
+        private float rudderTrimFramePos = 0f;
+        private const int RUDDER_TRIM_FRAME_COUNT = 26;
+        private const float RUDDER_TRIM_PIXELS_PER_FRAME = 9f;
         // zona de drag horitzontal
         private int rudderTrimZoneBaseX = 2760;
         private int rudderTrimZoneBaseY = 2050;
@@ -952,6 +960,32 @@ namespace SimConnect3
             imglightOff = panelAIR1000.Properties.Resources.light_off;
             imglightOn = panelAIR1000.Properties.Resources.light_on;
             trimWheelImg = LoadOverlayImage("trim wheel.png");
+
+            string animFolder = @"Resources\animació roda de trim";
+            for (int i = 1; i <= RUDDER_TRIM_FRAME_COUNT; i++)
+            {
+                string path = System.IO.Path.Combine(
+                    AppDomain.CurrentDomain.BaseDirectory, animFolder,
+                    $"fotograma-{i}-Photoroom.png");
+                if (System.IO.File.Exists(path))
+                    rudderTrimFrames[i - 1] = Image.FromFile(path);
+            }
+            for (int i = 1; i <= RUDDER_TRIM_FRAME_COUNT; i++)
+            {
+                string path = System.IO.Path.Combine(
+                    AppDomain.CurrentDomain.BaseDirectory, animFolder,
+                    $"fotograma-{i}-Photoroom.png");
+                if (System.IO.File.Exists(path))
+                {
+                    using var src = Image.FromFile(path);
+                    var rotated = new Bitmap(src.Height, src.Width);
+                    using var g = Graphics.FromImage(rotated);
+                    g.TranslateTransform(rotated.Width / 2f, rotated.Height / 2f);
+                    g.RotateTransform(90);
+                    g.DrawImage(src, -src.Width / 2f, -src.Height / 2f);
+                    trimFrames[i - 1] = rotated;
+                }
+            }
 
             var asm = System.Reflection.Assembly.GetExecutingAssembly();
             using var bgStream = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_1000 4K panel_f.png");
@@ -2959,7 +2993,12 @@ namespace SimConnect3
                 }
                 if (elevatorTrim != s1.elevator_trim)
                 {
+                    double delta = s1.elevator_trim - elevatorTrim;
                     elevatorTrim = s1.elevator_trim;
+
+                    float frameDelta = (float)(delta / 2.0) * TRIM_FRAME_COUNT * 35f;
+                    trimFramePos -= frameDelta;
+                    trimFramePos = ((trimFramePos % TRIM_FRAME_COUNT) + TRIM_FRAME_COUNT) % TRIM_FRAME_COUNT;
 
                     if (pbMain.IsHandleCreated)
                         pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
@@ -2967,7 +3006,13 @@ namespace SimConnect3
                 double newRudderTrim = s1.rudder_trim / 100.0;
                 if (rudderTrim != newRudderTrim)
                 {
+                    double delta = newRudderTrim - rudderTrim;
                     rudderTrim = newRudderTrim;
+
+                    float frameDelta = (float)(delta / 2.0) * RUDDER_TRIM_FRAME_COUNT * 35f;
+                    rudderTrimFramePos -= frameDelta;
+                    rudderTrimFramePos = ((rudderTrimFramePos % RUDDER_TRIM_FRAME_COUNT) + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
+
                     if (pbMain.IsHandleCreated)
                         pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
                 }
@@ -3368,31 +3413,21 @@ namespace SimConnect3
             if (flapsAnimDurationSec > 0f)
                 pbMain.Invalidate();
 
-            // TRIM WHEEL IMAGE VERTICAL — segueix trimZone, rotat 90°
-            if (trimWheelImg != null)
+            // TRIM WHEEL IMAGE VERTICAL — segueix trimZone
             {
-                float imgW = trimWheelImg.Width;
-                float imgH = trimWheelImg.Height;
-                float scale = trimZone.Height / imgW;  // altura resultant = trimZone.Height
-                float drawW = imgW * scale;            // = trimZone.Height
-                float drawH = imgH * scale;            // amplada resultant (del ratio)
-                float cx = trimZone.X + trimZone.Width / 2f;
-                float cy = trimZone.Y + trimZone.Height / 2f;
-                var state = e.Graphics.Save();
-                e.Graphics.TranslateTransform(cx, cy);
-                e.Graphics.RotateTransform(90);
-                e.Graphics.DrawImage(trimWheelImg, -drawW / 2, -drawH / 2, drawW, drawH);
-                e.Graphics.Restore(state);
+                int frameIdx = (int)trimFramePos % RUDDER_TRIM_FRAME_COUNT;
+                var frameImg = trimFrames[frameIdx];
+                if (frameImg != null)
+                {
+                    int th = (int)(trimZone.Height * 0.95f);
+                    int tw = (int)(th * (double)frameImg.Width / frameImg.Height);
+                    int tx = trimZone.X + (trimZone.Width - tw) / 2;
+                    int ty = trimZone.Y + (trimZone.Height - th) / 2;
+                    e.Graphics.DrawImage(frameImg, tx, ty, tw, th);
+                }
             }
 
-            // TRIM ARROWS
-            if (trimDragging && trimLastDir != 0)
-            {
-                if (trimLastDir > 0)
-                    DrawTrimArrow(e.Graphics, trimArrowDownPos.X, trimArrowDownPos.Y, -1);
-                else
-                    DrawTrimArrow(e.Graphics, trimArrowUpPos.X, trimArrowUpPos.Y, +1);
-            }
+
 
             // TRIM CIRCLE — rang absolut 1537..1976 (+35%)
             int trimYUp = 1537;
@@ -3412,12 +3447,17 @@ namespace SimConnect3
             }
 
             // TRIM WHEEL IMAGE — segueix rudderTrimZone
-            if (trimWheelImg != null)
             {
-                int tw = rudderTrimZone.Width;
-                int th = (int)(tw * (double)trimWheelImg.Height / trimWheelImg.Width);
-                int ty = rudderTrimZone.Y + (rudderTrimZone.Height - th) / 2;
-                e.Graphics.DrawImage(trimWheelImg, rudderTrimZone.X, ty, tw, th);
+                int frameIdx = (int)rudderTrimFramePos % RUDDER_TRIM_FRAME_COUNT;
+                var frameImg = rudderTrimFrames[frameIdx];
+                if (frameImg != null)
+                {
+                    int tw = (int)(rudderTrimZone.Width * 0.95f);
+                    int th = (int)(tw * (double)frameImg.Height / frameImg.Width);
+                    int tx = rudderTrimZone.X + (rudderTrimZone.Width - tw) / 2;
+                    int ty = rudderTrimZone.Y + (rudderTrimZone.Height - th) / 2;
+                    e.Graphics.DrawImage(frameImg, tx, ty, tw, th);
+                }
             }
 
             // RUDDER TRIM ARROWS
@@ -3878,6 +3918,10 @@ namespace SimConnect3
                 trimAccumulatedDelta += deltaY;
                 while (trimAccumulatedDelta >= TRIM_TICK_PIXELS)  { SendTrimTick(+1); trimAccumulatedDelta -= TRIM_TICK_PIXELS; }
                 while (trimAccumulatedDelta <= -TRIM_TICK_PIXELS) { SendTrimTick(-1); trimAccumulatedDelta += TRIM_TICK_PIXELS; }
+
+                trimFramePos += deltaY / TRIM_PIXELS_PER_FRAME;
+                trimFramePos = ((trimFramePos % RUDDER_TRIM_FRAME_COUNT)
+                               + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
                 pbMain.Invalidate();
             }
             if (rudderTrimDragging)
@@ -3889,6 +3933,10 @@ namespace SimConnect3
                 rudderTrimAccumulatedDelta += deltaX;
                 while (rudderTrimAccumulatedDelta >= RUDDER_TRIM_TICK_PIXELS)  { SendRudderTrimTick(+1); rudderTrimAccumulatedDelta -= RUDDER_TRIM_TICK_PIXELS; }
                 while (rudderTrimAccumulatedDelta <= -RUDDER_TRIM_TICK_PIXELS) { SendRudderTrimTick(-1); rudderTrimAccumulatedDelta += RUDDER_TRIM_TICK_PIXELS; }
+
+                rudderTrimFramePos -= deltaX / RUDDER_TRIM_PIXELS_PER_FRAME;
+                rudderTrimFramePos = ((rudderTrimFramePos % RUDDER_TRIM_FRAME_COUNT)
+                                     + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
                 pbMain.Invalidate();
             }
         }
