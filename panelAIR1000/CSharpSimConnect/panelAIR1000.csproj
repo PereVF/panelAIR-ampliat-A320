@@ -69,6 +69,39 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-1-Photoroom.png"><LogicalName>panelAIR1000.trimframe1.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-2-Photoroom.png"><LogicalName>panelAIR1000.trimframe2.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-3-Photoroom.png"><LogicalName>panelAIR1000.trimframe3.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-4-Photoroom.png"><LogicalName>panelAIR1000.trimframe4.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-5-Photoroom.png"><LogicalName>panelAIR1000.trimframe5.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-6-Photoroom.png"><LogicalName>panelAIR1000.trimframe6.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-7-Photoroom.png"><LogicalName>panelAIR1000.trimframe7.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-8-Photoroom.png"><LogicalName>panelAIR1000.trimframe8.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-9-Photoroom.png"><LogicalName>panelAIR1000.trimframe9.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-10-Photoroom.png"><LogicalName>panelAIR1000.trimframe10.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-11-Photoroom.png"><LogicalName>panelAIR1000.trimframe11.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-12-Photoroom.png"><LogicalName>panelAIR1000.trimframe12.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-13-Photoroom.png"><LogicalName>panelAIR1000.trimframe13.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-14-Photoroom.png"><LogicalName>panelAIR1000.trimframe14.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-15-Photoroom.png"><LogicalName>panelAIR1000.trimframe15.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-16-Photoroom.png"><LogicalName>panelAIR1000.trimframe16.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-17-Photoroom.png"><LogicalName>panelAIR1000.trimframe17.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-18-Photoroom.png"><LogicalName>panelAIR1000.trimframe18.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-19-Photoroom.png"><LogicalName>panelAIR1000.trimframe19.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-20-Photoroom.png"><LogicalName>panelAIR1000.trimframe20.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-21-Photoroom.png"><LogicalName>panelAIR1000.trimframe21.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-22-Photoroom.png"><LogicalName>panelAIR1000.trimframe22.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-23-Photoroom.png"><LogicalName>panelAIR1000.trimframe23.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-24-Photoroom.png"><LogicalName>panelAIR1000.trimframe24.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-25-Photoroom.png"><LogicalName>panelAIR1000.trimframe25.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-26-Photoroom.png"><LogicalName>panelAIR1000.trimframe26.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-27-Photoroom.png"><LogicalName>panelAIR1000.trimframe27.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-28-Photoroom.png"><LogicalName>panelAIR1000.trimframe28.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-29-Photoroom.png"><LogicalName>panelAIR1000.trimframe29.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\animació roda de trim\fotograma-30-Photoroom.png"><LogicalName>panelAIR1000.trimframe30.png</LogicalName></EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="Microsoft.FlightSimulator.SimConnect.dll">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>

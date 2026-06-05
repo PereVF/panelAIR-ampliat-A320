@@ -961,23 +961,19 @@ namespace SimConnect3
             imglightOn = panelAIR1000.Properties.Resources.light_on;
             trimWheelImg = LoadOverlayImage("trim wheel.png");
 
-            string animFolder = @"Resources\animació roda de trim";
+            var asmFrames = System.Reflection.Assembly.GetExecutingAssembly();
             for (int i = 1; i <= RUDDER_TRIM_FRAME_COUNT; i++)
             {
-                string path = System.IO.Path.Combine(
-                    AppDomain.CurrentDomain.BaseDirectory, animFolder,
-                    $"fotograma-{i}-Photoroom.png");
-                if (System.IO.File.Exists(path))
-                    rudderTrimFrames[i - 1] = Image.FromFile(path);
+                using var stream = asmFrames.GetManifestResourceStream($"panelAIR1000.trimframe{i}.png");
+                if (stream != null)
+                    rudderTrimFrames[i - 1] = Image.FromStream(stream);
             }
             for (int i = 1; i <= RUDDER_TRIM_FRAME_COUNT; i++)
             {
-                string path = System.IO.Path.Combine(
-                    AppDomain.CurrentDomain.BaseDirectory, animFolder,
-                    $"fotograma-{i}-Photoroom.png");
-                if (System.IO.File.Exists(path))
+                using var stream = asmFrames.GetManifestResourceStream($"panelAIR1000.trimframe{i}.png");
+                if (stream != null)
                 {
-                    using var src = Image.FromFile(path);
+                    using var src = Image.FromStream(stream);
                     var rotated = new Bitmap(src.Height, src.Width);
                     using var g = Graphics.FromImage(rotated);
                     g.TranslateTransform(rotated.Width / 2f, rotated.Height / 2f);
@@ -1332,7 +1328,7 @@ namespace SimConnect3
             this.Controls.Add(_msfsEndBtn); _msfsEndBtn.BringToFront();
 
             // ── Botó FOCUS MSFS ──────────────────────────────────────────
-            _focusBtn = MakeGroupBtn("FOCUS", 220, 63);
+            _focusBtn = MakeGroupBtn("MSFS FOCUS", 220, 63);
             _focusBtn.Location = new Point(1920 + 120, 1380);
             _focusBtn.Click += (s, e) =>
             {
@@ -3460,14 +3456,7 @@ namespace SimConnect3
                 }
             }
 
-            // RUDDER TRIM ARROWS
-            if (rudderTrimDragging && rudderTrimLastDir != 0)
-            {
-                if (rudderTrimLastDir > 0)
-                    DrawRudderTrimArrow(e.Graphics, rudderTrimArrowRightPos.X, rudderTrimArrowRightPos.Y, +1);
-                else
-                    DrawRudderTrimArrow(e.Graphics, rudderTrimArrowLeftPos.X,  rudderTrimArrowLeftPos.Y,  -1);
-            }
+
 
             // RUDDER TRIM INDICATOR — track horitzontal
             {
