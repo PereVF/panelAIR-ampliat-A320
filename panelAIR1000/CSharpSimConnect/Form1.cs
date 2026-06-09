@@ -341,6 +341,8 @@ namespace SimConnect3
         private Image imglightOff;
         private Image imglightOn;
         private Image? _bgImage;
+        private Image? _bgG3000Image;
+        private bool   _g3000Active = false;
         private Image? trimWheelImg;
 
         // Multiplicador per HDG segons velocitat de gir (cps) + límit de finestra
@@ -805,6 +807,10 @@ namespace SimConnect3
         private bool  _engineStopBtnDragging;
         private Point _engineStopBtnDragOffset;
 
+        private System.Windows.Forms.Button _g3000Btn = null!;
+        private bool  _g3000BtnDragging;
+        private Point _g3000BtnDragOffset;
+
         private UiButton? calibDragBtn = null;
         private AudioTriangle? calibDragTri = null;
         private UiButton? calibSelectedBtn = null;
@@ -986,6 +992,8 @@ namespace SimConnect3
             var asm = System.Reflection.Assembly.GetExecutingAssembly();
             using var bgStream = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_1000 4K panel_f.png");
             if (bgStream != null) _bgImage = Image.FromStream(bgStream);
+            using var bgG3000Stream = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_3000 4K panel_a.png");
+            if (bgG3000Stream != null) _bgG3000Image = Image.FromStream(bgG3000Stream);
 
             pbMain.Paint += PbMain_Paint;
             pbMain.MouseDown += PbMain_MouseDown;
@@ -1096,6 +1104,33 @@ namespace SimConnect3
             this.Controls.Add(_tactileBtn);
             _tactileBtn.BringToFront();
 
+            _g3000Btn = MakeGroupBtn("G3000 panel", 363, 63);
+            _g3000Btn.Location = new Point(3477, 1300);
+            _g3000Btn.Click += (s, e) =>
+            {
+                if (calibrationMode) return;
+                _g3000Active = !_g3000Active;
+                _g3000Btn.BackColor = _g3000Active ? Color.LimeGreen : Color.Black;
+                if (_g3000Active) ApplyG3000Region(); else ApplyPfdRegion();
+                pbMain.Invalidate();
+            };
+            _g3000Btn.MouseDown += (s, e) =>
+            {
+                if (!calibrationMode) return;
+                _g3000BtnDragging = true;
+                _g3000BtnDragOffset = e.Location;
+            };
+            _g3000Btn.MouseMove += (s, e) =>
+            {
+                if (!_g3000BtnDragging) return;
+                var screenPt = _g3000Btn.PointToScreen(e.Location);
+                var formPt = this.PointToClient(screenPt);
+                _g3000Btn.Location = new Point(formPt.X - _g3000BtnDragOffset.X, formPt.Y - _g3000BtnDragOffset.Y);
+            };
+            _g3000Btn.MouseUp += (s, e) => { _g3000BtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            this.Controls.Add(_g3000Btn);
+            _g3000Btn.BringToFront();
+
             closeButton.MouseDown += (s, e) =>
             {
                 if (!calibrationMode) return;
@@ -1176,6 +1211,7 @@ namespace SimConnect3
                 _focusBtn.Visible      = _panelVisible; _focusBtn.Enabled      = _panelVisible;
                 _engineStartBtn.Visible = _panelVisible; _engineStartBtn.Enabled = _panelVisible;
                 _engineStopBtn.Visible  = _panelVisible; _engineStopBtn.Enabled  = _panelVisible;
+                _g3000Btn.Visible       = _panelVisible; _g3000Btn.Enabled       = _panelVisible;
             };
             _gearBtn.MouseDown += (s, e) =>
             {
@@ -1424,6 +1460,7 @@ namespace SimConnect3
             _focusBtn.Visible      = false; _focusBtn.Enabled      = false;
             _engineStartBtn.Visible = false; _engineStartBtn.Enabled = false;
             _engineStopBtn.Visible  = false; _engineStopBtn.Enabled  = false;
+            _g3000Btn.Visible       = false; _g3000Btn.Enabled       = false;
             //this.TopMost = true;
             this.Load += frmMain_Load;
             //EnableFormDragging(this);
@@ -1845,6 +1882,26 @@ namespace SimConnect3
             formRegion.Exclude(mfdHole);
 
             // Aplica la regió al Form
+            this.Region = formRegion;
+        }
+
+        private void ApplyG3000Region()
+        {
+            Region formRegion = new Region(new Rectangle(
+                0, 0, this.Width, this.Height));
+
+            // FORAT PFD
+            formRegion.Exclude(new Rectangle(20, 20, 1850, 1200));
+
+            // FORAT MFD
+            formRegion.Exclude(new Rectangle(1970, 20, 1850, 1200));
+
+            // FORAT TSC esquerra
+            formRegion.Exclude(new Rectangle(1880, 1442, 870, 546));
+
+            // FORAT TSC dreta
+            formRegion.Exclude(new Rectangle(2870, 1442, 870, 546));
+
             this.Region = formRegion;
         }
 
@@ -3326,8 +3383,11 @@ namespace SimConnect3
         {
             try
             {
-            if (_bgImage != null)
-                e.Graphics.DrawImage(_bgImage, pbMain.ClientRectangle);
+            var activeBg = (_g3000Active && _bgG3000Image != null) ? _bgG3000Image : _bgImage;
+            if (activeBg != null)
+                e.Graphics.DrawImage(activeBg, pbMain.ClientRectangle);
+
+            if (_g3000Active) return;
 
             // --- AUDIO TRIANGLES ---
             foreach (var tri in audioTriangles)
@@ -3686,6 +3746,7 @@ namespace SimConnect3
         private void PbMain_MouseDown(object? sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) return;
+            if (_g3000Active) return;
 
             if (calibrationMode)
             {
