@@ -4,7 +4,11 @@
       "Bash(dotnet build *)",
       "Bash(mkdir \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\.vscode\")",
       "Bash(Copy-Item \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\panelAIR1000\\\\CSharpSimConnect\\\\Resources\\\\Parking Brake switch.png\" \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\panelAIR1000\\\\CSharpSimConnect\\\\bin\\\\x64\\\\Debug\\\\net6.0-windows7.0\\\\Resources\\\\Parking Brake switch.png\")",
-      "PowerShell(Copy-Item \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\panelAIR1000\\\\CSharpSimConnect\\\\Resources\\\\Parking Brake switch.png\" \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\panelAIR1000\\\\CSharpSimConnect\\\\bin\\\\x64\\\\Debug\\\\net6.0-windows7.0\\\\Resources\\\\Parking Brake switch.png\")"
+      "PowerShell(Copy-Item \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\panelAIR1000\\\\CSharpSimConnect\\\\Resources\\\\Parking Brake switch.png\" \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\panelAIR1000\\\\CSharpSimConnect\\\\bin\\\\x64\\\\Debug\\\\net6.0-windows7.0\\\\Resources\\\\Parking Brake switch.png\")",
+      "Bash(cat)",
+      "Read(//tmp/**)",
+      "Bash(dotnet run *)",
+      "PowerShell(Stop-Process -Id 28512 -Force)"
     ],
     "additionalDirectories": [
       "c:\\Users\\usuario\\Desktop\\panelAIR1000-j"

@@ -401,6 +401,7 @@ namespace SimConnect3
         [DllImport("user32.dll")]
         private static extern IntPtr GetForegroundWindow();
 
+
         [DllImport("user32.dll")]
         private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
 
@@ -422,7 +423,6 @@ namespace SimConnect3
         private const byte VK_ESCAPE       = 0x1B;
         private const uint KEYEVENTF_KEYUP      = 0x0002;
 
-        private System.Windows.Forms.Timer hideTimer;
         private Struct1 lastData;
 
         private int nav1SwapCnt = 0; // comptador B5 (NAV1_SWAP)
@@ -811,6 +811,12 @@ namespace SimConnect3
         private bool  _g3000BtnDragging;
         private Point _g3000BtnDragOffset;
 
+        private bool  _tb21Dragging;
+        private Point _tb21DragOffset;
+
+        private Label? _tipLbl;
+
+
         private UiButton? calibDragBtn = null;
         private AudioTriangle? calibDragTri = null;
         private UiButton? calibSelectedBtn = null;
@@ -992,7 +998,7 @@ namespace SimConnect3
             var asm = System.Reflection.Assembly.GetExecutingAssembly();
             using var bgStream = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_1000 4K panel_f.png");
             if (bgStream != null) _bgImage = Image.FromStream(bgStream);
-            using var bgG3000Stream = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_3000 4K panel_a.png");
+            using var bgG3000Stream = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_3000 4K panel_g.png");
             if (bgG3000Stream != null) _bgG3000Image = Image.FromStream(bgG3000Stream);
 
             pbMain.Paint += PbMain_Paint;
@@ -1051,7 +1057,7 @@ namespace SimConnect3
             this.Size = screen4k.Bounds.Size;
 
             ApplyPfdRegion();
-            this.TopMost = false;
+            this.TopMost = true;
 
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
             {
@@ -1104,6 +1110,16 @@ namespace SimConnect3
             this.Controls.Add(_tactileBtn);
             _tactileBtn.BringToFront();
 
+            textBox21.MouseDown += (s, e) => { if (!calibrationMode) return; _tb21Dragging = true; _tb21DragOffset = e.Location; };
+            textBox21.MouseMove += (s, e) =>
+            {
+                if (!_tb21Dragging) return;
+                var screenPt = textBox21.PointToScreen(e.Location);
+                var formPt = this.PointToClient(screenPt);
+                textBox21.Location = new Point(formPt.X - _tb21DragOffset.X, formPt.Y - _tb21DragOffset.Y);
+            };
+            textBox21.MouseUp += (s, e) => { _tb21Dragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+
             _g3000Btn = MakeGroupBtn("G3000 panel", 363, 63);
             _g3000Btn.Location = new Point(3477, 1300);
             _g3000Btn.Click += (s, e) =>
@@ -1111,7 +1127,53 @@ namespace SimConnect3
                 if (calibrationMode) return;
                 _g3000Active = !_g3000Active;
                 _g3000Btn.BackColor = _g3000Active ? Color.LimeGreen : Color.Black;
-                if (_g3000Active) ApplyG3000Region(); else ApplyPfdRegion();
+                if (_g3000Active)
+                {
+                    ApplyG3000Region();
+                }
+                else
+                {
+                    ApplyPfdRegion();
+                    if (_tipLbl != null) { this.Controls.Remove(_tipLbl); _tipLbl.Dispose(); _tipLbl = null; }
+                    Task.Run(async () =>
+                    {
+                        await Task.Delay(1000);
+                        this.BeginInvoke(new Action(() =>
+                        {
+                            _tipLbl = new Label
+                            {
+                                Text = "If you no longer need G3000 mode, close the MSFS G3000 pop‑out windows to restore full panel functionality.  [10]",
+                                AutoSize = false,
+                                Size = new Size(1440, 120),
+                                Location = new Point((3840 - 1440) / 2, (2160 - 120) / 2 + 50),
+                                TextAlign = ContentAlignment.MiddleCenter,
+                                Font = new Font("Segoe UI", 26f),
+                                ForeColor = Color.White,
+                                BackColor = Color.DarkRed
+                            };
+                            this.Controls.Add(_tipLbl);
+                            _tipLbl.BringToFront();
+                        }));
+                        for (int i = 9; i >= 0; i--)
+                        {
+                            await Task.Delay(1000);
+                            this.BeginInvoke(new Action(() =>
+                            {
+                                if (_tipLbl == null) return;
+                                if (i <= 0)
+                                {
+                                    this.Controls.Remove(_tipLbl);
+                                    _tipLbl.Dispose();
+                                    _tipLbl = null;
+                                }
+                                else
+                                {
+                                    _tipLbl.Text = "If you no longer need G3000 mode, close the MSFS G3000 pop‑out windows to restore full panel functionality.  [" + i + "]";
+                                }
+                            }));
+                        }
+                    });
+                }
                 pbMain.Invalidate();
             };
             _g3000Btn.MouseDown += (s, e) =>
@@ -1840,10 +1902,15 @@ namespace SimConnect3
             // Timer global per apagar ombres + animació flaps SW
             uiSurfaceTimer.Tick += (s, e) =>
             {
-                foreach (var srf in uiSurfaces)
-                    srf.RefreshVisual();
-
-
+                var now = DateTime.UtcNow;
+                bool needsRepaint = flapsAnimDurationSec > 0f;
+                if (!needsRepaint)
+                    foreach (var srf in uiSurfaces)
+                        foreach (var b in srf.Buttons)
+                            if (b.IsVisuallyPressed(now)) { needsRepaint = true; break; }
+                if (needsRepaint)
+                    foreach (var srf in uiSurfaces)
+                        srf.RefreshVisual();
             };
 
             uiSurfaceTimer.Start();
@@ -1891,21 +1958,19 @@ namespace SimConnect3
                 0, 0, this.Width, this.Height));
 
             // FORAT PFD
-            formRegion.Exclude(new Rectangle(20, 20, 1850, 1200));
+            formRegion.Exclude(new Rectangle(200, 458, 1595, 995));
 
-            // FORAT MFD
-            formRegion.Exclude(new Rectangle(1970, 20, 1850, 1200));
+            // FORAT MFD (retallat per no tapar els botons de l'engranatge a X=3477)
+            formRegion.Exclude(new Rectangle(2040, 459, 1437, 991));
 
             // FORAT TSC esquerra
-            formRegion.Exclude(new Rectangle(1880, 1442, 870, 546));
+            formRegion.Exclude(new Rectangle(1867, 1653, 721, 442));
 
             // FORAT TSC dreta
-            formRegion.Exclude(new Rectangle(2870, 1442, 870, 546));
+            formRegion.Exclude(new Rectangle(2821, 1653, 724, 442));
 
             this.Region = formRegion;
         }
-
-
 
         private bool HasDataChanged(Struct1 newData)
         {
@@ -2032,30 +2097,6 @@ namespace SimConnect3
                 simReconnectTimer.Start();
             }
 
-            hideTimer = new System.Windows.Forms.Timer();
-            hideTimer.Interval = 5000;
-            hideTimer.Tick += (s, ev) =>
-            {
-                if (!checkBox1.Checked)
-                {
-                    this.ShowInTaskbar = true;
-                    this.WindowState = FormWindowState.Minimized;
-                }
-                hideTimer.Stop();
-            };
-
-
-
-            //this.ShowInTaskbar = true;
-            //this.WindowState = FormWindowState.Normal;
-            //this.Activate();
-            //this.BringToFront();
-            checkBox1.Checked = true;
-            //hideTimer.Start();
-            checkBox1.CheckedChanged += checkBox1_CheckedChanged;
-            if (!checkBox1.Checked) hideTimer.Start();
-
-
             this.Text = "panelAIR1000";
 
             if (enableHidReading)
@@ -2090,65 +2131,8 @@ namespace SimConnect3
             stopHidThread4 = true;
             stopHidThread5 = true;
         }
-        private void checkBox1_CheckedChanged(object sender, EventArgs e)
-        {
-            if (!checkBox1.Checked)
-            {
-                // Reinicia el temporitzador per amagar la finestra en 5 segons
-                hideTimer.Stop();
-                hideTimer.Start();
-            }
-            else
-            {
-                // Si es torna a marcar, assegurem que la finestra es mostra
-                this.ShowInTaskbar = true;
-                this.WindowState = FormWindowState.Normal;
-                this.Activate();
-                this.BringToFront();
-                hideTimer.Stop();
-            }
-        }
-
         private void UpdateRotAIRStatus()
         {
-            // Type-1
-            if (!isType1GCConnected && !isType1ANAConnected)
-            {
-                textBox22.Text = "disconnected";
-                textBox22.ForeColor = Color.Orange;
-            }
-            else if (isType1GCConnected)
-            {
-                textBox22.Text = "GC mode";
-                textBox22.ForeColor = Color.LimeGreen;
-            }
-            else if (isType1ANAConnected)
-            {
-                textBox22.Text = "ANA mode";
-                textBox22.ForeColor = Color.LimeGreen;
-            }
-
-            // Type-2
-            if (!isType2GCConnected && !isType2ANAConnected && !isType2GCAMConnected)
-            {
-                textBox23.Text = "disconnected";
-                textBox23.ForeColor = Color.Orange;
-            }
-            else if (isType2GCAMConnected)
-            {
-                textBox23.Text = "GC (AM) mode";
-                textBox23.ForeColor = Color.Red;
-            }
-            else if (isType2GCConnected)
-            {
-                textBox23.Text = "GC mode";
-                textBox23.ForeColor = Color.LimeGreen;
-            }
-            else if (isType2ANAConnected)
-            {
-                textBox23.Text = "ANA mode";
-                textBox23.ForeColor = Color.LimeGreen;
-            }
         }
 
         private void ConnectToSimConnect()
@@ -3351,19 +3335,6 @@ namespace SimConnect3
 
                 if (hasChanged)
                 {
-                    //this.ShowInTaskbar = true;
-                    //this.WindowState = FormWindowState.Normal;
-                    //this.Activate();
-                    //this.BringToFront();
-                    if (!checkBox1.Checked)
-                    {
-                        hideTimer.Stop();
-                        hideTimer.Start();
-                    }
-                    else
-                    {
-                        hideTimer.Stop(); // si és “Always visible”, no programem cap ocultació
-                    }
 
 
 
@@ -4405,15 +4376,7 @@ namespace SimConnect3
             {
                 if (e.Button != MouseButtons.Left) return;
 
-                // 1) No fem drag si l’origen del clic és el closeButton o el checkBox1
-                if (s == closeButton || s == checkBox1) return;
-
-                // 2) Salvaguarda extra: si el cursor és DINS del checkBox1, tampoc fem drag
-                if (checkBox1 != null && checkBox1.Visible && checkBox1.Enabled)
-                {
-                    var cbScreenRect = new Rectangle(checkBox1.PointToScreen(Point.Empty), checkBox1.Size);
-                    if (cbScreenRect.Contains(Cursor.Position)) return;
-                }
+                if (s == closeButton) return;
 
                 ReleaseCapture();
                 SendMessage(this.Handle, WM_NCLBUTTONDOWN, HTCAPTION, 0);
@@ -4422,8 +4385,7 @@ namespace SimConnect3
             foreach (Control child in control.Controls)
             {
                 if (child == pbMain) continue;
-                // No enganxem el handler de drag ni al closeButton ni al checkBox1
-                if (child == closeButton || child == checkBox1) continue;
+                if (child == closeButton) continue;
 
                 EnableFormDragging(child);
             }
