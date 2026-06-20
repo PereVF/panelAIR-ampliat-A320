@@ -813,6 +813,7 @@ namespace SimConnect3
 
         private bool  _tb21Dragging;
         private Point _tb21DragOffset;
+        private DateTime _lastRepaint = DateTime.MinValue;
 
         private Label? _tipLbl;
 
@@ -2975,6 +2976,7 @@ namespace SimConnect3
             if (data.dwRequestID == (uint)REQUESTS.Request1)
             {
                 Struct1 s1 = (Struct1)data.dwData[0];
+                bool needsRepaint = false;
                 bool newCom1Active = (s1.com_transmit_1 & 1) != 0;
                 bool newCom2Active = (s1.com_transmit_2 & 1) != 0;
                 bool newComReceiveAll = (s1.com_receive_all & 1) != 0;
@@ -3002,8 +3004,7 @@ namespace SimConnect3
                 if (newGearHandleUp != lgearHandleUp)
                 {
                     lgearHandleUp = newGearHandleUp;
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 bool newParkingbrake = (s1.read_parking_brake & 1) != 0;
 
@@ -3015,18 +3016,14 @@ namespace SimConnect3
                 {
                     flapsNumPositions = s1.flaps_num_handle_positions;
 
-                    // forcem repintat cockpit right
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (flapsPoscPalanca != s1.flaps_real_handle_position)
                 {
                     flapsPoscPalanca = s1.flaps_real_handle_position;
 
                     //flapsTimer.Start();
-                    // forcem repintat cockpit right
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (elevatorTrim != s1.elevator_trim)
                 {
@@ -3037,8 +3034,7 @@ namespace SimConnect3
                     trimFramePos -= frameDelta;
                     trimFramePos = ((trimFramePos % TRIM_FRAME_COUNT) + TRIM_FRAME_COUNT) % TRIM_FRAME_COUNT;
 
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 double newRudderTrim = s1.rudder_trim / 100.0;
                 if (rudderTrim != newRudderTrim)
@@ -3050,140 +3046,108 @@ namespace SimConnect3
                     rudderTrimFramePos -= frameDelta;
                     rudderTrimFramePos = ((rudderTrimFramePos % RUDDER_TRIM_FRAME_COUNT) + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
 
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
 
                 if (newCom1Active != com1Active)
                 {
                     com1Active = newCom1Active;
 
-                    // força repintat immediat del pbAUDIO
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newCom2Active != com2Active)
                 {
                     com2Active = newCom2Active;
 
-                    // força repintat immediat del pbAUDIO
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newComReceiveAll != comReceiveAll)
                 {
                     comReceiveAll = newComReceiveAll;
 
-                    // força repintat immediat del pbAUDIO
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newDmeActive != dmeActive)
                 {
                     dmeActive = newDmeActive;
 
-                    // força repintat immediat del pbAUDIO
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newNav1Active != nav1Active)
                 {
                     nav1Active = newNav1Active;
 
-                    // força repintat immediat del pbAUDIO
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newSpkrActive != spkrActive)
                 {
                     spkrActive = newSpkrActive;
 
-                    // força repintat immediat del pbAUDIO
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newMkrMute != mkrMute)
                 {
                     mkrMute = newMkrMute;
 
-                    // força repintat immediat del pbAUDIO
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newAdfActive != adfMute)
                 {
                     adfMute = newAdfActive;
 
-                    // força repintat immediat del pbAUDIO
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newNav2Active != nav2Active)
                 {
                     nav2Active = newNav2Active;
 
-                    // força repintat immediat del pbAUDIO
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newBeacon != beaconActive )
                 {
                     beaconActive = newBeacon;
 
-                    // força repintat immediat del pbcokpitright
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newLand != landActive)
                 {
                     landActive = newLand;
 
-                    // força repintat immediat del pbcokpitright
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newTaxi != taxiActive)
                 {
                     taxiActive = newTaxi;
 
-                    // força repintat immediat del pbcokpitright
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newNav != navActive)
                 {
                     navActive = newNav;
 
-                    // força repintat immediat del pbcokpitright
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newStrobe != strobeActive)
                 {
                     strobeActive = newStrobe;
 
-                    // força repintat immediat del pbcokpitright
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newRecogn != recognActive)
                 {
                     recognActive = newRecogn;
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newPanelLight != panelLightActive)
                 {
                     panelLightActive = newPanelLight;
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 bool newDeice = (s1.read_deice & 1) != 0;
                 if (newDeice != deiceActive)
                 {
                     deiceActive = newDeice;
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 int newCowlL = s1.read_cowlflap_l < 10 ? 0 : s1.read_cowlflap_l < 70 ? 1 : 2;
                 int newCowlR = s1.read_cowlflap_r < 10 ? 0 : s1.read_cowlflap_r < 70 ? 1 : 2;
@@ -3191,80 +3155,67 @@ namespace SimConnect3
                 {
                     cowlFlapL = newCowlL;
                     cowlFlapR = newCowlR;
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newPitotheat != pitotheatActive)
                 {
                     pitotheatActive = newPitotheat;
 
-                    // força repintat immediat del pbcokpitright
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newFuelpump1 != fuelpump1Active)
                 {
                     fuelpump1Active = newFuelpump1;
 
-                    // força repintat immediat del pbcokpitright
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newFuelpump2 != fuelpump2Active)
                 {
                     fuelpump2Active = newFuelpump2;
 
-                    // força repintat immediat del pbcokpitright
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newParkingbrake != pbrakeActive)
                 {
                     pbrakeActive = newParkingbrake;
 
-                    // força repintat immediat del pbcokpitright
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 bool newMasterBatteryOff = s1.elec_master_battery == 0;
                 if (newMasterBatteryOff != masterBatteryOff)
                 {
                     masterBatteryOff = newMasterBatteryOff;
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 bool newAvionics1Off = s1.avionics_master_1 == 0;
                 if (newAvionics1Off != avionics1Off)
                 {
                     avionics1Off = newAvionics1Off;
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 bool newAvionics2Off = s1.avionics_master_2 == 0;
                 if (newAvionics2Off != avionics2Off)
                 {
                     avionics2Off = newAvionics2Off;
-                    if (pbMain.IsHandleCreated)
-                        pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 bool newAltGen1Off = s1.gen_master_alt_1 == 0;
                 bool newAltGen2Off = s1.gen_master_alt_2 == 0;
                 if (newAltGen1Off != altGen1Off)
                 {
                     altGen1Off = newAltGen1Off;
-                    if (pbMain.IsHandleCreated) pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 if (newAltGen2Off != altGen2Off)
                 {
                     altGen2Off = newAltGen2Off;
-                    if (pbMain.IsHandleCreated) pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                    needsRepaint = true;
                 }
                 bool newStarter1 = s1.starter1 != 0;
                 starter1Active = newStarter1;
-                pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                needsRepaint = true;
                 bool newStarter2 = s1.starter2 != 0;
                 starter2Active = newStarter2;
-                pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
                 int newIgn1Pos;
                 if      (s1.ign1_left == 0 && s1.ign1_right == 0 && s1.ign1_starter == 0) newIgn1Pos = 0; // OFF
                 else if (s1.ign1_left == 0 && s1.ign1_right == 1 && s1.ign1_starter == 0) newIgn1Pos = 1; // RIGHT
@@ -3272,7 +3223,7 @@ namespace SimConnect3
                 else if (s1.ign1_left == 1 && s1.ign1_right == 1 && s1.ign1_starter == 0) newIgn1Pos = 3; // BOTH
                 else if (s1.ign1_left == 1 && s1.ign1_right == 1 && s1.ign1_starter == 1) newIgn1Pos = 4; // START
                 else newIgn1Pos = ign1Pos; // mantenim l'últim valor conegut
-                if (newIgn1Pos != ign1Pos) { ign1Pos = newIgn1Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
+                if (newIgn1Pos != ign1Pos) { ign1Pos = newIgn1Pos; needsRepaint = true; }
                 int newIgn2Pos;
                 if      (s1.ign2_left == 0 && s1.ign2_right == 0 && s1.ign2_starter == 0) newIgn2Pos = 0;
                 else if (s1.ign2_left == 0 && s1.ign2_right == 1 && s1.ign2_starter == 0) newIgn2Pos = 1;
@@ -3280,7 +3231,7 @@ namespace SimConnect3
                 else if (s1.ign2_left == 1 && s1.ign2_right == 1 && s1.ign2_starter == 0) newIgn2Pos = 3;
                 else if (s1.ign2_left == 1 && s1.ign2_right == 1 && s1.ign2_starter == 1) newIgn2Pos = 4;
                 else newIgn2Pos = ign2Pos;
-                if (newIgn2Pos != ign2Pos) { ign2Pos = newIgn2Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
+                if (newIgn2Pos != ign2Pos) { ign2Pos = newIgn2Pos; needsRepaint = true; }
                 numEngines = s1.num_engines;
 
                 int newFuel1Pos, newFuel2Pos;
@@ -3317,8 +3268,8 @@ namespace SimConnect3
                     }
                 }
 
-                if (newFuel1Pos != fuel1Pos) { fuel1Pos = newFuel1Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
-                if (newFuel2Pos != fuel2Pos) { fuel2Pos = newFuel2Pos; pbMain.BeginInvoke(new Action(() => pbMain.Invalidate())); }
+                if (newFuel1Pos != fuel1Pos) { fuel1Pos = newFuel1Pos; needsRepaint = true; }
+                if (newFuel2Pos != fuel2Pos) { fuel2Pos = newFuel2Pos; needsRepaint = true; }
                 //dmeActive = s1.dme_read == 1; // o la variable que ja estàs llegint
 
                 //com1Tx = s1.com_transmit_1 == 1;
@@ -3340,6 +3291,12 @@ namespace SimConnect3
 
 
 
+                }
+
+                if (needsRepaint && pbMain.IsHandleCreated && (DateTime.UtcNow - _lastRepaint).TotalMilliseconds > 200)
+                {
+                    _lastRepaint = DateTime.UtcNow;
+                    pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
                 }
 
                 lastData = s1;
