@@ -433,7 +433,20 @@ namespace SimConnect3
             Struct1,
             XPNDR_SET,
             CameraState,
+            ElecSrcWrite,
+            ElecGenWrite,
+            ElecCrashbarWrite,
+            ElecStarterWrite,
         }
+
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct ElecSrcStruct { public double value; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct ElecGenStruct { public double value; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct ElecCrashbarStruct { public double value; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct ElecStarterStruct { public double value; }
 
         enum REQUESTS
         {
@@ -750,19 +763,25 @@ namespace SimConnect3
             public string TypeKey = "";
             public Point  BasePos;
             public float  ZoomWidth;
+            public float  ZoomHeight = 0;
             public Image? Img;
             public float AspectRatio => (Img != null && Img.Height > 0) ? (float)Img.Width / Img.Height : 1f;
-            public Rectangle Bounds => new Rectangle(BasePos.X, BasePos.Y,
-                (int)ZoomWidth, (int)(ZoomWidth / AspectRatio));
+            private int CalcH => ZoomHeight > 0 ? (int)ZoomHeight : (int)(ZoomWidth / AspectRatio);
+            public Rectangle Bounds => new Rectangle(BasePos.X, BasePos.Y, (int)ZoomWidth, CalcH);
             public Rectangle ResizeHandle => new Rectangle(
                 Bounds.Right - 12, Bounds.Bottom - 12, 16, 16);
             public int AnimOffsetY = 0;
             public Rectangle AnimatedBounds => new Rectangle(
-                BasePos.X, BasePos.Y + AnimOffsetY, (int)ZoomWidth, (int)(ZoomWidth / AspectRatio));
+                BasePos.X, BasePos.Y + AnimOffsetY, (int)ZoomWidth, CalcH);
             public Func<bool>? ShowWhen;
             public Action?     OnClick;
         }
         private List<OverlayImage> overlayImages = new();
+        private List<OverlayImage> g3000OverlayImages = new();
+        private double _elecSourceSwitch = 0;
+        private double _elecGeneratorSwitch = 0;
+        private double _elecCrashbar = 1;
+        private double _elecStarter = 2;
 
         private bool calibrationMode = false;
         private bool  _tactilebtnDragging = false;
@@ -833,7 +852,9 @@ namespace SimConnect3
         private Point calibDragOffset;
         private Point calibOverlayDragOffset;
         private float calibResizeStartWidth;
+        private float calibResizeStartHeight;
         private int   calibResizeStartMouseX;
+        private int   calibResizeStartMouseY;
         private readonly Rectangle calibExportBtnRect = new Rectangle(10, 10, 180, 50);
         private TextBox calibZoomBox = new TextBox();
 
@@ -931,6 +952,10 @@ namespace SimConnect3
             public int starter1;            // GENERAL ENG STARTER:1
             public int starter2;            // GENERAL ENG STARTER:2
             public double cameraState;
+            public double elecSourceSwitch; // L:XMLVAR_Elec_Source_Switch_State (0=OFF, 1=BATT, 2=GPU)
+            public double elecGeneratorSwitch; // L:XMLVAR_Elec_Generator_Switch_State
+            public double elecCrashbarState;   // L:XMLVAR_Elec_CrashBar_State (0=visible, 1=hidden)
+            public double elecStarter;         // L:XMLVAR_Starter (0=up, 1=center, 2=down)
 
 
 
@@ -999,7 +1024,7 @@ namespace SimConnect3
             var asm = System.Reflection.Assembly.GetExecutingAssembly();
             using var bgStream = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_1000 4K panel_f.png");
             if (bgStream != null) _bgImage = Image.FromStream(bgStream);
-            using var bgG3000Stream = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_3000 4K panel_g.png");
+            using var bgG3000Stream = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_3000 4K panel_i.png");
             if (bgG3000Stream != null) _bgG3000Image = Image.FromStream(bgG3000Stream);
 
             pbMain.Paint += PbMain_Paint;
@@ -1009,7 +1034,7 @@ namespace SimConnect3
 
             mainSurface = new UiSurface(pbMain);
             uiSurfaces.Add(mainSurface);
-            mainSurface.SuppressInput = () => calibrationMode;
+            mainSurface.SuppressInput = () => calibrationMode || _g3000Active;
 
             this.KeyPreview = true;
             this.KeyDown += (s, e) => { if (e.KeyCode == Keys.F12) { calibrationMode = !calibrationMode; calibSelectedBtn = null; calibSelectedTri = null; calibSelectedOverlay = null; calibZoomBox.Visible = false; pbMain.Invalidate(); } };
@@ -1024,7 +1049,7 @@ namespace SimConnect3
                         && int.TryParse(calibZoomBox.Text, out int w) && w > 10)
                     {
                         string tk = calibSelectedOverlay.TypeKey;
-                        foreach (var ov in overlayImages.Where(o => o.TypeKey == tk))
+                        foreach (var ov in overlayImages.Concat(g3000OverlayImages).Where(o => o.TypeKey == tk))
                             ov.ZoomWidth = w;
                         try { ExportCalibrationPositions(silent: true); } catch { }
                         pbMain.Invalidate();
@@ -1898,6 +1923,69 @@ namespace SimConnect3
                                           (gearRightPercent > 0 && gearRightPercent < 100)) },
             };
 
+            // G3000 overlay images
+            var swUpWhiteImg = LoadOverlayImage("switch-up-white.png");
+            var swCenterWhiteG3kImg = LoadOverlayImage("switch-center-white.png");
+            var swDownWhiteImg = LoadOverlayImage("switch-down-white.png");
+            var swUpBlackImg = LoadOverlayImage("switch-up-black.png");
+            var swCenterBlackImg = LoadOverlayImage("switch-center-black.png");
+            var swDownBlackImg = LoadOverlayImage("switch-down-black.png");
+            g3000OverlayImages = new List<OverlayImage>
+            {
+                new() { Name="G3K_ELECSRC_OFF",  TypeKey="G3K elec src", BasePos=new Point(100, 1500), ZoomWidth=75, Img=swDownWhiteImg,
+                        ShowWhen = () => _elecSourceSwitch < 0.5 },
+                new() { Name="G3K_ELECSRC_BATT", TypeKey="G3K elec src", BasePos=new Point(100, 1500), ZoomWidth=75, Img=swCenterWhiteG3kImg,
+                        ShowWhen = () => _elecSourceSwitch >= 0.5 && _elecSourceSwitch < 1.5 },
+                new() { Name="G3K_ELECSRC_GPU",  TypeKey="G3K elec src", BasePos=new Point(100, 1500), ZoomWidth=75, Img=swUpWhiteImg,
+                        ShowWhen = () => _elecSourceSwitch >= 1.5 },
+                new() { Name="G3K_ELECSRC_UP",   TypeKey="G3K elec click", BasePos=new Point(100, 1470), ZoomWidth=40, ZoomHeight=40,
+                        OnClick = () => { if (_elecCrashbar >= 0.5 && _elecSourceSwitch < 1.5) SetElecSourceSwitch(Math.Round(_elecSourceSwitch) + 1); } },
+                new() { Name="G3K_ELECSRC_DN",   TypeKey="G3K elec click", BasePos=new Point(100, 1540), ZoomWidth=40, ZoomHeight=40,
+                        OnClick = () => { if (_elecCrashbar >= 0.5 && _elecSourceSwitch > 0.5) SetElecSourceSwitch(Math.Round(_elecSourceSwitch) - 1); } },
+                new() { Name="G3K_ELECGEN_OFF",  TypeKey="G3K elec gen", BasePos=new Point(1225, 147), ZoomWidth=80, Img=swDownWhiteImg,
+                        ShowWhen = () => _elecGeneratorSwitch < 0.5 },
+                new() { Name="G3K_ELECGEN_BATT", TypeKey="G3K elec gen", BasePos=new Point(1225, 147), ZoomWidth=80, Img=swCenterWhiteG3kImg,
+                        ShowWhen = () => _elecGeneratorSwitch >= 0.5 && _elecGeneratorSwitch < 1.5 },
+                new() { Name="G3K_ELECGEN_GPU",  TypeKey="G3K elec gen", BasePos=new Point(1225, 147), ZoomWidth=80, Img=swUpWhiteImg,
+                        ShowWhen = () => _elecGeneratorSwitch >= 1.5 },
+                new() { Name="G3K_ELECGEN_UP",   TypeKey="G3K gen click", BasePos=new Point(1216, 80), ZoomWidth=100, ZoomHeight=100,
+                        OnClick = () => { if (_elecCrashbar >= 0.5 && _elecGeneratorSwitch < 1.5) SetElecGeneratorSwitch(Math.Round(_elecGeneratorSwitch) + 1); } },
+                new() { Name="G3K_ELECGEN_DN",   TypeKey="G3K gen click", BasePos=new Point(1217, 200), ZoomWidth=100, ZoomHeight=100,
+                        OnClick = () => { if (_elecCrashbar >= 0.5 && _elecGeneratorSwitch > 0.5) SetElecGeneratorSwitch(Math.Round(_elecGeneratorSwitch) - 1); } },
+                new() { Name="G3K_CRASHBAR",     TypeKey="G3K crashbar", BasePos=new Point(1175, 300), ZoomWidth=200, Img=LoadOverlayImage("Crashbar.png"),
+                        ShowWhen = () => _elecCrashbar < 0.5 },
+                new() { Name="G3K_CRASHBAR_TOG", TypeKey="G3K crashbar click", BasePos=new Point(1175, 300), ZoomWidth=200, ZoomHeight=50,
+                        OnClick = () => ToggleElecCrashbar() },
+                new() { Name="G3K_CRASHBAR_TOG2", TypeKey="G3K crashbar click2", BasePos=new Point(1175, 360), ZoomWidth=200, ZoomHeight=50,
+                        OnClick = () => ToggleElecCrashbar() },
+                new() { Name="G3K_LIGHT_LAND",   TypeKey="G3K light sw", BasePos=new Point(100, 147), ZoomWidth=80, Img=swUpBlackImg,
+                        ShowWhen = () => landActive },
+                new() { Name="G3K_LIGHT_TAXI",   TypeKey="G3K light sw", BasePos=new Point(100, 147), ZoomWidth=80, Img=swCenterBlackImg,
+                        ShowWhen = () => !landActive && taxiActive },
+                new() { Name="G3K_LIGHT_OFF",    TypeKey="G3K light sw", BasePos=new Point(100, 147), ZoomWidth=80, Img=swDownBlackImg,
+                        ShowWhen = () => !landActive && !taxiActive },
+                new() { Name="G3K_LIGHT_UP",     TypeKey="G3K light click", BasePos=new Point(20, 80), ZoomWidth=97, ZoomHeight=97,
+                        OnClick = () => {
+                            if (!landActive && !taxiActive) { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_TAXI, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); }
+                            else if (taxiActive && !landActive) { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_TAXI, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_LAND, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); }
+                        } },
+                new() { Name="G3K_LIGHT_DN",     TypeKey="G3K light click", BasePos=new Point(20, 200), ZoomWidth=97, ZoomHeight=97,
+                        OnClick = () => {
+                            if (landActive) { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_LAND, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_TAXI, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); }
+                            else if (taxiActive) { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_TAXI, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); }
+                        } },
+                new() { Name="G3K_STARTER_DN",    TypeKey="G3K starter sw", BasePos=new Point(1900, 123), ZoomWidth=105, Img=swDownBlackImg,
+                        ShowWhen = () => _elecStarter >= 1.5 },
+                new() { Name="G3K_STARTER_CTR",   TypeKey="G3K starter sw", BasePos=new Point(1900, 122), ZoomWidth=105, Img=swCenterBlackImg,
+                        ShowWhen = () => _elecStarter >= 0.5 && _elecStarter < 1.5 },
+                new() { Name="G3K_STARTER_UP",    TypeKey="G3K starter sw", BasePos=new Point(1900, 97), ZoomWidth=105, Img=swUpBlackImg,
+                        ShowWhen = () => _elecStarter < 0.5 },
+                new() { Name="G3K_STARTER_CK_UP", TypeKey="G3K starter click", BasePos=new Point(1894, 38), ZoomWidth=119, ZoomHeight=112,
+                        OnClick = () => { SetElecStarter(0); Task.Run(async () => { await Task.Delay(2000); SetElecStarter(1); }); } },
+                new() { Name="G3K_STARTER_CK_DN", TypeKey="G3K starter click", BasePos=new Point(1893, 193), ZoomWidth=119, ZoomHeight=112,
+                        OnClick = () => { SetElecStarter(2); Task.Run(async () => { await Task.Delay(2000); SetElecStarter(1); }); } },
+            };
+
             LoadCalibrationPositions();
 
             // Timer global per apagar ombres + animació flaps SW
@@ -2132,6 +2220,48 @@ namespace SimConnect3
             stopHidThread4 = true;
             stopHidThread5 = true;
         }
+        private void SetElecSourceSwitch(double value)
+        {
+            if (simconnect == null) return;
+            simconnect.SetDataOnSimObject(DEFINITIONS.ElecSrcWrite,
+                SimConnect.SIMCONNECT_OBJECT_ID_USER,
+                SIMCONNECT_DATA_SET_FLAG.DEFAULT,
+                new ElecSrcStruct { value = value });
+        }
+
+        private void ToggleElecCrashbar()
+        {
+            if (simconnect == null) return;
+            double newVal = _elecCrashbar < 0.5 ? 1.0 : 0.0;
+            simconnect.SetDataOnSimObject(DEFINITIONS.ElecCrashbarWrite,
+                SimConnect.SIMCONNECT_OBJECT_ID_USER,
+                SIMCONNECT_DATA_SET_FLAG.DEFAULT,
+                new ElecCrashbarStruct { value = newVal });
+            if (newVal < 0.5)
+            {
+                SetElecSourceSwitch(0);
+                SetElecGeneratorSwitch(0);
+            }
+        }
+
+        private void SetElecStarter(double value)
+        {
+            if (simconnect == null) return;
+            simconnect.SetDataOnSimObject(DEFINITIONS.ElecStarterWrite,
+                SimConnect.SIMCONNECT_OBJECT_ID_USER,
+                SIMCONNECT_DATA_SET_FLAG.DEFAULT,
+                new ElecStarterStruct { value = value });
+        }
+
+        private void SetElecGeneratorSwitch(double value)
+        {
+            if (simconnect == null) return;
+            simconnect.SetDataOnSimObject(DEFINITIONS.ElecGenWrite,
+                SimConnect.SIMCONNECT_OBJECT_ID_USER,
+                SIMCONNECT_DATA_SET_FLAG.DEFAULT,
+                new ElecGenStruct { value = value });
+        }
+
         private void UpdateRotAIRStatus()
         {
         }
@@ -2748,8 +2878,24 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG STARTER:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG STARTER:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Elec_Source_Switch_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Elec_Generator_Switch_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Elec_CrashBar_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Starter", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
+
+                simconnect.AddToDataDefinition(DEFINITIONS.ElecSrcWrite, "L:XMLVAR_Elec_Source_Switch_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<ElecSrcStruct>(DEFINITIONS.ElecSrcWrite);
+
+                simconnect.AddToDataDefinition(DEFINITIONS.ElecGenWrite, "L:XMLVAR_Elec_Generator_Switch_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<ElecGenStruct>(DEFINITIONS.ElecGenWrite);
+
+                simconnect.AddToDataDefinition(DEFINITIONS.ElecCrashbarWrite, "L:XMLVAR_Elec_CrashBar_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<ElecCrashbarStruct>(DEFINITIONS.ElecCrashbarWrite);
+
+                simconnect.AddToDataDefinition(DEFINITIONS.ElecStarterWrite, "L:XMLVAR_Starter", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<ElecStarterStruct>(DEFINITIONS.ElecStarterWrite);
 
                 simconnect.RegisterDataDefineStruct<Struct1>(DEFINITIONS.Struct1);
                 simconnect.RequestDataOnSimObject(REQUESTS.Request1, DEFINITIONS.Struct1, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.VISUAL_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
@@ -3279,8 +3425,15 @@ namespace SimConnect3
                 //Debug.WriteLine($"COM TX raw: c1={s1.com_transmit_1} c2={s1.com_transmit_2} -> b1={com1Tx} b2={com2Tx}");
 
                 displayBackupActive_bool = s1.displayBackupActive > 0.5;
-
-                
+                _elecSourceSwitch = s1.elecSourceSwitch;
+                _elecGeneratorSwitch = s1.elecGeneratorSwitch;
+                _elecCrashbar = s1.elecCrashbarState;
+                _elecStarter = s1.elecStarter;
+                if (_elecCrashbar < 0.5 && (_elecSourceSwitch > 0.5 || _elecGeneratorSwitch > 0.5))
+                {
+                    SetElecSourceSwitch(0);
+                    SetElecGeneratorSwitch(0);
+                }
 
                 bool hasChanged = HasDataChanged(s1);
 
@@ -3315,7 +3468,28 @@ namespace SimConnect3
             if (activeBg != null)
                 e.Graphics.DrawImage(activeBg, pbMain.ClientRectangle);
 
-            if (_g3000Active) return;
+            if (_g3000Active)
+            {
+                foreach (var ov in g3000OverlayImages)
+                    if (ov.Img != null && (calibrationMode || (ov.ShowWhen?.Invoke() ?? true)))
+                        e.Graphics.DrawImage(ov.Img, ov.AnimatedBounds);
+
+                if (calibrationMode)
+                {
+                    using var ovPen = new Pen(Color.Cyan, 2);
+                    using var selPen = new Pen(Color.Yellow, 2);
+                    using var handleBr = new SolidBrush(Color.FromArgb(200, 255, 165, 0));
+                    using var smallFont = new Font("Segoe UI", 9f);
+                    foreach (var ov in g3000OverlayImages)
+                    {
+                        var pen = (ov == calibSelectedOverlay) ? selPen : ovPen;
+                        e.Graphics.DrawRectangle(pen, ov.Bounds);
+                        e.Graphics.FillRectangle(handleBr, ov.ResizeHandle);
+                        e.Graphics.DrawString(ov.Name, smallFont, Brushes.Cyan, new PointF(ov.BasePos.X, ov.BasePos.Y - 14));
+                    }
+                }
+                return;
+            }
 
             // --- AUDIO TRIANGLES ---
             foreach (var tri in audioTriangles)
@@ -3674,7 +3848,13 @@ namespace SimConnect3
         private void PbMain_MouseDown(object? sender, MouseEventArgs e)
         {
             if (e.Button != MouseButtons.Left) return;
-            if (_g3000Active) return;
+            if (_g3000Active && !calibrationMode)
+            {
+                foreach (var ov in g3000OverlayImages)
+                    if (ov.OnClick != null && ov.Bounds.Contains(e.Location))
+                    { ov.OnClick.Invoke(); return; }
+                return;
+            }
 
             if (calibrationMode)
             {
@@ -3758,14 +3938,17 @@ namespace SimConnect3
                         pbMain.Invalidate(); return;
                     }
                 }
-                foreach (var ov in overlayImages)
+                var activeOverlays = _g3000Active ? g3000OverlayImages : overlayImages;
+                foreach (var ov in activeOverlays)
                 {
                     if (ov.ResizeHandle.Contains(e.Location))
                     {
                         calibResizeOverlay     = ov;
                         calibSelectedOverlay   = ov;
                         calibResizeStartWidth  = ov.ZoomWidth;
+                        calibResizeStartHeight = ov.ZoomHeight;
                         calibResizeStartMouseX = e.X;
+                        calibResizeStartMouseY = e.Y;
                         calibZoomBox.Text      = ((int)ov.ZoomWidth).ToString();
                         calibZoomBox.Location  = new Point(ov.ResizeHandle.Right + 5, ov.ResizeHandle.Top);
                         calibZoomBox.Visible   = true;
@@ -3872,8 +4055,12 @@ namespace SimConnect3
                 {
                     float newW = Math.Max(10, calibResizeStartWidth + (e.X - calibResizeStartMouseX));
                     string tk  = calibResizeOverlay.TypeKey;
-                    foreach (var ov in overlayImages.Where(o => o.TypeKey == tk))
+                    foreach (var ov in overlayImages.Concat(g3000OverlayImages).Where(o => o.TypeKey == tk))
+                    {
                         ov.ZoomWidth = newW;
+                        if (ov.ZoomHeight > 0)
+                            ov.ZoomHeight = Math.Max(10, calibResizeStartHeight + (e.Y - calibResizeStartMouseY));
+                    }
                     calibZoomBox.Text = ((int)newW).ToString();
                     pbMain.Invalidate(); return;
                 }
@@ -4063,6 +4250,10 @@ namespace SimConnect3
                 sb.AppendLine($"TRI:{tri.Name}:{tri.BasePos.X}:{tri.BasePos.Y}");
             foreach (var ov in overlayImages)
                 sb.AppendLine($"IMG:{ov.Name}:{ov.BasePos.X}:{ov.BasePos.Y}:{(int)ov.ZoomWidth}");
+            foreach (var ov in g3000OverlayImages)
+                sb.AppendLine(ov.ZoomHeight > 0
+                    ? $"G3K:{ov.Name}:{ov.BasePos.X}:{ov.BasePos.Y}:{(int)ov.ZoomWidth}:{(int)ov.ZoomHeight}"
+                    : $"G3K:{ov.Name}:{ov.BasePos.X}:{ov.BasePos.Y}:{(int)ov.ZoomWidth}");
             sb.AppendLine($"FLI:fli:{flapsIndX}:{flapsIndYOffset}");
             sb.AppendLine($"TRIND:tri:{trimIndX}:{trimIndYOffset}");
             sb.AppendLine($"TRIMZ:tz:{trimZoneBaseX}:{trimZoneBaseY}");
@@ -4122,6 +4313,21 @@ namespace SimConnect3
                         string tk = ov.TypeKey;
                         foreach (var same in overlayImages.Where(o => o.TypeKey == tk))
                             same.ZoomWidth = w;
+                    }
+                }
+                else if (type == "G3K" && parts.Length >= 5 && int.TryParse(parts[4], out int g3kw))
+                {
+                    var ov = g3000OverlayImages.FirstOrDefault(o => o.Name == name);
+                    if (ov != null)
+                    {
+                        ov.BasePos = new Point(x, y);
+                        string tk = ov.TypeKey;
+                        int g3kh = (parts.Length >= 6 && int.TryParse(parts[5], out int h)) ? h : 0;
+                        foreach (var same in g3000OverlayImages.Where(o => o.TypeKey == tk))
+                        {
+                            same.ZoomWidth = g3kw;
+                            if (g3kh > 0) same.ZoomHeight = g3kh;
+                        }
                     }
                 }
                 else if (type == "FLI")

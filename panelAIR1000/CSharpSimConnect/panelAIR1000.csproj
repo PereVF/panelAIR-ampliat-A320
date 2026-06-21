@@ -25,7 +25,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\main GA_1000 4K panel_f.png" />
-    <EmbeddedResource Include="Resources\main GA_3000 4K panel_g.png" />
+    <EmbeddedResource Include="Resources\main GA_3000 4K panel_i.png" />
     <EmbeddedResource Include="Resources\SW DN white.png" />
     <EmbeddedResource Include="Resources\SW DN green.png" />
     <EmbeddedResource Include="Resources\SW DN blue.png" />
@@ -41,6 +41,13 @@
     <EmbeddedResource Include="Resources\SW fuel_r.png" />
     <EmbeddedResource Include="Resources\SW battery.png" />
     <EmbeddedResource Include="Resources\SW avionics.png" />
+    <EmbeddedResource Include="Resources\switch-up-white.png" />
+    <EmbeddedResource Include="Resources\switch-center-white.png" />
+    <EmbeddedResource Include="Resources\switch-down-white.png" />
+    <EmbeddedResource Include="Resources\Crashbar.png" />
+    <EmbeddedResource Include="Resources\switch-up-black.png" />
+    <EmbeddedResource Include="Resources\switch-center-black.png" />
+    <EmbeddedResource Include="Resources\switch-down-black.png" />
   </ItemGroup>
 
   <ItemGroup>
