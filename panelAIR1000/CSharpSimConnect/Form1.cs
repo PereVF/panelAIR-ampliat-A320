@@ -437,6 +437,7 @@ namespace SimConnect3
             ElecGenWrite,
             ElecCrashbarWrite,
             ElecStarterWrite,
+            ElecIgnitionWrite,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -447,6 +448,8 @@ namespace SimConnect3
         struct ElecCrashbarStruct { public double value; }
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct ElecStarterStruct { public double value; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct ElecIgnitionStruct { public double value; }
 
         enum REQUESTS
         {
@@ -603,6 +606,12 @@ namespace SimConnect3
             KINGAIR_IGN1_OFF,
             KINGAIR_IGN2_ARM,
             KINGAIR_IGN2_OFF,
+            TBM930_IGN1_ON,
+            TBM930_IGN1_OFF,
+            TBM930_IGN1_AUTO,
+            ELECT_FUEL_PUMP1_SET,
+            SET_STARTER1_HELD,
+            STARTER1_SET,
             //softkeys MFD
             MFD_SK_1,
             MFD_SK_2,
@@ -782,6 +791,8 @@ namespace SimConnect3
         private double _elecGeneratorSwitch = 0;
         private double _elecCrashbar = 1;
         private double _elecStarter = 2;
+        private double _elecIgnition = 2;
+        private double _elecFuelPump = 0;
 
         private bool calibrationMode = false;
         private bool  _tactilebtnDragging = false;
@@ -835,6 +846,7 @@ namespace SimConnect3
         private DateTime _lastRepaint = DateTime.MinValue;
 
         private Label? _tipLbl;
+        private bool _tbm930ModCheckDone = false;
 
 
         private UiButton? calibDragBtn = null;
@@ -956,6 +968,8 @@ namespace SimConnect3
             public double elecGeneratorSwitch; // L:XMLVAR_Elec_Generator_Switch_State
             public double elecCrashbarState;   // L:XMLVAR_Elec_CrashBar_State (0=visible, 1=hidden)
             public double elecStarter;         // L:XMLVAR_Starter (0=up, 1=center, 2=down)
+            public double elecIgnition;        // L:XMLVAR_Ignition (0=up, 1=center, 2=down)
+            public double elecFuelPump;        // L:XMLVAR_BoostFuelPump (0=up/auto, 1=center/on, 2=down/off)
 
 
 
@@ -1156,6 +1170,7 @@ namespace SimConnect3
                 if (_g3000Active)
                 {
                     ApplyG3000Region();
+                    CheckTBM930Mod();
                 }
                 else
                 {
@@ -1981,9 +1996,29 @@ namespace SimConnect3
                 new() { Name="G3K_STARTER_UP",    TypeKey="G3K starter sw", BasePos=new Point(1900, 97), ZoomWidth=105, Img=swUpBlackImg,
                         ShowWhen = () => _elecStarter < 0.5 },
                 new() { Name="G3K_STARTER_CK_UP", TypeKey="G3K starter click", BasePos=new Point(1894, 38), ZoomWidth=119, ZoomHeight=112,
-                        OnClick = () => { SetElecStarter(0); Task.Run(async () => { await Task.Delay(2000); SetElecStarter(1); }); } },
+                        OnClick = () => { SetElecStarter(0); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Run(async () => { await Task.Delay(4000); SetElecStarter(1); }); } },
                 new() { Name="G3K_STARTER_CK_DN", TypeKey="G3K starter click", BasePos=new Point(1893, 193), ZoomWidth=119, ZoomHeight=112,
-                        OnClick = () => { SetElecStarter(2); Task.Run(async () => { await Task.Delay(2000); SetElecStarter(1); }); } },
+                        OnClick = () => { SetElecStarter(2); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.STARTER1_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Run(async () => { await Task.Delay(1500); SetElecStarter(1); }); } },
+                new() { Name="G3K_IGNITION_DN",    TypeKey="G3K ignition sw", BasePos=new Point(2000, 123), ZoomWidth=105, Img=swDownBlackImg,
+                        ShowWhen = () => _elecIgnition >= 1.5 },
+                new() { Name="G3K_IGNITION_CTR",   TypeKey="G3K ignition sw", BasePos=new Point(2000, 122), ZoomWidth=105, Img=swCenterBlackImg,
+                        ShowWhen = () => _elecIgnition >= 0.5 && _elecIgnition < 1.5 },
+                new() { Name="G3K_IGNITION_UP",    TypeKey="G3K ignition sw", BasePos=new Point(2000, 97), ZoomWidth=105, Img=swUpBlackImg,
+                        ShowWhen = () => _elecIgnition < 0.5 },
+                new() { Name="G3K_IGNITION_CK_UP", TypeKey="G3K ignition click", BasePos=new Point(1994, 38), ZoomWidth=119, ZoomHeight=112,
+                        OnClick = () => SetIgnitionPos((int)Math.Max(0, Math.Round(_elecIgnition) - 1)) },
+                new() { Name="G3K_IGNITION_CK_DN", TypeKey="G3K ignition click", BasePos=new Point(1993, 193), ZoomWidth=119, ZoomHeight=112,
+                        OnClick = () => SetIgnitionPos((int)Math.Min(2, Math.Round(_elecIgnition) + 1)) },
+                new() { Name="G3K_FUELPUMP_DN",    TypeKey="G3K fuelpump sw", BasePos=new Point(2200, 123), ZoomWidth=105, Img=swDownBlackImg,
+                        ShowWhen = () => _elecFuelPump >= 1.5 },
+                new() { Name="G3K_FUELPUMP_CTR",   TypeKey="G3K fuelpump sw", BasePos=new Point(2200, 122), ZoomWidth=105, Img=swCenterBlackImg,
+                        ShowWhen = () => _elecFuelPump >= 0.5 && _elecFuelPump < 1.5 },
+                new() { Name="G3K_FUELPUMP_UP",    TypeKey="G3K fuelpump sw", BasePos=new Point(2200, 97), ZoomWidth=105, Img=swUpBlackImg,
+                        ShowWhen = () => _elecFuelPump < 0.5 },
+                new() { Name="G3K_FUELPUMP_CK_UP", TypeKey="G3K fuelpump click", BasePos=new Point(2194, 38), ZoomWidth=119, ZoomHeight=112,
+                        OnClick = () => { if (_elecFuelPump > 0.5) SetFuelPump(Math.Round(_elecFuelPump) - 1); } },
+                new() { Name="G3K_FUELPUMP_CK_DN", TypeKey="G3K fuelpump click", BasePos=new Point(2193, 193), ZoomWidth=119, ZoomHeight=112,
+                        OnClick = () => { if (_elecFuelPump < 1.5) SetFuelPump(Math.Round(_elecFuelPump) + 1); } },
             };
 
             LoadCalibrationPositions();
@@ -2253,6 +2288,34 @@ namespace SimConnect3
                 new ElecStarterStruct { value = value });
         }
 
+        private void SetElecIgnition(double value)
+        {
+            if (simconnect == null) return;
+            simconnect.SetDataOnSimObject(DEFINITIONS.ElecIgnitionWrite,
+                SimConnect.SIMCONNECT_OBJECT_ID_USER,
+                SIMCONNECT_DATA_SET_FLAG.DEFAULT,
+                new ElecIgnitionStruct { value = value });
+        }
+
+        private void SetIgnitionPos(int pos)
+        {
+            if (simconnect == null) return;
+            // pos: 0=UP=AUTO(L:1), 1=CENTER=ON(L:2), 2=DN=OFF(L:3)
+            double lval = pos + 1;
+            simconnect.SetDataOnSimObject(DEFINITIONS.ElecIgnitionWrite,
+                SimConnect.SIMCONNECT_OBJECT_ID_USER,
+                SIMCONNECT_DATA_SET_FLAG.DEFAULT,
+                new ElecIgnitionStruct { value = lval });
+        }
+
+        private void SetFuelPump(double pos)
+        {
+            if (simconnect == null) return;
+            // pos: 0=UP=AUTO(K:2), 1=CENTER=ON(K:1), 2=DN=OFF(K:0)
+            uint kval = (uint)(2 - (int)pos);
+            simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.ELECT_FUEL_PUMP1_SET, kval, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+        }
+
         private void SetElecGeneratorSwitch(double value)
         {
             if (simconnect == null) return;
@@ -2260,6 +2323,77 @@ namespace SimConnect3
                 SimConnect.SIMCONNECT_OBJECT_ID_USER,
                 SIMCONNECT_DATA_SET_FLAG.DEFAULT,
                 new ElecGenStruct { value = value });
+        }
+
+        private void CheckTBM930Mod()
+        {
+            if (_tbm930ModCheckDone) return;
+            _tbm930ModCheckDone = true;
+
+            string? communityPath = null;
+            string[] cfgPaths = new[]
+            {
+                System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Microsoft Flight Simulator", "UserCfg.opt"),
+                System.IO.Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), @"Packages\Microsoft.FlightSimulator_8wekyb3d8bbwe\LocalCache\UserCfg.opt")
+            };
+
+            foreach (var cfgPath in cfgPaths)
+            {
+                if (!System.IO.File.Exists(cfgPath)) continue;
+                try
+                {
+                    foreach (var line in System.IO.File.ReadAllLines(cfgPath))
+                    {
+                        if (line.TrimStart().StartsWith("InstalledPackagesPath"))
+                        {
+                            int q1 = line.IndexOf('"');
+                            int q2 = line.IndexOf('"', q1 + 1);
+                            if (q1 >= 0 && q2 > q1)
+                            {
+                                communityPath = System.IO.Path.Combine(line.Substring(q1 + 1, q2 - q1 - 1), "Community");
+                                break;
+                            }
+                        }
+                    }
+                }
+                catch { }
+                if (communityPath != null) break;
+            }
+
+            if (communityPath == null || !System.IO.Directory.Exists(communityPath)) return;
+
+            bool found = false;
+            try
+            {
+                foreach (var dir in System.IO.Directory.GetDirectories(communityPath))
+                {
+                    var dirName = System.IO.Path.GetFileName(dir).ToLowerInvariant();
+                    if (dirName.Contains("tbm930") && System.IO.Directory.Exists(System.IO.Path.Combine(dir, "SimObjects", "Airplanes", "Asobo_TBM930")))
+                    { found = true; break; }
+                }
+            }
+            catch { }
+
+            if (!found)
+            {
+                var result = MessageBox.Show(
+                    "MSFS 2020 users: for full G3000 panel functionality, we recommend installing the free mod " +
+                    "'TBM930 - LVars for Bleed Air, Inert Sep and Cabin Lights' by FlyingDutch.\n\n" +
+                    "Download it at:\nhttps://flightsim.to/addon/57918/tbm930-lvars-for-bleed-inert-and-cabin-lights\n\n" +
+                    "Once downloaded, copy the contents to your MSFS 2020 Community folder.\n\n" +
+                    "Would you like to open the download page?",
+                    "Recommended mod not detected",
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Information);
+                if (result == DialogResult.Yes)
+                {
+                    try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = "https://flightsim.to/addon/57918/tbm930-lvars-for-bleed-inert-and-cabin-lights",
+                        UseShellExecute = true
+                    }); } catch { }
+                }
+            }
         }
 
         private void UpdateRotAIRStatus()
@@ -2792,6 +2926,12 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.KINGAIR_IGN2_ARM, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.KINGAIR_IGN2_OFF, "SFS.KingAir_Ign2_Off");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.KINGAIR_IGN2_OFF, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TBM930_IGN1_ON, "SFS.TBM930_Ign1_On");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TBM930_IGN1_ON, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TBM930_IGN1_OFF, "SFS.TBM930_Ign1_Off");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TBM930_IGN1_OFF, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TBM930_IGN1_AUTO, "SFS.TBM930_Ign1_Auto");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TBM930_IGN1_AUTO, false);
 
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.MAGNETO1_INCR, "MAGNETO1_INCR");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.MAGNETO1_INCR, false);
@@ -2882,6 +3022,8 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Elec_Generator_Switch_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Elec_CrashBar_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Starter", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Ignition", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_BoostFuelPump", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
 
@@ -2896,6 +3038,16 @@ namespace SimConnect3
 
                 simconnect.AddToDataDefinition(DEFINITIONS.ElecStarterWrite, "L:XMLVAR_Starter", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<ElecStarterStruct>(DEFINITIONS.ElecStarterWrite);
+
+                simconnect.AddToDataDefinition(DEFINITIONS.ElecIgnitionWrite, "L:TBM930_IGNITION_SET", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<ElecIgnitionStruct>(DEFINITIONS.ElecIgnitionWrite);
+
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.ELECT_FUEL_PUMP1_SET, "ELECT_FUEL_PUMP1_SET");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.ELECT_FUEL_PUMP1_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SET_STARTER1_HELD, "SET_STARTER1_HELD");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.STARTER1_SET, "STARTER1_SET");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.STARTER1_SET, false);
 
                 simconnect.RegisterDataDefineStruct<Struct1>(DEFINITIONS.Struct1);
                 simconnect.RequestDataOnSimObject(REQUESTS.Request1, DEFINITIONS.Struct1, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.VISUAL_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
@@ -3429,6 +3581,8 @@ namespace SimConnect3
                 _elecGeneratorSwitch = s1.elecGeneratorSwitch;
                 _elecCrashbar = s1.elecCrashbarState;
                 _elecStarter = s1.elecStarter;
+                _elecIgnition = s1.elecIgnition;
+                _elecFuelPump = s1.elecFuelPump;
                 if (_elecCrashbar < 0.5 && (_elecSourceSwitch > 0.5 || _elecGeneratorSwitch > 0.5))
                 {
                     SetElecSourceSwitch(0);

@@ -8,7 +8,9 @@
       "Bash(cat)",
       "Read(//tmp/**)",
       "Bash(dotnet run *)",
-      "PowerShell(Stop-Process -Id 28512 -Force)"
+      "PowerShell(Stop-Process -Id 28512 -Force)",
+      "Read(//c/Users/usuario/AppData/Local/Packages/Microsoft.FlightSimulator_8wekyb3d8bbwe/LocalCache/**)",
+      "Read(//c/Users/usuario/Desktop/panelAIR1000-j/%APPDATA%/Microsoft Flight Simulator/**)"
     ],
     "additionalDirectories": [
       "c:\\Users\\usuario\\Desktop\\panelAIR1000-j"
