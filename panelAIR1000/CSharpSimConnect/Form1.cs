@@ -438,6 +438,8 @@ namespace SimConnect3
             ElecCrashbarWrite,
             ElecStarterWrite,
             ElecIgnitionWrite,
+            APTrimWrite,
+            LightingLogo1Write,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -450,6 +452,10 @@ namespace SimConnect3
         struct ElecStarterStruct { public double value; }
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct ElecIgnitionStruct { public double value; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct APTrimStruct { public double value; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct LightingLogo1Struct { public double value; }
 
         enum REQUESTS
         {
@@ -612,6 +618,13 @@ namespace SimConnect3
             ELECT_FUEL_PUMP1_SET,
             SET_STARTER1_HELD,
             STARTER1_SET,
+            AUTOPILOT_DISENGAGE_TOGGLE,
+            RUDDER_TRIM_DISABLED_SET,
+            AILERON_TRIM_DISABLED_SET,
+            LOGO_LIGHTS_SET,
+            LIGHT_POTENTIOMETER_10_SET,
+            LIGHT_POTENTIOMETER_2_SET,
+            ELEC_BUS_CIRCUIT_TOGGLE,
             //softkeys MFD
             MFD_SK_1,
             MFD_SK_2,
@@ -793,6 +806,13 @@ namespace SimConnect3
         private double _elecStarter = 2;
         private double _elecIgnition = 2;
         private double _elecFuelPump = 0;
+        private double _apTrim = 0;
+        private int _apDisengaged = 0;
+        private int _rudderTrimDisabled = 0;
+        private int _aileronTrimDisabled = 0;
+        private double _lightingLogo1 = 0;
+        private int _lightLogo = 0;
+        private int _circuitConn17 = 0;
 
         private bool calibrationMode = false;
         private bool  _tactilebtnDragging = false;
@@ -970,6 +990,13 @@ namespace SimConnect3
             public double elecStarter;         // L:XMLVAR_Starter (0=up, 1=center, 2=down)
             public double elecIgnition;        // L:XMLVAR_Ignition (0=up, 1=center, 2=down)
             public double elecFuelPump;        // L:XMLVAR_BoostFuelPump (0=up/auto, 1=center/on, 2=down/off)
+            public double apTrim;              // L:XMLVAR_APTrim (0=ON/up, 1=AP OFF/center, 2=OFF/dn)
+            public int apDisengaged;           // AUTOPILOT DISENGAGED (Bool)
+            public int rudderTrimDisabled;     // RUDDER TRIM DISABLED (Bool)
+            public int aileronTrimDisabled;    // AILERON TRIM DISABLED (Bool)
+            public double lightingLogo1;       // L:LIGHTING_LOGO_1 (0=OFF, 1=ON)
+            public int lightLogo;              // LIGHT LOGO (Bool)
+            public int circuitConn17;          // CIRCUIT CONNECTION ON:17 (Bool)
 
 
 
@@ -1038,7 +1065,7 @@ namespace SimConnect3
             var asm = System.Reflection.Assembly.GetExecutingAssembly();
             using var bgStream = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_1000 4K panel_f.png");
             if (bgStream != null) _bgImage = Image.FromStream(bgStream);
-            using var bgG3000Stream = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_3000 4K panel_i.png");
+            using var bgG3000Stream = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_3000 4K panel_j.png");
             if (bgG3000Stream != null) _bgG3000Image = Image.FromStream(bgG3000Stream);
 
             pbMain.Paint += PbMain_Paint;
@@ -1170,6 +1197,7 @@ namespace SimConnect3
                 if (_g3000Active)
                 {
                     ApplyG3000Region();
+                    SetAPTrimPos(0);
                     CheckTBM930Mod();
                 }
                 else
@@ -2019,6 +2047,24 @@ namespace SimConnect3
                         OnClick = () => { if (_elecFuelPump > 0.5) SetFuelPump(Math.Round(_elecFuelPump) - 1); } },
                 new() { Name="G3K_FUELPUMP_CK_DN", TypeKey="G3K fuelpump click", BasePos=new Point(2193, 193), ZoomWidth=119, ZoomHeight=112,
                         OnClick = () => { if (_elecFuelPump < 1.5) SetFuelPump(Math.Round(_elecFuelPump) + 1); } },
+                new() { Name="G3K_APTRIM_DN",    TypeKey="G3K aptrim sw", BasePos=new Point(2025, 123), ZoomWidth=105, Img=swDownWhiteImg,
+                        ShowWhen = () => _apTrim >= 1.5 },
+                new() { Name="G3K_APTRIM_CTR",   TypeKey="G3K aptrim sw", BasePos=new Point(2025, 122), ZoomWidth=105, Img=swCenterWhiteG3kImg,
+                        ShowWhen = () => _apTrim >= 0.5 && _apTrim < 1.5 },
+                new() { Name="G3K_APTRIM_UP",    TypeKey="G3K aptrim sw", BasePos=new Point(2025, 97), ZoomWidth=105, Img=swUpWhiteImg,
+                        ShowWhen = () => _apTrim < 0.5 },
+                new() { Name="G3K_APTRIM_CK_UP", TypeKey="G3K aptrim click", BasePos=new Point(2019, 38), ZoomWidth=119, ZoomHeight=112,
+                        OnClick = () => SetAPTrimPos((int)Math.Max(0, Math.Round(_apTrim) - 1)) },
+                new() { Name="G3K_APTRIM_CK_DN", TypeKey="G3K aptrim click", BasePos=new Point(2018, 193), ZoomWidth=119, ZoomHeight=112,
+                        OnClick = () => SetAPTrimPos((int)Math.Min(2, Math.Round(_apTrim) + 1)) },
+                new() { Name="G3K_PULSELIGHT_ON", TypeKey="G3K pulselight", BasePos=new Point(200, 113), ZoomWidth=105, Img=LoadOverlayImage("rocker_black_sw_ON.png"),
+                        ShowWhen = () => _lightingLogo1 >= 0.5 },
+                new() { Name="G3K_PULSELIGHT_TOG", TypeKey="G3K pulselight click", BasePos=new Point(200, 113), ZoomWidth=105, ZoomHeight=105,
+                        OnClick = () => TogglePulseLight() },
+                new() { Name="G3K_NAV_ON", TypeKey="G3K nav", BasePos=new Point(250, 113), ZoomWidth=105, Img=LoadOverlayImage("rocker_black_sw_ON.png"),
+                        ShowWhen = () => navActive },
+                new() { Name="G3K_NAV_TOG", TypeKey="G3K nav click", BasePos=new Point(250, 113), ZoomWidth=105, ZoomHeight=105,
+                        OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_NAV, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             };
 
             LoadCalibrationPositions();
@@ -2306,6 +2352,68 @@ namespace SimConnect3
                 SimConnect.SIMCONNECT_OBJECT_ID_USER,
                 SIMCONNECT_DATA_SET_FLAG.DEFAULT,
                 new ElecIgnitionStruct { value = lval });
+        }
+
+        private void SetAPTrimPos(int pos)
+        {
+            if (simconnect == null) return;
+            _apTrim = pos;
+            simconnect.SetDataOnSimObject(DEFINITIONS.APTrimWrite,
+                SimConnect.SIMCONNECT_OBJECT_ID_USER,
+                SIMCONNECT_DATA_SET_FLAG.DEFAULT,
+                new APTrimStruct { value = pos });
+            if (pos == 0)
+            {
+                // ON (UP): enable AP if disengaged
+                if (_apDisengaged != 0)
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUTOPILOT_DISENGAGE_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            }
+            else if (pos == 1)
+            {
+                // AP OFF (CENTER): disengage AP if engaged, enable trims
+                if (_apDisengaged == 0)
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUTOPILOT_DISENGAGE_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                if (_rudderTrimDisabled != 0)
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.RUDDER_TRIM_DISABLED_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                if (_aileronTrimDisabled != 0)
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.AILERON_TRIM_DISABLED_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            }
+            else
+            {
+                // OFF (DN): disengage AP if engaged, disable trims
+                if (_apDisengaged == 0)
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUTOPILOT_DISENGAGE_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                if (_rudderTrimDisabled == 0)
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.RUDDER_TRIM_DISABLED_SET, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                if (_aileronTrimDisabled == 0)
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.AILERON_TRIM_DISABLED_SET, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            }
+        }
+
+        private void TogglePulseLight()
+        {
+            if (simconnect == null) return;
+            double newVal = _lightingLogo1 < 0.5 ? 1.0 : 0.0;
+            simconnect.SetDataOnSimObject(DEFINITIONS.LightingLogo1Write,
+                SimConnect.SIMCONNECT_OBJECT_ID_USER,
+                SIMCONNECT_DATA_SET_FLAG.DEFAULT,
+                new LightingLogo1Struct { value = newVal });
+            uint nv = (uint)newVal;
+            simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.LOGO_LIGHTS_SET, nv, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            if (landActive)
+            {
+                simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_10_SET, 100, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_2_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            }
+            else
+            {
+                simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_10_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                uint pot2 = taxiActive ? 100u : 0u;
+                simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_2_SET, pot2, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            }
+            int expectedCircuit = landActive ? 0 : (_lightLogo != 0 ? 1 : 0);
+            if (_circuitConn17 != expectedCircuit)
+                simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.ELEC_BUS_CIRCUIT_TOGGLE, 17, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
         }
 
         private void SetFuelPump(double pos)
@@ -3024,6 +3132,13 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Starter", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Ignition", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_BoostFuelPump", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_APTrim", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT DISENGAGED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RUDDER TRIM DISABLED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AILERON TRIM DISABLED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:LIGHTING_LOGO_1", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT LOGO", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "CIRCUIT CONNECTION ON:17", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
 
@@ -3041,6 +3156,8 @@ namespace SimConnect3
 
                 simconnect.AddToDataDefinition(DEFINITIONS.ElecIgnitionWrite, "L:TBM930_IGNITION_SET", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<ElecIgnitionStruct>(DEFINITIONS.ElecIgnitionWrite);
+                simconnect.AddToDataDefinition(DEFINITIONS.APTrimWrite, "L:XMLVAR_APTrim", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<APTrimStruct>(DEFINITIONS.APTrimWrite);
 
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.ELECT_FUEL_PUMP1_SET, "ELECT_FUEL_PUMP1_SET");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.ELECT_FUEL_PUMP1_SET, false);
@@ -3048,6 +3165,22 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.STARTER1_SET, "STARTER1_SET");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.STARTER1_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AUTOPILOT_DISENGAGE_TOGGLE, "AUTOPILOT_DISENGAGE_TOGGLE");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AUTOPILOT_DISENGAGE_TOGGLE, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.RUDDER_TRIM_DISABLED_SET, "RUDDER_TRIM_DISABLED_SET");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.RUDDER_TRIM_DISABLED_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AILERON_TRIM_DISABLED_SET, "AILERON_TRIM_DISABLED_SET");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AILERON_TRIM_DISABLED_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.LOGO_LIGHTS_SET, "2:LOGO_LIGHTS_SET");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.LOGO_LIGHTS_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_10_SET, "LIGHT_POTENTIOMETER_10_SET");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_10_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_2_SET, "LIGHT_POTENTIOMETER_2_SET");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_2_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.ELEC_BUS_CIRCUIT_TOGGLE, "2:ELECTRICAL_BUS_TO_CIRCUIT_CONNECTION_TOGGLE");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.ELEC_BUS_CIRCUIT_TOGGLE, false);
+                simconnect.AddToDataDefinition(DEFINITIONS.LightingLogo1Write, "L:LIGHTING_LOGO_1", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightingLogo1Struct>(DEFINITIONS.LightingLogo1Write);
 
                 simconnect.RegisterDataDefineStruct<Struct1>(DEFINITIONS.Struct1);
                 simconnect.RequestDataOnSimObject(REQUESTS.Request1, DEFINITIONS.Struct1, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.VISUAL_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
@@ -3577,12 +3710,19 @@ namespace SimConnect3
                 //Debug.WriteLine($"COM TX raw: c1={s1.com_transmit_1} c2={s1.com_transmit_2} -> b1={com1Tx} b2={com2Tx}");
 
                 displayBackupActive_bool = s1.displayBackupActive > 0.5;
-                _elecSourceSwitch = s1.elecSourceSwitch;
-                _elecGeneratorSwitch = s1.elecGeneratorSwitch;
-                _elecCrashbar = s1.elecCrashbarState;
-                _elecStarter = s1.elecStarter;
-                _elecIgnition = s1.elecIgnition;
-                _elecFuelPump = s1.elecFuelPump;
+                if (_elecSourceSwitch != s1.elecSourceSwitch) { _elecSourceSwitch = s1.elecSourceSwitch; needsRepaint = true; }
+                if (_elecGeneratorSwitch != s1.elecGeneratorSwitch) { _elecGeneratorSwitch = s1.elecGeneratorSwitch; needsRepaint = true; }
+                if (_elecCrashbar != s1.elecCrashbarState) { _elecCrashbar = s1.elecCrashbarState; needsRepaint = true; }
+                if (_elecStarter != s1.elecStarter) { _elecStarter = s1.elecStarter; needsRepaint = true; }
+                if (_elecIgnition != s1.elecIgnition) { _elecIgnition = s1.elecIgnition; needsRepaint = true; }
+                if (_elecFuelPump != s1.elecFuelPump) { _elecFuelPump = s1.elecFuelPump; needsRepaint = true; }
+                // _apTrim es gestiona localment, no es llegeix de MSFS
+                _apDisengaged = s1.apDisengaged;
+                _rudderTrimDisabled = s1.rudderTrimDisabled;
+                _aileronTrimDisabled = s1.aileronTrimDisabled;
+                if (_lightingLogo1 != s1.lightingLogo1) { _lightingLogo1 = s1.lightingLogo1; needsRepaint = true; }
+                _lightLogo = s1.lightLogo;
+                _circuitConn17 = s1.circuitConn17;
                 if (_elecCrashbar < 0.5 && (_elecSourceSwitch > 0.5 || _elecGeneratorSwitch > 0.5))
                 {
                     SetElecSourceSwitch(0);
