@@ -440,6 +440,7 @@ namespace SimConnect3
             ElecIgnitionWrite,
             APTrimWrite,
             LightingLogo1Write,
+            FuelSelectionWrite,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -456,6 +457,8 @@ namespace SimConnect3
         struct APTrimStruct { public double value; }
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct LightingLogo1Struct { public double value; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct FuelSelectionStruct { public double value; }
 
         enum REQUESTS
         {
@@ -621,10 +624,10 @@ namespace SimConnect3
             AUTOPILOT_DISENGAGE_TOGGLE,
             RUDDER_TRIM_DISABLED_SET,
             AILERON_TRIM_DISABLED_SET,
-            LOGO_LIGHTS_SET,
-            LIGHT_POTENTIOMETER_10_SET,
-            LIGHT_POTENTIOMETER_2_SET,
-            ELEC_BUS_CIRCUIT_TOGGLE,
+            TBM930_PULSELIGHT_TOGGLE,
+            TBM930_LIGHT_LDG,
+            TBM930_LIGHT_TAXI,
+            TBM930_LIGHT_OFF,
             //softkeys MFD
             MFD_SK_1,
             MFD_SK_2,
@@ -813,6 +816,7 @@ namespace SimConnect3
         private double _lightingLogo1 = 0;
         private int _lightLogo = 0;
         private int _circuitConn17 = 0;
+        private double _fuelSelectionSet = 2;
 
         private bool calibrationMode = false;
         private bool  _tactilebtnDragging = false;
@@ -997,6 +1001,7 @@ namespace SimConnect3
             public double lightingLogo1;       // L:LIGHTING_LOGO_1 (0=OFF, 1=ON)
             public int lightLogo;              // LIGHT LOGO (Bool)
             public int circuitConn17;          // CIRCUIT CONNECTION ON:17 (Bool)
+            public double fuelSelectionSet;    // L:TBM930_FUEL_SELECTION_SET (1=MANUAL, 2=AUTO)
 
 
 
@@ -1187,13 +1192,13 @@ namespace SimConnect3
             };
             textBox21.MouseUp += (s, e) => { _tb21Dragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
 
-            _g3000Btn = MakeGroupBtn("G3000 panel", 363, 63);
+            _g3000Btn = MakeGroupBtn("TBM 930", 363, 63);
             _g3000Btn.Location = new Point(3477, 1300);
             _g3000Btn.Click += (s, e) =>
             {
                 if (calibrationMode) return;
                 _g3000Active = !_g3000Active;
-                _g3000Btn.BackColor = _g3000Active ? Color.LimeGreen : Color.Black;
+                _g3000Btn.Text = _g3000Active ? "G1000" : "TBM 930";
                 if (_g3000Active)
                 {
                     ApplyG3000Region();
@@ -2009,13 +2014,13 @@ namespace SimConnect3
                         ShowWhen = () => !landActive && !taxiActive },
                 new() { Name="G3K_LIGHT_UP",     TypeKey="G3K light click", BasePos=new Point(20, 80), ZoomWidth=97, ZoomHeight=97,
                         OnClick = () => {
-                            if (!landActive && !taxiActive) { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_TAXI, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); }
-                            else if (taxiActive && !landActive) { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_TAXI, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_LAND, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); }
+                            if (!landActive && !taxiActive) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_LIGHT_TAXI, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            else if (taxiActive && !landActive) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_LIGHT_LDG, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         } },
                 new() { Name="G3K_LIGHT_DN",     TypeKey="G3K light click", BasePos=new Point(20, 200), ZoomWidth=97, ZoomHeight=97,
                         OnClick = () => {
-                            if (landActive) { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_LAND, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_TAXI, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); }
-                            else if (taxiActive) { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_TAXI, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); }
+                            if (landActive) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_LIGHT_TAXI, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            else if (taxiActive) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_LIGHT_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         } },
                 new() { Name="G3K_STARTER_DN",    TypeKey="G3K starter sw", BasePos=new Point(1900, 123), ZoomWidth=105, Img=swDownBlackImg,
                         ShowWhen = () => _elecStarter >= 1.5 },
@@ -2057,14 +2062,22 @@ namespace SimConnect3
                         OnClick = () => SetAPTrimPos((int)Math.Max(0, Math.Round(_apTrim) - 1)) },
                 new() { Name="G3K_APTRIM_CK_DN", TypeKey="G3K aptrim click", BasePos=new Point(2018, 193), ZoomWidth=119, ZoomHeight=112,
                         OnClick = () => SetAPTrimPos((int)Math.Min(2, Math.Round(_apTrim) + 1)) },
-                new() { Name="G3K_PULSELIGHT_ON", TypeKey="G3K pulselight", BasePos=new Point(200, 113), ZoomWidth=105, Img=LoadOverlayImage("rocker_black_sw_ON.png"),
-                        ShowWhen = () => _lightingLogo1 >= 0.5 },
+                new() { Name="G3K_PULSELIGHT_ON", TypeKey="G3K pulselight", BasePos=new Point(200, 113), ZoomWidth=105, Img=LoadOverlayImage("rocker_black_sw_OFF.png"),
+                        ShowWhen = () => _lightingLogo1 < 0.5 },
                 new() { Name="G3K_PULSELIGHT_TOG", TypeKey="G3K pulselight click", BasePos=new Point(200, 113), ZoomWidth=105, ZoomHeight=105,
                         OnClick = () => TogglePulseLight() },
-                new() { Name="G3K_NAV_ON", TypeKey="G3K nav", BasePos=new Point(250, 113), ZoomWidth=105, Img=LoadOverlayImage("rocker_black_sw_ON.png"),
-                        ShowWhen = () => navActive },
+                new() { Name="G3K_NAV_ON", TypeKey="G3K nav", BasePos=new Point(250, 113), ZoomWidth=105, Img=LoadOverlayImage("rocker_black_sw_OFF.png"),
+                        ShowWhen = () => !navActive },
                 new() { Name="G3K_NAV_TOG", TypeKey="G3K nav click", BasePos=new Point(250, 113), ZoomWidth=105, ZoomHeight=105,
                         OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_NAV, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+                new() { Name="G3K_STROBE_ON", TypeKey="G3K strobe", BasePos=new Point(414, 115), ZoomWidth=67, Img=LoadOverlayImage("rocker_black_sw_OFF.png"),
+                        ShowWhen = () => !strobeActive },
+                new() { Name="G3K_STROBE_TOG", TypeKey="G3K strobe click", BasePos=new Point(411, 101), ZoomWidth=71, ZoomHeight=113,
+                        OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_STROBE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+                new() { Name="G3K_FUELSEL_ON", TypeKey="G3K fuelsel", BasePos=new Point(1905, 115), ZoomWidth=67, Img=LoadOverlayImage("rocker_black_sw_OFF.png"),
+                        ShowWhen = () => _fuelSelectionSet < 1.5 },
+                new() { Name="G3K_FUELSEL_TOG", TypeKey="G3K fuelsel click", BasePos=new Point(1902, 101), ZoomWidth=71, ZoomHeight=113,
+                        OnClick = () => SetFuelSelection(_fuelSelectionSet >= 1.5 ? 1.0 : 2.0) },
             };
 
             LoadCalibrationPositions();
@@ -2390,30 +2403,19 @@ namespace SimConnect3
             }
         }
 
+        private void SetFuelSelection(double value)
+        {
+            if (simconnect == null) return;
+            simconnect.SetDataOnSimObject(DEFINITIONS.FuelSelectionWrite,
+                SimConnect.SIMCONNECT_OBJECT_ID_USER,
+                SIMCONNECT_DATA_SET_FLAG.DEFAULT,
+                new FuelSelectionStruct { value = value });
+        }
+
         private void TogglePulseLight()
         {
             if (simconnect == null) return;
-            double newVal = _lightingLogo1 < 0.5 ? 1.0 : 0.0;
-            simconnect.SetDataOnSimObject(DEFINITIONS.LightingLogo1Write,
-                SimConnect.SIMCONNECT_OBJECT_ID_USER,
-                SIMCONNECT_DATA_SET_FLAG.DEFAULT,
-                new LightingLogo1Struct { value = newVal });
-            uint nv = (uint)newVal;
-            simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.LOGO_LIGHTS_SET, nv, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-            if (landActive)
-            {
-                simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_10_SET, 100, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_2_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-            }
-            else
-            {
-                simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_10_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                uint pot2 = taxiActive ? 100u : 0u;
-                simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_2_SET, pot2, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-            }
-            int expectedCircuit = landActive ? 0 : (_lightLogo != 0 ? 1 : 0);
-            if (_circuitConn17 != expectedCircuit)
-                simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.ELEC_BUS_CIRCUIT_TOGGLE, 17, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_PULSELIGHT_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
         }
 
         private void SetFuelPump(double pos)
@@ -3139,6 +3141,7 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:LIGHTING_LOGO_1", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT LOGO", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "CIRCUIT CONNECTION ON:17", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:TBM930_FUEL_SELECTION_SET", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
 
@@ -3171,16 +3174,18 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.RUDDER_TRIM_DISABLED_SET, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AILERON_TRIM_DISABLED_SET, "AILERON_TRIM_DISABLED_SET");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AILERON_TRIM_DISABLED_SET, false);
-                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.LOGO_LIGHTS_SET, "2:LOGO_LIGHTS_SET");
-                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.LOGO_LIGHTS_SET, false);
-                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_10_SET, "LIGHT_POTENTIOMETER_10_SET");
-                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_10_SET, false);
-                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_2_SET, "LIGHT_POTENTIOMETER_2_SET");
-                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.LIGHT_POTENTIOMETER_2_SET, false);
-                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.ELEC_BUS_CIRCUIT_TOGGLE, "2:ELECTRICAL_BUS_TO_CIRCUIT_CONNECTION_TOGGLE");
-                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.ELEC_BUS_CIRCUIT_TOGGLE, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TBM930_PULSELIGHT_TOGGLE, "SFS.TBM930_PulseLight_Toggle");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TBM930_PULSELIGHT_TOGGLE, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TBM930_LIGHT_LDG, "SFS.TBM930_Light_LDG");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TBM930_LIGHT_LDG, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TBM930_LIGHT_TAXI, "SFS.TBM930_Light_TAXI");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TBM930_LIGHT_TAXI, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TBM930_LIGHT_OFF, "SFS.TBM930_Light_OFF");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TBM930_LIGHT_OFF, false);
                 simconnect.AddToDataDefinition(DEFINITIONS.LightingLogo1Write, "L:LIGHTING_LOGO_1", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<LightingLogo1Struct>(DEFINITIONS.LightingLogo1Write);
+                simconnect.AddToDataDefinition(DEFINITIONS.FuelSelectionWrite, "L:TBM930_FUEL_SELECTION_SET", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<FuelSelectionStruct>(DEFINITIONS.FuelSelectionWrite);
 
                 simconnect.RegisterDataDefineStruct<Struct1>(DEFINITIONS.Struct1);
                 simconnect.RequestDataOnSimObject(REQUESTS.Request1, DEFINITIONS.Struct1, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.VISUAL_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
@@ -3723,6 +3728,7 @@ namespace SimConnect3
                 if (_lightingLogo1 != s1.lightingLogo1) { _lightingLogo1 = s1.lightingLogo1; needsRepaint = true; }
                 _lightLogo = s1.lightLogo;
                 _circuitConn17 = s1.circuitConn17;
+                if (_fuelSelectionSet != s1.fuelSelectionSet) { _fuelSelectionSet = s1.fuelSelectionSet; needsRepaint = true; }
                 if (_elecCrashbar < 0.5 && (_elecSourceSwitch > 0.5 || _elecGeneratorSwitch > 0.5))
                 {
                     SetElecSourceSwitch(0);

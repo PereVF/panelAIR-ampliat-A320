@@ -45,7 +45,7 @@
     <EmbeddedResource Include="Resources\switch-center-white.png" />
     <EmbeddedResource Include="Resources\switch-down-white.png" />
     <EmbeddedResource Include="Resources\Crashbar.png" />
-    <EmbeddedResource Include="Resources\rocker_black_sw_ON.png" />
+    <EmbeddedResource Include="Resources\rocker_black_sw_OFF.png" />
     <EmbeddedResource Include="Resources\switch-up-black.png" />
     <EmbeddedResource Include="Resources\switch-center-black.png" />
     <EmbeddedResource Include="Resources\switch-down-black.png" />
