@@ -41,12 +41,12 @@ namespace SimConnect3
             //
             textBox21.BackColor = Color.Black;
             textBox21.BorderStyle = BorderStyle.None;
-            textBox21.Font = new Font("Dubai", 16F, FontStyle.Regular, GraphicsUnit.Point);
+            textBox21.Font = new Font("Segoe UI Emoji", 17.5F, FontStyle.Bold, GraphicsUnit.Point);
             textBox21.ForeColor = Color.Cyan;
             textBox21.Location = new Point(510, 260);
             textBox21.Multiline = true;
             textBox21.Name = "textBox21";
-            textBox21.Size = new Size(95, 28);
+            textBox21.Size = new Size(353, 55);
             textBox21.TabIndex = 34;
             textBox21.TextAlign = HorizontalAlignment.Center;
             //
@@ -63,7 +63,7 @@ namespace SimConnect3
             closeButton.Name = "closeButton";
             closeButton.Size = new Size(363, 63);
             closeButton.TabIndex = 0;
-            closeButton.Text = "✕  close this cockpit panel";
+            closeButton.Text = "✕  EXIT APP";
             closeButton.UseVisualStyleBackColor = false;
             closeButton.Click += closeButton_Click;
             //
@@ -83,8 +83,6 @@ namespace SimConnect3
             AutoScaleMode = AutoScaleMode.Font;
             BackColor = Color.Black;
             ClientSize = new Size(3840, 2160);
-            Controls.Add(closeButton);
-            Controls.Add(textBox21);
             Controls.Add(pbMain);
             DoubleBuffered = true;
             FormBorderStyle = FormBorderStyle.None;

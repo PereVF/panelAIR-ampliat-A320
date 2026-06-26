@@ -835,7 +835,7 @@ namespace SimConnect3
         // Volum
         private System.Windows.Forms.Button _volUpBtn   = null!;
         private System.Windows.Forms.Button _volDownBtn = null!;
-        private Point _volGrpAnchor = new Point(1920, 1100);
+        private Point _volGrpAnchor = new Point(1300, 80);
         private bool  _volGrpDragging;
         private Point _volGrpDragStartScreen;
 
@@ -872,6 +872,8 @@ namespace SimConnect3
         private DateTime _lastRepaint = DateTime.MinValue;
 
         private Label? _tipLbl;
+        private Form? _overlayPanel;
+        private Panel? _fsConnPanel;
         private bool _tbm930ModCheckDone = false;
 
 
@@ -1085,7 +1087,8 @@ namespace SimConnect3
             mainSurface.SuppressInput = () => calibrationMode || _g3000Active;
 
             this.KeyPreview = true;
-            this.KeyDown += (s, e) => { if (e.KeyCode == Keys.F12) { calibrationMode = !calibrationMode; calibSelectedBtn = null; calibSelectedTri = null; calibSelectedOverlay = null; calibZoomBox.Visible = false; pbMain.Invalidate(); } };
+            Action<KeyEventArgs> handleF12 = (e) => { if (e.KeyCode == Keys.F12) { calibrationMode = !calibrationMode; calibSelectedBtn = null; calibSelectedTri = null; calibSelectedOverlay = null; calibZoomBox.Visible = false; pbMain.Invalidate(); } };
+            this.KeyDown += (s, e) => handleF12(e);
             this.KeyDown += frmMain_KeyDown;
 
             calibZoomBox.Visible = false;
@@ -1144,6 +1147,18 @@ namespace SimConnect3
 
             this.Icon = Resources.logo;
 
+            _overlayPanel = new Form
+            {
+                FormBorderStyle = FormBorderStyle.None,
+                StartPosition = FormStartPosition.Manual,
+                BackColor = Color.Black,
+                ShowInTaskbar = false,
+                Size = new Size(3840, 270),
+                Location = new Point(this.Left, this.Top + 1160)
+            };
+            _overlayPanel.KeyPreview = true;
+            _overlayPanel.KeyDown += (s, e) => handleF12(e);
+
             _tactileBtn = new System.Windows.Forms.Button
             {
                 Text = "🖐  Make this screen touch",
@@ -1177,25 +1192,62 @@ namespace SimConnect3
             {
                 if (!_tactilebtnDragging) return;
                 var screenPt = _tactileBtn.PointToScreen(e.Location);
-                var formPt = this.PointToClient(screenPt);
+                var formPt = _overlayPanel!.PointToClient(screenPt);
                 _tactileBtn.Location = new Point(formPt.X - _tactilebtnDragOffset.X, formPt.Y - _tactilebtnDragOffset.Y);
             };
             _tactileBtn.MouseUp += (s, e) => { _tactilebtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
-            this.Controls.Add(_tactileBtn);
-            _tactileBtn.BringToFront();
+            _tactileBtn.Location = new Point(900, 100);
+            _overlayPanel.Controls.Add(_tactileBtn);
 
-            textBox21.MouseDown += (s, e) => { if (!calibrationMode) return; _tb21Dragging = true; _tb21DragOffset = e.Location; };
-            textBox21.MouseMove += (s, e) =>
+            _fsConnPanel = new Panel
+            {
+                Location = new Point(1870, 30),
+                Size = new Size(363, 126),
+                BackColor = Color.Black
+            };
+            _fsConnPanel.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.White, 1);
+                e.Graphics.DrawRectangle(pen, 0, 0, _fsConnPanel.Width - 1, _fsConnPanel.Height - 1);
+            };
+            var _fsConnTitle = new Label
+            {
+                Text = "FS CONNECTION",
+                Location = new Point(5, 5),
+                Size = new Size(353, 55),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold),
+                ForeColor = Color.White,
+                BackColor = Color.Black
+            };
+            textBox21.Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold);
+            textBox21.Size = new Size(353, 55);
+            textBox21.Location = new Point(5, 63);
+            _fsConnPanel.Controls.Add(_fsConnTitle);
+            _fsConnPanel.Controls.Add(textBox21);
+
+            _fsConnPanel.MouseDown += (s, e) => { if (!calibrationMode) return; _tb21Dragging = true; _tb21DragOffset = e.Location; };
+            _fsConnPanel.MouseMove += (s, e) =>
             {
                 if (!_tb21Dragging) return;
-                var screenPt = textBox21.PointToScreen(e.Location);
-                var formPt = this.PointToClient(screenPt);
-                textBox21.Location = new Point(formPt.X - _tb21DragOffset.X, formPt.Y - _tb21DragOffset.Y);
+                var screenPt = _fsConnPanel.PointToScreen(e.Location);
+                var formPt = _overlayPanel!.PointToClient(screenPt);
+                _fsConnPanel.Location = new Point(formPt.X - _tb21DragOffset.X, formPt.Y - _tb21DragOffset.Y);
             };
-            textBox21.MouseUp += (s, e) => { _tb21Dragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            _fsConnPanel.MouseUp += (s, e) => { _tb21Dragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            _fsConnTitle.MouseDown += (s, e) => { if (!calibrationMode) return; _tb21Dragging = true; _tb21DragOffset = e.Location; };
+            _fsConnTitle.MouseMove += (s, e) =>
+            {
+                if (!_tb21Dragging) return;
+                var screenPt = _fsConnTitle.PointToScreen(e.Location);
+                var formPt = _overlayPanel!.PointToClient(screenPt);
+                _fsConnPanel.Location = new Point(formPt.X - _tb21DragOffset.X, formPt.Y - _tb21DragOffset.Y);
+            };
+            _fsConnTitle.MouseUp += (s, e) => { _tb21Dragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            _overlayPanel.Controls.Add(_fsConnPanel);
 
             _g3000Btn = MakeGroupBtn("TBM 930", 363, 63);
-            _g3000Btn.Location = new Point(3477, 1300);
+            _g3000Btn.Location = new Point(3100, 100);
             _g3000Btn.Click += (s, e) =>
             {
                 if (calibrationMode) return;
@@ -1263,12 +1315,11 @@ namespace SimConnect3
             {
                 if (!_g3000BtnDragging) return;
                 var screenPt = _g3000Btn.PointToScreen(e.Location);
-                var formPt = this.PointToClient(screenPt);
+                var formPt = _overlayPanel!.PointToClient(screenPt);
                 _g3000Btn.Location = new Point(formPt.X - _g3000BtnDragOffset.X, formPt.Y - _g3000BtnDragOffset.Y);
             };
             _g3000Btn.MouseUp += (s, e) => { _g3000BtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
-            this.Controls.Add(_g3000Btn);
-            _g3000Btn.BringToFront();
+            _overlayPanel.Controls.Add(_g3000Btn);
 
             closeButton.MouseDown += (s, e) =>
             {
@@ -1280,10 +1331,13 @@ namespace SimConnect3
             {
                 if (!_closeBtnDragging) return;
                 var screenPt = closeButton.PointToScreen(e.Location);
-                var formPt = this.PointToClient(screenPt);
+                var formPt = _overlayPanel!.PointToClient(screenPt);
                 closeButton.Location = new Point(formPt.X - _closeBtnDragOffset.X, formPt.Y - _closeBtnDragOffset.Y);
             };
             closeButton.MouseUp += (s, e) => { _closeBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            closeButton.Location = new Point(100, 100);
+            closeButton.Anchor = AnchorStyles.None;
+            _overlayPanel.Controls.Add(closeButton);
 
             _showAreasBtn = new System.Windows.Forms.Button
             {
@@ -1315,12 +1369,12 @@ namespace SimConnect3
             {
                 if (!_showAreasBtnDragging) return;
                 var screenPt = _showAreasBtn.PointToScreen(e.Location);
-                var formPt = this.PointToClient(screenPt);
+                var formPt = _overlayPanel!.PointToClient(screenPt);
                 _showAreasBtn.Location = new Point(formPt.X - _showAreasBtnDragOffset.X, formPt.Y - _showAreasBtnDragOffset.Y);
             };
             _showAreasBtn.MouseUp += (s, e) => { _showAreasBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
-            this.Controls.Add(_showAreasBtn);
-            _showAreasBtn.BringToFront();
+            _showAreasBtn.Location = new Point(500, 100);
+            _overlayPanel.Controls.Add(_showAreasBtn);
 
             _gearBtn = new System.Windows.Forms.Button
             {
@@ -1335,23 +1389,44 @@ namespace SimConnect3
             };
             _gearBtn.FlatAppearance.BorderSize = 1;
             _gearBtn.FlatAppearance.BorderColor = Color.White;
-            _gearBtn.Click += (s, e) =>
+            var _overlayGearBtn = new System.Windows.Forms.Button
+            {
+                Text = "⚙",
+                Location = new Point(1896, 22),
+                Size = new Size(63, 63),
+                BackColor = Color.LimeGreen,
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Emoji", 28f, FontStyle.Bold),
+                Cursor = Cursors.Hand
+            };
+            _overlayGearBtn.FlatAppearance.BorderSize = 1;
+            _overlayGearBtn.FlatAppearance.BorderColor = Color.White;
+            bool _overlayGearDragging = false;
+            Point _overlayGearDragOffset = Point.Empty;
+            _overlayGearBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _overlayGearDragging = true; _overlayGearDragOffset = e.Location; };
+            _overlayGearBtn.MouseMove += (s, e) =>
+            {
+                if (!_overlayGearDragging) return;
+                var sp = _overlayGearBtn.PointToScreen(e.Location);
+                var fp = _overlayPanel.PointToClient(sp);
+                _overlayGearBtn.Location = new Point(fp.X - _overlayGearDragOffset.X, fp.Y - _overlayGearDragOffset.Y);
+            };
+            _overlayGearBtn.MouseUp += (s, e) => { _overlayGearDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            _overlayPanel.Controls.Add(_overlayGearBtn);
+
+            Action toggleOverlay = () =>
             {
                 if (calibrationMode) return;
                 _panelVisible = !_panelVisible;
                 _gearBtn.BackColor = _panelVisible ? Color.LimeGreen : Color.Black;
-                closeButton.Visible   = _panelVisible; closeButton.Enabled   = _panelVisible;
-                _showAreasBtn.Visible = _panelVisible; _showAreasBtn.Enabled = _panelVisible;
-                _tactileBtn.Visible   = _panelVisible; _tactileBtn.Enabled   = _panelVisible;
-                _volUpBtn.Visible      = _panelVisible; _volUpBtn.Enabled      = _panelVisible;
-                _volDownBtn.Visible    = _panelVisible; _volDownBtn.Enabled    = _panelVisible;
-                _fullscreenBtn.Visible = _panelVisible; _fullscreenBtn.Enabled = _panelVisible;
-                _msfsEndBtn.Visible    = _panelVisible; _msfsEndBtn.Enabled    = _panelVisible;
-                _focusBtn.Visible      = _panelVisible; _focusBtn.Enabled      = _panelVisible;
-                _engineStartBtn.Visible = _panelVisible; _engineStartBtn.Enabled = _panelVisible;
-                _engineStopBtn.Visible  = _panelVisible; _engineStopBtn.Enabled  = _panelVisible;
-                _g3000Btn.Visible       = _panelVisible; _g3000Btn.Enabled       = _panelVisible;
+                if (_panelVisible)
+                    _overlayPanel!.Show(this);
+                else
+                    _overlayPanel!.Hide();
             };
+            _gearBtn.Click += (s, e) => toggleOverlay();
+            _overlayGearBtn.Click += (s, e) => toggleOverlay();
             _gearBtn.MouseDown += (s, e) =>
             {
                 if (!calibrationMode) return;
@@ -1426,7 +1501,7 @@ namespace SimConnect3
                 b.MouseDown += OnVolGrpMouseDown;
                 b.MouseMove += OnVolGrpMouseMove;
                 b.MouseUp   += OnVolGrpMouseUp;
-                this.Controls.Add(b); b.BringToFront();
+                _overlayPanel.Controls.Add(b);
             }
             UpdateVolGroupPositions();
 
@@ -1458,7 +1533,7 @@ namespace SimConnect3
             {
                 if (!_fullscreenBtnDragging) return;
                 var sp = _fullscreenBtn.PointToScreen(e.Location);
-                var fp = this.PointToClient(sp);
+                var fp = _overlayPanel!.PointToClient(sp);
                 _fullscreenBtn.Location = new Point(fp.X - _fullscreenBtnDragOffset.X, fp.Y - _fullscreenBtnDragOffset.Y);
             };
             _fullscreenBtn.MouseUp += (s, e) =>
@@ -1466,7 +1541,8 @@ namespace SimConnect3
                 _fullscreenBtnDragging = false;
                 try { ExportCalibrationPositions(silent: true); } catch { }
             };
-            this.Controls.Add(_fullscreenBtn); _fullscreenBtn.BringToFront();
+            _fullscreenBtn.Location = new Point(1600, 100);
+            _overlayPanel.Controls.Add(_fullscreenBtn);
 
             // ── Botó MSFS END KEY ──────────────────────────────────────────
             _msfsEndBtn = MakeGroupBtn("CAM IN/EXT", 220, 63);
@@ -1492,7 +1568,7 @@ namespace SimConnect3
             {
                 if (!_msfsEndBtnDragging) return;
                 var sp = _msfsEndBtn.PointToScreen(e.Location);
-                var fp = this.PointToClient(sp);
+                var fp = _overlayPanel!.PointToClient(sp);
                 _msfsEndBtn.Location = new Point(fp.X - _msfsEndBtnDragOffset.X, fp.Y - _msfsEndBtnDragOffset.Y);
             };
             _msfsEndBtn.MouseUp += (s, e) =>
@@ -1500,7 +1576,8 @@ namespace SimConnect3
                 _msfsEndBtnDragging = false;
                 try { ExportCalibrationPositions(silent: true); } catch { }
             };
-            this.Controls.Add(_msfsEndBtn); _msfsEndBtn.BringToFront();
+            _msfsEndBtn.Location = new Point(1900, 100);
+            _overlayPanel.Controls.Add(_msfsEndBtn);
 
             // ── Botó FOCUS MSFS ──────────────────────────────────────────
             _focusBtn = MakeGroupBtn("MSFS FOCUS", 220, 63);
@@ -1522,7 +1599,7 @@ namespace SimConnect3
             {
                 if (!_focusBtnDragging) return;
                 var sp = _focusBtn.PointToScreen(e.Location);
-                var fp = this.PointToClient(sp);
+                var fp = _overlayPanel!.PointToClient(sp);
                 _focusBtn.Location = new Point(fp.X - _focusBtnDragOffset.X, fp.Y - _focusBtnDragOffset.Y);
             };
             _focusBtn.MouseUp += (s, e) =>
@@ -1530,7 +1607,8 @@ namespace SimConnect3
                 _focusBtnDragging = false;
                 try { ExportCalibrationPositions(silent: true); } catch { }
             };
-            this.Controls.Add(_focusBtn); _focusBtn.BringToFront();
+            _focusBtn.Location = new Point(2200, 100);
+            _overlayPanel.Controls.Add(_focusBtn);
 
             // ── Botó ENGINE START ──────────────────────────────────────────
             _engineStartBtn = MakeGroupBtn("ENG START", 220, 63);
@@ -1550,7 +1628,7 @@ namespace SimConnect3
             {
                 if (!_engineStartBtnDragging) return;
                 var sp = _engineStartBtn.PointToScreen(e.Location);
-                var fp = this.PointToClient(sp);
+                var fp = _overlayPanel!.PointToClient(sp);
                 _engineStartBtn.Location = new Point(fp.X - _engineStartBtnDragOffset.X, fp.Y - _engineStartBtnDragOffset.Y);
             };
             _engineStartBtn.MouseUp += (s, e) =>
@@ -1558,7 +1636,8 @@ namespace SimConnect3
                 _engineStartBtnDragging = false;
                 try { ExportCalibrationPositions(silent: true); } catch { }
             };
-            this.Controls.Add(_engineStartBtn); _engineStartBtn.BringToFront();
+            _engineStartBtn.Location = new Point(2500, 100);
+            _overlayPanel.Controls.Add(_engineStartBtn);
 
             // ── Botó ENGINE STOP ──────────────────────────────────────────
             _engineStopBtn = MakeGroupBtn("ENG STOP", 220, 63);
@@ -1578,7 +1657,7 @@ namespace SimConnect3
             {
                 if (!_engineStopBtnDragging) return;
                 var sp = _engineStopBtn.PointToScreen(e.Location);
-                var fp = this.PointToClient(sp);
+                var fp = _overlayPanel!.PointToClient(sp);
                 _engineStopBtn.Location = new Point(fp.X - _engineStopBtnDragOffset.X, fp.Y - _engineStopBtnDragOffset.Y);
             };
             _engineStopBtn.MouseUp += (s, e) =>
@@ -1586,20 +1665,9 @@ namespace SimConnect3
                 _engineStopBtnDragging = false;
                 try { ExportCalibrationPositions(silent: true); } catch { }
             };
-            this.Controls.Add(_engineStopBtn); _engineStopBtn.BringToFront();
+            _engineStopBtn.Location = new Point(2800, 100);
+            _overlayPanel.Controls.Add(_engineStopBtn);
 
-            // Els botons comencen amagats (estat inicial: engranatge negre)
-            closeButton.Visible   = false; closeButton.Enabled   = false;
-            _showAreasBtn.Visible = false; _showAreasBtn.Enabled = false;
-            _tactileBtn.Visible   = false; _tactileBtn.Enabled   = false;
-            _volUpBtn.Visible      = false; _volUpBtn.Enabled      = false;
-            _volDownBtn.Visible    = false; _volDownBtn.Enabled    = false;
-            _fullscreenBtn.Visible = false; _fullscreenBtn.Enabled = false;
-            _msfsEndBtn.Visible    = false; _msfsEndBtn.Enabled    = false;
-            _focusBtn.Visible      = false; _focusBtn.Enabled      = false;
-            _engineStartBtn.Visible = false; _engineStartBtn.Enabled = false;
-            _engineStopBtn.Visible  = false; _engineStopBtn.Enabled  = false;
-            _g3000Btn.Visible       = false; _g3000Btn.Enabled       = false;
             //this.TopMost = true;
             this.Load += frmMain_Load;
             //EnableFormDragging(this);
@@ -1990,7 +2058,7 @@ namespace SimConnect3
                 new() { Name="G3K_ELECSRC_GPU",  TypeKey="G3K elec src", BasePos=new Point(100, 1500), ZoomWidth=75, Img=swUpWhiteImg,
                         ShowWhen = () => _elecSourceSwitch >= 1.5 },
                 new() { Name="G3K_ELECSRC_UP",   TypeKey="G3K elec click", BasePos=new Point(100, 1470), ZoomWidth=40, ZoomHeight=40,
-                        OnClick = () => { if (_elecCrashbar >= 0.5 && _elecSourceSwitch < 1.5) SetElecSourceSwitch(Math.Round(_elecSourceSwitch) + 1); } },
+                        OnClick = () => { if (_elecCrashbar >= 0.5 && _elecSourceSwitch < 1.5) { var newVal = Math.Round(_elecSourceSwitch) + 1; if (newVal >= 0.5 && _elecSourceSwitch < 0.5) { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.STARTER1_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } SetElecSourceSwitch(newVal); } } },
                 new() { Name="G3K_ELECSRC_DN",   TypeKey="G3K elec click", BasePos=new Point(100, 1540), ZoomWidth=40, ZoomHeight=40,
                         OnClick = () => { if (_elecCrashbar >= 0.5 && _elecSourceSwitch > 0.5) SetElecSourceSwitch(Math.Round(_elecSourceSwitch) - 1); } },
                 new() { Name="G3K_ELECGEN_OFF",  TypeKey="G3K elec gen", BasePos=new Point(1225, 147), ZoomWidth=80, Img=swDownWhiteImg,
@@ -2032,7 +2100,7 @@ namespace SimConnect3
                 new() { Name="G3K_STARTER_UP",    TypeKey="G3K starter sw", BasePos=new Point(1900, 97), ZoomWidth=105, Img=swUpBlackImg,
                         ShowWhen = () => _elecStarter < 0.5 },
                 new() { Name="G3K_STARTER_CK_UP", TypeKey="G3K starter click", BasePos=new Point(1894, 38), ZoomWidth=119, ZoomHeight=112,
-                        OnClick = () => { SetElecStarter(0); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Run(async () => { await Task.Delay(4000); SetElecStarter(1); }); } },
+                        OnClick = () => { SetElecStarter(0); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Run(async () => { await Task.Delay(4000); this.BeginInvoke(new Action(() => { SetElecStarter(1); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); })); }); } },
                 new() { Name="G3K_STARTER_CK_DN", TypeKey="G3K starter click", BasePos=new Point(1893, 193), ZoomWidth=119, ZoomHeight=112,
                         OnClick = () => { SetElecStarter(2); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.STARTER1_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Run(async () => { await Task.Delay(1500); SetElecStarter(1); }); } },
                 new() { Name="G3K_IGNITION_DN",    TypeKey="G3K ignition sw", BasePos=new Point(2000, 123), ZoomWidth=105, Img=swDownBlackImg,
@@ -3173,9 +3241,9 @@ namespace SimConnect3
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.ELECT_FUEL_PUMP1_SET, "ELECT_FUEL_PUMP1_SET");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.ELECT_FUEL_PUMP1_SET, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SET_STARTER1_HELD, "SET_STARTER1_HELD");
-                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, false);
+                //simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.STARTER1_SET, "STARTER1_SET");
-                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.STARTER1_SET, false);
+                //simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.STARTER1_SET, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AUTOPILOT_DISENGAGE_TOGGLE, "AUTOPILOT_DISENGAGE_TOGGLE");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AUTOPILOT_DISENGAGE_TOGGLE, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.RUDDER_TRIM_DISABLED_SET, "RUDDER_TRIM_DISABLED_SET");
@@ -3293,7 +3361,7 @@ namespace SimConnect3
                     simReconnectTimer.Stop();
 
                     textBox21.Text = "MSFS";
-                    textBox21.ForeColor = Color.Cyan;
+                    textBox21.ForeColor = Color.DodgerBlue;
 
                     try
                     {
@@ -3376,8 +3444,8 @@ namespace SimConnect3
         {
             Console.WriteLine("SimConnect connection established");
 
-            textBox21.Text = "MSFS";
-            textBox21.ForeColor = Color.Cyan;
+            textBox21.Text = data.dwApplicationVersionMajor >= 12 ? "MSFS 2024" : "MSFS 2020";
+            textBox21.ForeColor = Color.DodgerBlue;
             // Ens acabem de connectar: aturem reintents i forcem un "refresh" inicial.
             simReconnectPending = false;
             if (simReconnectTimer.Enabled) simReconnectTimer.Stop();
@@ -4581,6 +4649,8 @@ namespace SimConnect3
             sb.AppendLine($"FOCUSBTN:focus:{_focusBtn.Location.X}:{_focusBtn.Location.Y}");
             sb.AppendLine($"ENGSTARTBTN:engstart:{_engineStartBtn.Location.X}:{_engineStartBtn.Location.Y}");
             sb.AppendLine($"ENGSTOPBTN:engstop:{_engineStopBtn.Location.X}:{_engineStopBtn.Location.Y}");
+            sb.AppendLine($"G3KBTN:g3k:{_g3000Btn.Location.X}:{_g3000Btn.Location.Y}");
+            if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
             string projectDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.StartupPath, @"..\..\..\..\.."));
             string path = System.IO.Path.Combine(projectDir, "calibration_export.txt");
             System.IO.File.WriteAllText(path, sb.ToString());
@@ -4714,6 +4784,14 @@ namespace SimConnect3
                 else if (type == "ENGSTOPBTN")
                 {
                     _engineStopBtn.Location = new Point(x, y);
+                }
+                else if (type == "G3KBTN")
+                {
+                    _g3000Btn.Location = new Point(x, y);
+                }
+                else if (type == "FSCONN" && _fsConnPanel != null)
+                {
+                    _fsConnPanel.Location = new Point(x, y);
                 }
             }
         }
