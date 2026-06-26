@@ -628,6 +628,8 @@ namespace SimConnect3
             TBM930_LIGHT_LDG,
             TBM930_LIGHT_TAXI,
             TBM930_LIGHT_OFF,
+            TBM930_FUELSEL_AUTO,
+            TBM930_FUELSEL_MAN,
             //softkeys MFD
             MFD_SK_1,
             MFD_SK_2,
@@ -1203,6 +1205,7 @@ namespace SimConnect3
                 {
                     ApplyG3000Region();
                     SetAPTrimPos(0);
+                    if (simconnect != null) { simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_FUELSEL_AUTO, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); _fuelSelectionSet = 2; }
                     CheckTBM930Mod();
                 }
                 else
@@ -2077,7 +2080,12 @@ namespace SimConnect3
                 new() { Name="G3K_FUELSEL_ON", TypeKey="G3K fuelsel", BasePos=new Point(1905, 115), ZoomWidth=67, Img=LoadOverlayImage("rocker_black_sw_OFF.png"),
                         ShowWhen = () => _fuelSelectionSet < 1.5 },
                 new() { Name="G3K_FUELSEL_TOG", TypeKey="G3K fuelsel click", BasePos=new Point(1902, 101), ZoomWidth=71, ZoomHeight=113,
-                        OnClick = () => SetFuelSelection(_fuelSelectionSet >= 1.5 ? 1.0 : 2.0) },
+                        OnClick = () => {
+                            if (simconnect == null) return;
+                            if (_fuelSelectionSet >= 1.5) { simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_FUELSEL_MAN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); _fuelSelectionSet = 1; }
+                            else { simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_FUELSEL_AUTO, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); _fuelSelectionSet = 2; }
+                            pbMain.Invalidate();
+                        } },
             };
 
             LoadCalibrationPositions();
@@ -3182,6 +3190,10 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TBM930_LIGHT_TAXI, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TBM930_LIGHT_OFF, "SFS.TBM930_Light_OFF");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TBM930_LIGHT_OFF, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TBM930_FUELSEL_AUTO, "SFS.TBM930_FuelSel_Auto");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TBM930_FUELSEL_AUTO, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TBM930_FUELSEL_MAN, "SFS.TBM930_FuelSel_Man");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TBM930_FUELSEL_MAN, false);
                 simconnect.AddToDataDefinition(DEFINITIONS.LightingLogo1Write, "L:LIGHTING_LOGO_1", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<LightingLogo1Struct>(DEFINITIONS.LightingLogo1Write);
                 simconnect.AddToDataDefinition(DEFINITIONS.FuelSelectionWrite, "L:TBM930_FUEL_SELECTION_SET", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -3728,7 +3740,7 @@ namespace SimConnect3
                 if (_lightingLogo1 != s1.lightingLogo1) { _lightingLogo1 = s1.lightingLogo1; needsRepaint = true; }
                 _lightLogo = s1.lightLogo;
                 _circuitConn17 = s1.circuitConn17;
-                if (_fuelSelectionSet != s1.fuelSelectionSet) { _fuelSelectionSet = s1.fuelSelectionSet; needsRepaint = true; }
+                // _fuelSelectionSet es gestiona localment, no es llegeix de MSFS
                 if (_elecCrashbar < 0.5 && (_elecSourceSwitch > 0.5 || _elecGeneratorSwitch > 0.5))
                 {
                     SetElecSourceSwitch(0);
