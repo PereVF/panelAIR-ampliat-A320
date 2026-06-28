@@ -442,7 +442,6 @@ namespace SimConnect3
             LightingLogo1Write,
             FuelSelectionWrite,
             CondLeverCutoffWrite,
-            CondLeverPosWrite,
             PropLeverWrite,
         }
 
@@ -464,8 +463,6 @@ namespace SimConnect3
         struct FuelSelectionStruct { public double value; }
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct CondLeverCutoffStruct { public double value; }
-        [StructLayout(LayoutKind.Sequential, Pack = 1)]
-        struct CondLeverPosStruct { public double value; }
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct PropLeverStruct { public double value; }
 
@@ -648,7 +645,6 @@ namespace SimConnect3
             PROP_PITCH1_AXIS_SET_EX,
             CONDITION_LEVER_SET,
             PROP_PITCH_SET,
-            AXIS_MIXTURE_SET,
             AXIS_THROTTLE_SET,
             //softkeys MFD
             MFD_SK_1,
@@ -903,17 +899,20 @@ namespace SimConnect3
         private System.Windows.Forms.Button _highIdleBtn = null!;
         private bool _highIdleDragging;
         private Point _highIdleDragOffset;
+        private System.Windows.Forms.Button _taxiBtn = null!;
+        private bool _taxiBtnDragging;
+        private Point _taxiBtnDragOffset;
+        private bool _taxiPropActive = false;
+        private bool _thrSliderFollow = false;
         private TrackBar? _propPitchSlider;
         private Label? _propPitchLabel;
         private Label? _propLeverLabel;
         private Label? _propRpmLabel;
         private CheckBox? _propSendEnabled;
-        private TrackBar? _mixSlider;
-        private Label? _mixLabel;
-        private CheckBox? _mixSendEnabled;
         private TrackBar? _condSlider;
         private Label? _condLabel;
         private CheckBox? _condSendEnabled;
+        private Label? _thrReadLabel;
         private bool _tbm930ModCheckDone = false;
 
 
@@ -1048,6 +1047,7 @@ namespace SimConnect3
             public double fuelSelectionSet;    // L:TBM930_FUEL_SELECTION_SET (1=MANUAL, 2=AUTO)
             public double propLeverPos;        // GENERAL ENG PROPELLER LEVER POSITION:1 (0-100%)
             public double propRpm;             // PROP RPM:1
+            public double thrLeverPos;         // GENERAL ENG THROTTLE LEVER POSITION:1
 
 
 
@@ -1301,22 +1301,34 @@ namespace SimConnect3
                 _fuelCutoffBtn.Visible = _g3000Active;
                 _lowIdleBtn.Visible = _g3000Active;
                 _highIdleBtn.Visible = _g3000Active;
+                _taxiBtn.Visible = _g3000Active;
                 if (_propPitchSlider != null) _propPitchSlider.Visible = _g3000Active;
                 if (_propPitchLabel != null) _propPitchLabel.Visible = _g3000Active;
-                if (_propLeverLabel != null) _propLeverLabel.Visible = _g3000Active;
-                if (_propRpmLabel != null) _propRpmLabel.Visible = _g3000Active;
                 _propSendEnabled.Visible = _g3000Active;
-                if (_mixSlider != null) _mixSlider.Visible = _g3000Active;
-                if (_mixLabel != null) _mixLabel.Visible = _g3000Active;
-                if (_mixSendEnabled != null) _mixSendEnabled.Visible = _g3000Active;
                 if (_condSlider != null) _condSlider.Visible = _g3000Active;
                 if (_condLabel != null) _condLabel.Visible = _g3000Active;
                 if (_condSendEnabled != null) _condSendEnabled.Visible = _g3000Active;
+                if (_thrReadLabel != null) _thrReadLabel.Visible = _g3000Active;
                 if (_g3000Active)
                 {
                     ApplyG3000Region();
                     SetAPTrimPos(0);
-                    if (simconnect != null) { simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_FUELSEL_AUTO, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); _fuelSelectionSet = 2; }
+                    if (simconnect != null)
+                    {
+                        simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_FUELSEL_AUTO, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); _fuelSelectionSet = 2;
+                        simconnect.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 1 });
+                        simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-16383)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        _propSendEnabled!.Checked = false;
+                        _condSendEnabled!.Checked = false;
+                        Task.Run(async () => { await Task.Delay(500); this.BeginInvoke(new Action(() => {
+                            simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 1 });
+                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-16383)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        })); });
+                    }
                     CheckTBM930Mod();
                 }
                 else
@@ -2231,14 +2243,70 @@ namespace SimConnect3
             _fuelCutoffBtn.Click += (s, e) =>
             {
                 if (calibrationMode) return;
+                _taxiPropActive = false;
+                _thrSliderFollow = false;
+                _condSendEnabled!.Checked = false;
                 simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 0 });
                 simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverPosWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverPosStruct { value = 0 });
             };
             _fuelCutoffBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _fuelCutoffDragging = true; _fuelCutoffDragOffset = e.Location; };
             _fuelCutoffBtn.MouseMove += (s, e) => { if (!_fuelCutoffDragging) return; var sp = _fuelCutoffBtn.PointToScreen(e.Location); var fp = this.PointToClient(sp); _fuelCutoffBtn.Location = new Point(fp.X - _fuelCutoffDragOffset.X, fp.Y - _fuelCutoffDragOffset.Y); };
             _fuelCutoffBtn.MouseUp += (s, e) => { _fuelCutoffDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             this.Controls.Add(_fuelCutoffBtn); _fuelCutoffBtn.BringToFront();
+
+            _taxiBtn = new System.Windows.Forms.Button
+            {
+                Text = "TAXI",
+                Location = new Point(3600, 754),
+                Size = new Size(220, 63),
+                BackColor = Color.Black, ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand, Visible = false
+            };
+            _taxiBtn.FlatAppearance.BorderSize = 1;
+            _taxiBtn.FlatAppearance.BorderColor = Color.White;
+            _taxiBtn.Click += (s, e) =>
+            {
+                if (calibrationMode) return;
+                _taxiPropActive = true;
+                _thrSliderFollow = true;
+                _condSendEnabled!.Checked = true;
+                _condSlider!.Value = -16383;
+                _condLabel!.Text = $"THR: {-16383}";
+                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 8250, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-16383)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            };
+            _taxiBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _taxiBtnDragging = true; _taxiBtnDragOffset = e.Location; };
+            _taxiBtn.MouseMove += (s, e) => { if (!_taxiBtnDragging) return; var sp = _taxiBtn.PointToScreen(e.Location); var fp = this.PointToClient(sp); _taxiBtn.Location = new Point(fp.X - _taxiBtnDragOffset.X, fp.Y - _taxiBtnDragOffset.Y); };
+            _taxiBtn.MouseUp += (s, e) => { _taxiBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            this.Controls.Add(_taxiBtn); _taxiBtn.BringToFront();
+
+            _highIdleBtn = new System.Windows.Forms.Button
+            {
+                Text = "HIGH IDLE",
+                Location = new Point(3600, 817),
+                Size = new Size(220, 63),
+                BackColor = Color.Black, ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold),
+                Cursor = Cursors.Hand, Visible = false
+            };
+            _highIdleBtn.FlatAppearance.BorderSize = 1;
+            _highIdleBtn.FlatAppearance.BorderColor = Color.White;
+            _highIdleBtn.Click += (s, e) =>
+            {
+                if (calibrationMode) return;
+                _taxiPropActive = false;
+                _thrSliderFollow = false;
+                _condSendEnabled!.Checked = false;
+                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-11000)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            };
+            _highIdleBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _highIdleDragging = true; _highIdleDragOffset = e.Location; };
+            _highIdleBtn.MouseMove += (s, e) => { if (!_highIdleDragging) return; var sp = _highIdleBtn.PointToScreen(e.Location); var fp = this.PointToClient(sp); _highIdleBtn.Location = new Point(fp.X - _highIdleDragOffset.X, fp.Y - _highIdleDragOffset.Y); };
+            _highIdleBtn.MouseUp += (s, e) => { _highIdleDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            this.Controls.Add(_highIdleBtn); _highIdleBtn.BringToFront();
 
             _lowIdleBtn = new System.Windows.Forms.Button
             {
@@ -2255,71 +2323,29 @@ namespace SimConnect3
             _lowIdleBtn.Click += (s, e) =>
             {
                 if (calibrationMode) return;
-                simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 1 });
-                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverPosWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverPosStruct { value = 1 });
+                _taxiPropActive = false;
+                _thrSliderFollow = false;
+                _condSendEnabled!.Checked = false;
+                Action sendLowIdle = () =>
+                {
+                    simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 1 });
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-16383)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                };
+                sendLowIdle();
+                Task.Run(async () => { await Task.Delay(500); this.BeginInvoke(sendLowIdle); });
             };
             _lowIdleBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _lowIdleDragging = true; _lowIdleDragOffset = e.Location; };
             _lowIdleBtn.MouseMove += (s, e) => { if (!_lowIdleDragging) return; var sp = _lowIdleBtn.PointToScreen(e.Location); var fp = this.PointToClient(sp); _lowIdleBtn.Location = new Point(fp.X - _lowIdleDragOffset.X, fp.Y - _lowIdleDragOffset.Y); };
             _lowIdleBtn.MouseUp += (s, e) => { _lowIdleDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             this.Controls.Add(_lowIdleBtn); _lowIdleBtn.BringToFront();
 
-            _highIdleBtn = new System.Windows.Forms.Button
-            {
-                Text = "HIGH IDLE",
-                Location = new Point(3600, 960),
-                Size = new Size(220, 63),
-                BackColor = Color.Black, ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold),
-                Cursor = Cursors.Hand, Visible = false
-            };
-            _highIdleBtn.FlatAppearance.BorderSize = 1;
-            _highIdleBtn.FlatAppearance.BorderColor = Color.White;
-            _highIdleBtn.Click += (s, e) =>
-            {
-                if (calibrationMode) return;
-                simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 1 });
-                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverPosWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverPosStruct { value = 2 });
-            };
-            _highIdleBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _highIdleDragging = true; _highIdleDragOffset = e.Location; };
-            _highIdleBtn.MouseMove += (s, e) => { if (!_highIdleDragging) return; var sp = _highIdleBtn.PointToScreen(e.Location); var fp = this.PointToClient(sp); _highIdleBtn.Location = new Point(fp.X - _highIdleDragOffset.X, fp.Y - _highIdleDragOffset.Y); };
-            _highIdleBtn.MouseUp += (s, e) => { _highIdleDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
-            this.Controls.Add(_highIdleBtn); _highIdleBtn.BringToFront();
-
-            // Labels lectura PROP
-            _propRpmLabel = new Label
-            {
-                Text = "RPM: ---",
-                Location = new Point(3620, 370),
-                Size = new Size(210, 35),
-                Font = new Font("Segoe UI Emoji", 14f, FontStyle.Bold),
-                ForeColor = Color.LimeGreen,
-                BackColor = Color.Black,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Visible = false
-            };
-            this.Controls.Add(_propRpmLabel); _propRpmLabel.BringToFront();
-
-            _propLeverLabel = new Label
-            {
-                Text = "LEVER: ---",
-                Location = new Point(3620, 410),
-                Size = new Size(210, 35),
-                Font = new Font("Segoe UI Emoji", 14f, FontStyle.Bold),
-                ForeColor = Color.Cyan,
-                BackColor = Color.Black,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Visible = false
-            };
-            this.Controls.Add(_propLeverLabel); _propLeverLabel.BringToFront();
-
-            // Slider provisional PROP PITCH
+            // Label valor enviat PROP
             _propPitchLabel = new Label
             {
                 Text = "PROP: 0",
-                Location = new Point(3650, 450),
+                Location = new Point(3450, 460),
                 Size = new Size(180, 40),
                 Font = new Font("Segoe UI Emoji", 14f, FontStyle.Bold),
                 ForeColor = Color.White,
@@ -2332,7 +2358,7 @@ namespace SimConnect3
             _propPitchSlider = new TrackBar
             {
                 Orientation = Orientation.Vertical,
-                Location = new Point(3700, 500),
+                Location = new Point(3500, 500),
                 Size = new Size(60, 400),
                 Minimum = -16383,
                 Maximum = 16383,
@@ -2346,7 +2372,7 @@ namespace SimConnect3
             _propSendEnabled = new CheckBox
             {
                 Text = "SEND",
-                Location = new Point(3700, 910),
+                Location = new Point(3500, 910),
                 Size = new Size(80, 30),
                 ForeColor = Color.White,
                 BackColor = Color.Black,
@@ -2357,67 +2383,34 @@ namespace SimConnect3
             _propPitchSlider.Scroll += (s, e) =>
             {
                 int val = _propPitchSlider.Value;
-                _propPitchLabel!.Text = $"PROP: {val}";
+                uint sent = (uint)(val + 16383);
+                _propPitchLabel!.Text = $"PROP: {sent}";
                 if (_propSendEnabled!.Checked)
-                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, (uint)(val + 16383), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, sent, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             };
             this.Controls.Add(_propPitchSlider); _propPitchSlider.BringToFront();
             this.Controls.Add(_propSendEnabled); _propSendEnabled.BringToFront();
 
             // Slider provisional MIXTURE
-            _mixLabel = new Label
+            // Label lectura THROTTLE
+            _thrReadLabel = new Label
             {
-                Text = "MIX: 0",
-                Location = new Point(3500, 450),
-                Size = new Size(180, 40),
+                Text = "THR READ: ---",
+                Location = new Point(3450, 990),
+                Size = new Size(220, 35),
                 Font = new Font("Segoe UI Emoji", 14f, FontStyle.Bold),
-                ForeColor = Color.Yellow,
+                ForeColor = Color.LimeGreen,
                 BackColor = Color.Black,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Visible = false
             };
-            this.Controls.Add(_mixLabel); _mixLabel.BringToFront();
-
-            _mixSlider = new TrackBar
-            {
-                Orientation = Orientation.Vertical,
-                Location = new Point(3550, 500),
-                Size = new Size(60, 400),
-                Minimum = -16383,
-                Maximum = 16383,
-                Value = 0,
-                TickFrequency = 4000,
-                LargeChange = 1000,
-                SmallChange = 100,
-                BackColor = Color.Black,
-                Visible = false
-            };
-            _mixSendEnabled = new CheckBox
-            {
-                Text = "SEND",
-                Location = new Point(3550, 910),
-                Size = new Size(80, 30),
-                ForeColor = Color.White,
-                BackColor = Color.Black,
-                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
-                Checked = true,
-                Visible = false
-            };
-            _mixSlider.Scroll += (s, e) =>
-            {
-                int val = _mixSlider.Value;
-                _mixLabel!.Text = $"MIX: {val}";
-                if (_mixSendEnabled!.Checked)
-                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_MIXTURE_SET, (uint)(val + 16383), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-            };
-            this.Controls.Add(_mixSlider); _mixSlider.BringToFront();
-            this.Controls.Add(_mixSendEnabled); _mixSendEnabled.BringToFront();
+            this.Controls.Add(_thrReadLabel); _thrReadLabel.BringToFront();
 
             // Slider provisional THROTTLE
             _condLabel = new Label
             {
                 Text = "THR: 0",
-                Location = new Point(3620, 1030),
+                Location = new Point(3470, 1030),
                 Size = new Size(180, 40),
                 Font = new Font("Segoe UI Emoji", 14f, FontStyle.Bold),
                 ForeColor = Color.Orange,
@@ -2430,9 +2423,9 @@ namespace SimConnect3
             _condSlider = new TrackBar
             {
                 Orientation = Orientation.Vertical,
-                Location = new Point(3650, 1080),
+                Location = new Point(3500, 1080),
                 Size = new Size(60, 400),
-                Minimum = -16383,
+                Minimum = -21350,
                 Maximum = 16383,
                 Value = 0,
                 TickFrequency = 4000,
@@ -2444,7 +2437,7 @@ namespace SimConnect3
             _condSendEnabled = new CheckBox
             {
                 Text = "SEND",
-                Location = new Point(3650, 1490),
+                Location = new Point(3500, 1490),
                 Size = new Size(80, 30),
                 ForeColor = Color.White,
                 BackColor = Color.Black,
@@ -2455,9 +2448,14 @@ namespace SimConnect3
             _condSlider.Scroll += (s, e) =>
             {
                 int val = _condSlider.Value;
-                _condLabel!.Text = $"THR: {val}";
+                uint sent = unchecked((uint)val);
+                _condLabel!.Text = $"THR: {(int)sent}";
                 if (_condSendEnabled!.Checked)
-                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)val), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                {
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, sent, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    if (_taxiPropActive)
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 8250, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                }
             };
             this.Controls.Add(_condSlider); _condSlider.BringToFront();
             this.Controls.Add(_condSendEnabled); _condSendEnabled.BringToFront();
@@ -2469,10 +2467,12 @@ namespace SimConnect3
                 if (!_g3000Active || simconnect == null) return;
                 if (_propSendEnabled!.Checked)
                     simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, (uint)(_propPitchSlider!.Value + 16383), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                if (_mixSendEnabled!.Checked)
-                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_MIXTURE_SET, (uint)(_mixSlider!.Value + 16383), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                 if (_condSendEnabled!.Checked)
+                {
                     simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)_condSlider!.Value), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    if (_taxiPropActive)
+                        simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 8250, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                }
             };
             sliderResendTimer.Start();
 
@@ -3540,6 +3540,7 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:TBM930_FUEL_SELECTION_SET", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG PROPELLER LEVER POSITION:1", "Position 16k", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "PROP RPM:1", "Rpm", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG THROTTLE LEVER POSITION:1", "Position 16k", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
 
@@ -3590,8 +3591,6 @@ namespace SimConnect3
                 simconnect.RegisterDataDefineStruct<FuelSelectionStruct>(DEFINITIONS.FuelSelectionWrite);
                 simconnect.AddToDataDefinition(DEFINITIONS.CondLeverCutoffWrite, "L:Condition_Lever_CutOff_1", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CondLeverCutoffStruct>(DEFINITIONS.CondLeverCutoffWrite);
-                simconnect.AddToDataDefinition(DEFINITIONS.CondLeverPosWrite, "TURB ENG CONDITION LEVER POSITION:1", "Enum", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.RegisterDataDefineStruct<CondLeverPosStruct>(DEFINITIONS.CondLeverPosWrite);
                 simconnect.AddToDataDefinition(DEFINITIONS.PropLeverWrite, "GENERAL ENG PROPELLER LEVER POSITION:1", "Position 16k", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<PropLeverStruct>(DEFINITIONS.PropLeverWrite);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, "SET_FUEL_VALVE_ENG1");
@@ -3612,8 +3611,6 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.CONDITION_LEVER_SET, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.PROP_PITCH_SET, "PROP_PITCH_SET");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.PROP_PITCH_SET, false);
-                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AXIS_MIXTURE_SET, "AXIS_MIXTURE_SET");
-                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AXIS_MIXTURE_SET, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, "AXIS_THROTTLE_SET");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, false);
 
@@ -4158,11 +4155,21 @@ namespace SimConnect3
                 if (_lightingLogo1 != s1.lightingLogo1) { _lightingLogo1 = s1.lightingLogo1; needsRepaint = true; }
                 _lightLogo = s1.lightLogo;
                 _circuitConn17 = s1.circuitConn17;
+                if (_thrReadLabel != null && _g3000Active)
+                {
+                    _thrReadLabel.BeginInvoke(new Action(() =>
+                    {
+                        _thrReadLabel.Text = $"THR READ: {s1.thrLeverPos:F0}";
+                        if (_thrSliderFollow && _condSlider != null)
+                        {
+                            int sliderVal = (int)(s1.thrLeverPos * 2) - 16383;
+                            sliderVal = Math.Max(_condSlider.Minimum, Math.Min(_condSlider.Maximum, sliderVal));
+                            _condSlider.Value = sliderVal;
+                            _condLabel!.Text = $"THR: {unchecked((int)((uint)sliderVal))}";
+                        }
+                    }));
+                }
                 // _fuelSelectionSet es gestiona localment, no es llegeix de MSFS
-                if (_propLeverLabel != null && _g3000Active)
-                    _propLeverLabel.BeginInvoke(new Action(() => _propLeverLabel.Text = $"LEVER: {s1.propLeverPos:F0}"));
-                if (_propRpmLabel != null && _g3000Active)
-                    _propRpmLabel.BeginInvoke(new Action(() => _propRpmLabel.Text = $"RPM: {s1.propRpm:F0}"));
                 if (_elecCrashbar < 0.5 && (_elecSourceSwitch > 0.5 || _elecGeneratorSwitch > 0.5))
                 {
                     SetElecSourceSwitch(0);
@@ -5007,6 +5014,7 @@ namespace SimConnect3
             sb.AppendLine($"FUELCUTOFF:fc:{_fuelCutoffBtn.Location.X}:{_fuelCutoffBtn.Location.Y}:{_fuelCutoffBtn.Width}:{_fuelCutoffBtn.Height}");
             sb.AppendLine($"LOWIDLE:li:{_lowIdleBtn.Location.X}:{_lowIdleBtn.Location.Y}:{_lowIdleBtn.Width}:{_lowIdleBtn.Height}");
             sb.AppendLine($"HIGHIDLE:hi:{_highIdleBtn.Location.X}:{_highIdleBtn.Location.Y}:{_highIdleBtn.Width}:{_highIdleBtn.Height}");
+            sb.AppendLine($"TAXIBTN:tx:{_taxiBtn.Location.X}:{_taxiBtn.Location.Y}:{_taxiBtn.Width}:{_taxiBtn.Height}");
             if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
             string projectDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.StartupPath, @"..\..\..\..\.."));
             string path = System.IO.Path.Combine(projectDir, "calibration_export.txt");
@@ -5164,6 +5172,11 @@ namespace SimConnect3
                 {
                     _highIdleBtn.Location = new Point(x, y);
                     _highIdleBtn.Size = new Size(hiw, hih);
+                }
+                else if (type == "TAXIBTN" && parts.Length >= 6 && int.TryParse(parts[4], out int txw) && int.TryParse(parts[5], out int txh))
+                {
+                    _taxiBtn.Location = new Point(x, y);
+                    _taxiBtn.Size = new Size(txw, txh);
                 }
             }
         }
