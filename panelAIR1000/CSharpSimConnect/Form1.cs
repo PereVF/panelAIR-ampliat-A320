@@ -904,6 +904,13 @@ namespace SimConnect3
         private Point _taxiBtnDragOffset;
         private bool _taxiPropActive = false;
         private bool _thrSliderFollow = false;
+        private bool _thrQuadrantVisible = false;
+        private System.Windows.Forms.Button _thrQuadrantBtn = null!;
+        private bool _thrHandleDragging = false;
+        private int _thrHandleDragOffsetY;
+        private int _thrHandleDefaultY = -1;
+        private Label? _thrHandleXLabel;
+        private Label? _thrHandleYLabel;
         private TrackBar? _propPitchSlider;
         private Label? _propPitchLabel;
         private Label? _propLeverLabel;
@@ -1309,10 +1316,22 @@ namespace SimConnect3
                 if (_condLabel != null) _condLabel.Visible = _g3000Active;
                 if (_condSendEnabled != null) _condSendEnabled.Visible = _g3000Active;
                 if (_thrReadLabel != null) _thrReadLabel.Visible = _g3000Active;
+                _thrQuadrantBtn.Visible = _g3000Active;
+                if (_thrHandleXLabel != null) _thrHandleXLabel.Visible = _g3000Active;
+                if (_thrHandleYLabel != null) _thrHandleYLabel.Visible = _g3000Active;
+                if (!_g3000Active) { _thrQuadrantVisible = false; }
                 if (_g3000Active)
                 {
                     ApplyG3000Region();
                     SetAPTrimPos(0);
+                    var thrH = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
+                    if (thrH != null)
+                    {
+                        int cx = thrH.BasePos.X + thrH.Bounds.Width / 2;
+                        int cy = thrH.BasePos.Y + thrH.Bounds.Height / 2;
+                        if (_thrHandleXLabel != null) _thrHandleXLabel.Text = $"HX: {cx}";
+                        if (_thrHandleYLabel != null) _thrHandleYLabel.Text = $"HY: {cy}";
+                    }
                     if (simconnect != null)
                     {
                         simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_FUELSEL_AUTO, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); _fuelSelectionSet = 2;
@@ -1391,6 +1410,65 @@ namespace SimConnect3
             };
             _g3000Btn.MouseUp += (s, e) => { _g3000BtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             _overlayPanel.Controls.Add(_g3000Btn);
+
+            _thrHandleXLabel = new Label
+            {
+                Text = "HX: ---",
+                Location = new Point(3730, 900),
+                Size = new Size(100, 25),
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                ForeColor = Color.Yellow, BackColor = Color.Black,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Visible = false
+            };
+            this.Controls.Add(_thrHandleXLabel); _thrHandleXLabel.BringToFront();
+            _thrHandleYLabel = new Label
+            {
+                Text = "HY: ---",
+                Location = new Point(3730, 930),
+                Size = new Size(100, 25),
+                Font = new Font("Segoe UI", 10f, FontStyle.Bold),
+                ForeColor = Color.Yellow, BackColor = Color.Black,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Visible = false
+            };
+            this.Controls.Add(_thrHandleYLabel); _thrHandleYLabel.BringToFront();
+
+            _thrQuadrantBtn = new System.Windows.Forms.Button
+            {
+                Text = "THR",
+                Location = new Point(3750, 1000),
+                Size = new Size(79, 79),
+                BackColor = Color.FromArgb(40, 40, 40), ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Emoji", 15f, FontStyle.Bold),
+                Cursor = Cursors.Hand,
+                Visible = false
+            };
+            _thrQuadrantBtn.FlatAppearance.BorderSize = 0;
+            _thrQuadrantBtn.FlatAppearance.BorderColor = Color.Black;
+            _thrQuadrantBtn.FlatAppearance.MouseOverBackColor = Color.FromArgb(40, 40, 40);
+            _thrQuadrantBtn.FlatAppearance.MouseDownBackColor = Color.FromArgb(40, 40, 40);
+            _thrQuadrantBtn.Region = new Region(CreateRoundedRect(new Rectangle(0, 0, 79, 79), 15));
+            _thrQuadrantBtn.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.White, 1);
+                using var path = CreateRoundedRect(new Rectangle(0, 0, 78, 78), 15);
+                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                e.Graphics.DrawPath(pen, path);
+            };
+            bool _thrQDragging = false;
+            Point _thrQDragOffset = Point.Empty;
+            _thrQuadrantBtn.Click += (s, e) =>
+            {
+                if (calibrationMode) return;
+                _thrQuadrantVisible = !_thrQuadrantVisible;
+                pbMain.Invalidate();
+            };
+            _thrQuadrantBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _thrQDragging = true; _thrQDragOffset = e.Location; };
+            _thrQuadrantBtn.MouseMove += (s, e) => { if (!_thrQDragging) return; var sp = _thrQuadrantBtn.PointToScreen(e.Location); var fp = this.PointToClient(sp); _thrQuadrantBtn.Location = new Point(fp.X - _thrQDragOffset.X, fp.Y - _thrQDragOffset.Y); };
+            _thrQuadrantBtn.MouseUp += (s, e) => { _thrQDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            this.Controls.Add(_thrQuadrantBtn); _thrQuadrantBtn.BringToFront();
 
             closeButton.MouseDown += (s, e) =>
             {
@@ -2225,6 +2303,10 @@ namespace SimConnect3
                             else { simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_FUELSEL_AUTO, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); _fuelSelectionSet = 2; }
                             pbMain.Invalidate();
                         } },
+                new() { Name="G3K_THR_BASE", TypeKey="G3K thr base", BasePos=new Point(0, 0), ZoomWidth=166, Img=LoadOverlayImage("THR_base.png"),
+                        ShowWhen = () => _thrQuadrantVisible },
+                new() { Name="G3K_THR_HANDLE", TypeKey="G3K thr handle", BasePos=new Point(0, 0), ZoomWidth=78, Img=LoadOverlayImage("THR_handle.png"),
+                        ShowWhen = () => _thrQuadrantVisible },
             };
 
             // Botons FUEL CUTOFF i LOW IDLE (G3000 only)
@@ -4215,6 +4297,20 @@ namespace SimConnect3
                     if (ov.Img != null && (calibrationMode || (ov.ShowWhen?.Invoke() ?? true)))
                         e.Graphics.DrawImage(ov.Img, ov.AnimatedBounds);
 
+                if (mainSurface.ShowAllAreas && _thrQuadrantVisible)
+                {
+                    var thrH = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
+                    if (thrH != null)
+                    {
+                        var b = thrH.Bounds;
+                        var touchRect = new Rectangle(b.X - b.Width/2, b.Y - b.Height/2, b.Width*2, b.Height*2);
+                        using var touchBrush = new SolidBrush(Color.FromArgb(60, Color.LimeGreen));
+                        e.Graphics.FillRectangle(touchBrush, touchRect);
+                        using var touchPen = new Pen(Color.LimeGreen, 1);
+                        e.Graphics.DrawRectangle(touchPen, touchRect);
+                    }
+                }
+
                 if (calibrationMode)
                 {
                     using var ovPen = new Pen(Color.Cyan, 2);
@@ -4591,6 +4687,15 @@ namespace SimConnect3
             if (e.Button != MouseButtons.Left) return;
             if (_g3000Active && !calibrationMode)
             {
+                var thrHandle = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
+                Rectangle thrTouchArea(OverlayImage h) { var b = h.Bounds; return new Rectangle(b.X - b.Width/2, b.Y - b.Height/2, b.Width*2, b.Height*2); }
+                if (thrHandle != null && _thrQuadrantVisible && thrTouchArea(thrHandle).Contains(e.Location))
+                {
+                    if (_thrHandleDefaultY < 0) _thrHandleDefaultY = thrHandle.BasePos.Y;
+                    _thrHandleDragging = true;
+                    _thrHandleDragOffsetY = e.Y - thrHandle.BasePos.Y;
+                    return;
+                }
                 foreach (var ov in g3000OverlayImages)
                     if (ov.OnClick != null && ov.Bounds.Contains(e.Location))
                     { ov.OnClick.Invoke(); return; }
@@ -4748,6 +4853,24 @@ namespace SimConnect3
 
         private void PbMain_MouseMove(object? sender, MouseEventArgs e)
         {
+            if (_thrHandleDragging)
+            {
+                var thrHandle = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
+                if (thrHandle != null)
+                {
+                    int newY = e.Y - _thrHandleDragOffsetY;
+                    int minY = _thrHandleDefaultY - 200;
+                    int maxY = _thrHandleDefaultY + 120;
+                    newY = Math.Max(minY, Math.Min(maxY, newY));
+                    thrHandle.BasePos = new Point(thrHandle.BasePos.X, newY);
+                    int cx = thrHandle.BasePos.X + thrHandle.Bounds.Width / 2;
+                    int cy = thrHandle.BasePos.Y + thrHandle.Bounds.Height / 2;
+                    if (_thrHandleXLabel != null) _thrHandleXLabel.Text = $"HX: {cx}";
+                    if (_thrHandleYLabel != null) _thrHandleYLabel.Text = $"HY: {cy}";
+                    pbMain.Invalidate();
+                }
+                return;
+            }
             if (calibrationMode)
             {
                 if (calibDragFlapsInd)
@@ -4809,6 +4932,7 @@ namespace SimConnect3
                 {
                     calibDragOverlay.BasePos = new Point(
                         e.X - calibOverlayDragOffset.X, e.Y - calibOverlayDragOffset.Y);
+                    if (calibDragOverlay.Name == "G3K_THR_HANDLE") _thrHandleDefaultY = calibDragOverlay.BasePos.Y;
                     pbMain.Invalidate(); return;
                 }
                 if (calibDragBtn != null)  { calibDragBtn.BasePos = new Point(e.X - calibDragOffset.X, e.Y - calibDragOffset.Y); pbMain.Invalidate(); }
@@ -4873,6 +4997,11 @@ namespace SimConnect3
 
         private void PbMain_MouseUp(object? sender, MouseEventArgs e)
         {
+            if (_thrHandleDragging)
+            {
+                _thrHandleDragging = false;
+                return;
+            }
             if (calibrationMode)
             {
                 if (calibDragFlapsInd)
@@ -4992,9 +5121,12 @@ namespace SimConnect3
             foreach (var ov in overlayImages)
                 sb.AppendLine($"IMG:{ov.Name}:{ov.BasePos.X}:{ov.BasePos.Y}:{(int)ov.ZoomWidth}");
             foreach (var ov in g3000OverlayImages)
+            {
+                int saveY = (ov.Name == "G3K_THR_HANDLE" && _thrHandleDefaultY >= 0) ? _thrHandleDefaultY : ov.BasePos.Y;
                 sb.AppendLine(ov.ZoomHeight > 0
-                    ? $"G3K:{ov.Name}:{ov.BasePos.X}:{ov.BasePos.Y}:{(int)ov.ZoomWidth}:{(int)ov.ZoomHeight}"
-                    : $"G3K:{ov.Name}:{ov.BasePos.X}:{ov.BasePos.Y}:{(int)ov.ZoomWidth}");
+                    ? $"G3K:{ov.Name}:{ov.BasePos.X}:{saveY}:{(int)ov.ZoomWidth}:{(int)ov.ZoomHeight}"
+                    : $"G3K:{ov.Name}:{ov.BasePos.X}:{saveY}:{(int)ov.ZoomWidth}");
+            }
             sb.AppendLine($"FLI:fli:{flapsIndX}:{flapsIndYOffset}");
             sb.AppendLine($"TRIND:tri:{trimIndX}:{trimIndYOffset}");
             sb.AppendLine($"TRIMZ:tz:{trimZoneBaseX}:{trimZoneBaseY}");
@@ -5015,6 +5147,7 @@ namespace SimConnect3
             sb.AppendLine($"LOWIDLE:li:{_lowIdleBtn.Location.X}:{_lowIdleBtn.Location.Y}:{_lowIdleBtn.Width}:{_lowIdleBtn.Height}");
             sb.AppendLine($"HIGHIDLE:hi:{_highIdleBtn.Location.X}:{_highIdleBtn.Location.Y}:{_highIdleBtn.Width}:{_highIdleBtn.Height}");
             sb.AppendLine($"TAXIBTN:tx:{_taxiBtn.Location.X}:{_taxiBtn.Location.Y}:{_taxiBtn.Width}:{_taxiBtn.Height}");
+            sb.AppendLine($"THRQBTN:tq:{_thrQuadrantBtn.Location.X}:{_thrQuadrantBtn.Location.Y}:0:0");
             if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
             string projectDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.StartupPath, @"..\..\..\..\.."));
             string path = System.IO.Path.Combine(projectDir, "calibration_export.txt");
@@ -5068,6 +5201,7 @@ namespace SimConnect3
                     if (ov != null)
                     {
                         ov.BasePos = new Point(x, y);
+                        if (name == "G3K_THR_HANDLE") _thrHandleDefaultY = y;
                         string tk = ov.TypeKey;
                         int g3kh = (parts.Length >= 6 && int.TryParse(parts[5], out int h)) ? h : 0;
                         foreach (var same in g3000OverlayImages.Where(o => o.TypeKey == tk))
@@ -5153,6 +5287,10 @@ namespace SimConnect3
                 else if (type == "G3KBTN")
                 {
                     _g3000Btn.Location = new Point(x, y);
+                }
+                else if (type == "THRQBTN")
+                {
+                    _thrQuadrantBtn.Location = new Point(x, y);
                 }
                 else if (type == "FSCONN" && _fsConnPanel != null)
                 {
