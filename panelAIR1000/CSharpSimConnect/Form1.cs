@@ -2307,6 +2307,29 @@ namespace SimConnect3
                         ShowWhen = () => _thrQuadrantVisible },
                 new() { Name="G3K_THR_HANDLE", TypeKey="G3K thr handle", BasePos=new Point(0, 0), ZoomWidth=78, Img=LoadOverlayImage("THR_handle.png"),
                         ShowWhen = () => _thrQuadrantVisible },
+                new() { Name="G3K_THR_CUTOFF", TypeKey="G3K thr cutoff click", BasePos=new Point(3700, 1700), ZoomWidth=100, ZoomHeight=80,
+                        OnClick = () => { _taxiPropActive = false; _thrSliderFollow = false; _condSendEnabled!.Checked = false;
+                            simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 0 });
+                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            MoveThrHandle(_thrHandleDefaultY + 150); } },
+                new() { Name="G3K_THR_LOWIDLE", TypeKey="G3K thr lowidle click", BasePos=new Point(3700, 1600), ZoomWidth=100, ZoomHeight=80,
+                        OnClick = () => { _taxiPropActive = false; _thrSliderFollow = false; _condSendEnabled!.Checked = false;
+                            Action sendLI = () => { simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 1 });
+                                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-16383)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); };
+                            sendLI(); Task.Run(async () => { await Task.Delay(500); this.BeginInvoke(sendLI); });
+                            MoveThrHandle(_thrHandleDefaultY); } },
+                new() { Name="G3K_THR_HIGHIDLE", TypeKey="G3K thr highidle click", BasePos=new Point(3700, 1500), ZoomWidth=100, ZoomHeight=80,
+                        OnClick = () => { _taxiPropActive = false; _thrSliderFollow = false; _condSendEnabled!.Checked = false;
+                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-11000)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            MoveThrHandle(_thrHandleDefaultY - 170); } },
+                new() { Name="G3K_THR_TAXI", TypeKey="G3K thr taxi click", BasePos=new Point(3700, 1400), ZoomWidth=100, ZoomHeight=80,
+                        OnClick = () => { _taxiPropActive = true; _thrSliderFollow = true; _condSendEnabled!.Checked = true;
+                            _condSlider!.Value = -16383; _condLabel!.Text = $"THR: {-16383}";
+                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 8250, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-16383)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } },
             };
 
             // Botons FUEL CUTOFF i LOW IDLE (G3000 only)
@@ -2888,6 +2911,18 @@ namespace SimConnect3
                 SimConnect.SIMCONNECT_OBJECT_ID_USER,
                 SIMCONNECT_DATA_SET_FLAG.DEFAULT,
                 new FuelSelectionStruct { value = value });
+        }
+
+        private void MoveThrHandle(int targetY)
+        {
+            var thrHandle = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
+            if (thrHandle == null) return;
+            thrHandle.BasePos = new Point(thrHandle.BasePos.X, targetY);
+            int cx = thrHandle.BasePos.X + thrHandle.Bounds.Width / 2;
+            int cy = thrHandle.BasePos.Y + thrHandle.Bounds.Height / 2;
+            if (_thrHandleXLabel != null) _thrHandleXLabel.Text = $"HX: {cx}";
+            if (_thrHandleYLabel != null) _thrHandleYLabel.Text = $"HY: {cy}";
+            pbMain.Invalidate();
         }
 
         private void TogglePulseLight()
@@ -4297,19 +4332,6 @@ namespace SimConnect3
                     if (ov.Img != null && (calibrationMode || (ov.ShowWhen?.Invoke() ?? true)))
                         e.Graphics.DrawImage(ov.Img, ov.AnimatedBounds);
 
-                if (mainSurface.ShowAllAreas && _thrQuadrantVisible)
-                {
-                    var thrH = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
-                    if (thrH != null)
-                    {
-                        var b = thrH.Bounds;
-                        var touchRect = new Rectangle(b.X - b.Width/2, b.Y - b.Height/2, b.Width*2, b.Height*2);
-                        using var touchBrush = new SolidBrush(Color.FromArgb(60, Color.LimeGreen));
-                        e.Graphics.FillRectangle(touchBrush, touchRect);
-                        using var touchPen = new Pen(Color.LimeGreen, 1);
-                        e.Graphics.DrawRectangle(touchPen, touchRect);
-                    }
-                }
 
                 if (calibrationMode)
                 {
@@ -4688,8 +4710,7 @@ namespace SimConnect3
             if (_g3000Active && !calibrationMode)
             {
                 var thrHandle = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
-                Rectangle thrTouchArea(OverlayImage h) { var b = h.Bounds; return new Rectangle(b.X - b.Width/2, b.Y - b.Height/2, b.Width*2, b.Height*2); }
-                if (thrHandle != null && _thrQuadrantVisible && thrTouchArea(thrHandle).Contains(e.Location))
+                if (thrHandle != null && _thrQuadrantVisible && thrHandle.Bounds.Contains(e.Location))
                 {
                     if (_thrHandleDefaultY < 0) _thrHandleDefaultY = thrHandle.BasePos.Y;
                     _thrHandleDragging = true;
@@ -4859,10 +4880,38 @@ namespace SimConnect3
                 if (thrHandle != null)
                 {
                     int newY = e.Y - _thrHandleDragOffsetY;
-                    int minY = _thrHandleDefaultY - 200;
-                    int maxY = _thrHandleDefaultY + 120;
+                    int minY = _thrHandleDefaultY - 170;
+                    int maxY = _thrHandleDefaultY + 150;
                     newY = Math.Max(minY, Math.Min(maxY, newY));
                     thrHandle.BasePos = new Point(thrHandle.BasePos.X, newY);
+                    int topLimit = _thrHandleDefaultY - 170;
+                    int botLimit = _thrHandleDefaultY + 150;
+                    if (newY <= topLimit + 10)
+                    {
+                        _taxiPropActive = false; _thrSliderFollow = false; _condSendEnabled!.Checked = false;
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-11000)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    }
+                    if (newY >= botLimit - 10)
+                    {
+                        _taxiPropActive = false; _thrSliderFollow = false; _condSendEnabled!.Checked = false;
+                        simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 0 });
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    }
+                    var lowIdleArea = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_LOWIDLE");
+                    if (lowIdleArea != null)
+                    {
+                        int handleCenterY = newY + thrHandle.Bounds.Height / 2;
+                        int areaCenterY = lowIdleArea.BasePos.Y + lowIdleArea.Bounds.Height / 2;
+                        if (Math.Abs(handleCenterY - areaCenterY) <= 20)
+                        {
+                            _taxiPropActive = false; _thrSliderFollow = false; _condSendEnabled!.Checked = false;
+                            simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 1 });
+                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-16383)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        }
+                    }
                     int cx = thrHandle.BasePos.X + thrHandle.Bounds.Width / 2;
                     int cy = thrHandle.BasePos.Y + thrHandle.Bounds.Height / 2;
                     if (_thrHandleXLabel != null) _thrHandleXLabel.Text = $"HX: {cx}";
