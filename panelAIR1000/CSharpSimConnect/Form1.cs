@@ -572,6 +572,9 @@ namespace SimConnect3
             G3K_MFD_SK_1,  G3K_MFD_SK_2,  G3K_MFD_SK_3,  G3K_MFD_SK_4,
             G3K_MFD_SK_5,  G3K_MFD_SK_6,  G3K_MFD_SK_7,  G3K_MFD_SK_8,
             G3K_MFD_SK_9,  G3K_MFD_SK_10, G3K_MFD_SK_11, G3K_MFD_SK_12,
+            // G3000 TSC softkeys
+            G3K_TSC1_SK_1, G3K_TSC1_SK_2, G3K_TSC1_SK_3,
+            G3K_TSC2_SK_1, G3K_TSC2_SK_2, G3K_TSC2_SK_3,
             //right keys PFD
             PFD_D_TO,
             PFD_FPL,
@@ -713,6 +716,7 @@ namespace SimConnect3
 
         private readonly List<UiSurface> uiSurfaces = new();
         private readonly System.Windows.Forms.Timer uiSurfaceTimer = new System.Windows.Forms.Timer { Interval = 30 };
+        private readonly System.Windows.Forms.Timer _thrSyncTimer  = new System.Windows.Forms.Timer { Interval = 3000 };
 
         private sealed class UiButton
         {
@@ -2383,6 +2387,12 @@ namespace SimConnect3
             new() { Name="G3K_MFD_softkey_10", TypeKey="G3K MFD softkey 10", BasePos=new Point(3227, 1504), ZoomWidth=95, ZoomHeight=73, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_MFD_SK_10, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_MFD_softkey_11", TypeKey="G3K MFD softkey 11", BasePos=new Point(3355, 1504), ZoomWidth=95, ZoomHeight=73, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_MFD_SK_11, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_MFD_softkey_12", TypeKey="G3K MFD softkey 12", BasePos=new Point(3482, 1504), ZoomWidth=95, ZoomHeight=73, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_MFD_SK_12, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_TSC1_softkey_1", TypeKey="G3K TSC1 softkey 1", BasePos=new Point(0, 0), ZoomWidth=95, ZoomHeight=73, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_TSC1_SK_1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_TSC1_softkey_2", TypeKey="G3K TSC1 softkey 2", BasePos=new Point(2634, 1847), ZoomWidth=77, ZoomHeight=58, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_TSC1_SK_2, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_TSC1_softkey_3", TypeKey="G3K TSC1 softkey 3", BasePos=new Point(2634, 1905), ZoomWidth=77, ZoomHeight=58, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_TSC1_SK_3, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_TSC2_softkey_1", TypeKey="G3K TSC2 softkey 1", BasePos=new Point(3765, 1789), ZoomWidth=77, ZoomHeight=58, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_TSC2_SK_1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_TSC2_softkey_2", TypeKey="G3K TSC2 softkey 2", BasePos=new Point(3765, 1847), ZoomWidth=77, ZoomHeight=58, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_TSC2_SK_2, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_TSC2_softkey_3", TypeKey="G3K TSC2 softkey 3", BasePos=new Point(3765, 1905), ZoomWidth=77, ZoomHeight=58, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_TSC2_SK_3, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             };
 
             LoadCalibrationPositions();
@@ -2409,7 +2419,8 @@ namespace SimConnect3
 
             uiSurfaceTimer.Start();
 
-
+            _thrSyncTimer.Tick += (s, e) => SyncThrHandleFromMsfs();
+            _thrSyncTimer.Start();
 
         }
         private void closeButton_Click(object sender, EventArgs e)
@@ -2730,6 +2741,31 @@ namespace SimConnect3
             int targetX = _thrHandleLeftRail ? 3694 : 3734;
             thrHandle.BasePos = new Point(targetX, targetY);
             pbMain.Invalidate();
+        }
+
+        private void SyncThrHandleFromMsfs()
+        {
+            if (!_thrQuadrantVisible || _thrHandleDragging || simconnect == null) return;
+            if (double.IsNaN(_lastThrLeverPos)) return;
+            if (DateTime.UtcNow < _thrIgnoreFollowUntil) return;
+
+            if (!_thrHandleLeftRail)
+            {
+                var taxiOv = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_TAXI");
+                var thrH   = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
+                if (taxiOv == null || thrH == null) return;
+                _thrHandleLeftRailCenterY = taxiOv.BasePos.Y + taxiOv.Bounds.Height / 2 - thrH.Bounds.Height / 2;
+                _thrHandleLeftRail = true;
+                _taxiPropActive    = true;
+            }
+
+            int read    = (int)_lastThrLeverPos;
+            int centerY = _thrHandleLeftRailCenterY;
+            int handleY = read >= 0
+                ? centerY - (int)((long)read * 375 / 16383)
+                : centerY - (int)((long)read * 250 / 2048);
+            handleY = Math.Max(centerY - 375, Math.Min(centerY + 250, handleY));
+            MoveThrHandle(handleY);
         }
 
         private void TogglePulseLight()
@@ -3171,6 +3207,18 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_MFD_SK_11, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_MFD_SK_12, "SFS.G3000_PFD2_SoftKey_12");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_MFD_SK_12, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_TSC1_SK_1, "SFS.G3000_TSC1_SoftKey_1");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_TSC1_SK_1, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_TSC1_SK_2, "SFS.G3000_TSC1_SoftKey_2");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_TSC1_SK_2, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_TSC1_SK_3, "SFS.G3000_TSC1_SoftKey_3");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_TSC1_SK_3, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_TSC2_SK_1, "SFS.G3000_TSC2_SoftKey_1");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_TSC2_SK_1, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_TSC2_SK_2, "SFS.G3000_TSC2_SoftKey_2");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_TSC2_SK_2, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_TSC2_SK_3, "SFS.G3000_TSC2_SoftKey_3");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_TSC2_SK_3, false);
 
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.PFD_D_TO, "SFS.G1000_PFD_DTO");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.PFD_D_TO, false);
