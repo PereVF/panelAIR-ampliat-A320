@@ -575,6 +575,22 @@ namespace SimConnect3
             // G3000 TSC softkeys
             G3K_TSC1_SK_1, G3K_TSC1_SK_2, G3K_TSC1_SK_3,
             G3K_TSC2_SK_1, G3K_TSC2_SK_2, G3K_TSC2_SK_3,
+            G3K_AP_MASTER,
+            G3K_AP_HDG_HOLD,
+            G3K_AP_NAV1_HOLD,
+            G3K_AP_APR_HOLD,
+            G3K_AP_VS_HOLD,
+            G3K_AP_FLC,
+            G3K_AP_FD,
+            G3K_AP_ALT,
+            G3K_AP_VNV,
+            G3K_AP_BC,
+            G3K_AP_KAP140_UP,
+            G3K_AP_KAP140_DN,
+            G3K_AP_SPD_DEC,
+            G3K_AP_SPD_INC,
+            G3K_AP_VS_VAR_INC,
+            G3K_AP_VS_VAR_DEC,
             //right keys PFD
             PFD_D_TO,
             PFD_FPL,
@@ -847,6 +863,9 @@ namespace SimConnect3
         private double _elecFuelPump = 0;
         private double _apTrim = 0;
         private int _apDisengaged = 0;
+        private int _kap140State = 0;
+        private int _apVsHold = 0;
+        private int _apFlcActive = 0;
         private int _rudderTrimDisabled = 0;
         private int _aileronTrimDisabled = 0;
         private double _lightingLogo1 = 0;
@@ -1058,6 +1077,9 @@ namespace SimConnect3
             public double propRpm;             // PROP RPM:1
             public double thrLeverPos;         // GENERAL ENG THROTTLE LEVER POSITION:1
             public int fuelValve;              // GENERAL ENG FUEL VALVE:1 (0=CUTOFF, 1=open)
+            public int kap140State;            // L:KAP140_State
+            public int apVsHold;               // AUTOPILOT VERTICAL HOLD (Bool)
+            public int apFlcActive;            // AUTOPILOT FLIGHT LEVEL CHANGE (Bool)
 
 
 
@@ -1124,10 +1146,10 @@ namespace SimConnect3
             }
 
             var asm = System.Reflection.Assembly.GetExecutingAssembly();
-            using var bgStream = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_1000 4K panel_f.png");
-            if (bgStream != null) _bgImage = Image.FromStream(bgStream);
-            using var bgG3000Stream = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_3000 4K panel_k.png");
-            if (bgG3000Stream != null) _bgG3000Image = Image.FromStream(bgG3000Stream);
+            using (var s = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_1000 4K panel_f.png"))
+                if (s != null) { using var src = Image.FromStream(s); _bgImage = new Bitmap(src); }
+            using (var s = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_3000 4K panel_m.png"))
+                if (s != null) { using var src = Image.FromStream(s); _bgG3000Image = new Bitmap(src); }
 
             pbMain.Paint += PbMain_Paint;
             pbMain.MouseDown += PbMain_MouseDown;
@@ -2393,6 +2415,36 @@ namespace SimConnect3
             new() { Name="G3K_TSC2_softkey_1", TypeKey="G3K TSC2 softkey 1", BasePos=new Point(3765, 1789), ZoomWidth=77, ZoomHeight=58, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_TSC2_SK_1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_TSC2_softkey_2", TypeKey="G3K TSC2 softkey 2", BasePos=new Point(3765, 1847), ZoomWidth=77, ZoomHeight=58, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_TSC2_SK_2, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_TSC2_softkey_3", TypeKey="G3K TSC2 softkey 3", BasePos=new Point(3765, 1905), ZoomWidth=77, ZoomHeight=58, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_TSC2_SK_3, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_AP_MASTER",    TypeKey="G3K AP MASTER",    BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_MASTER,    0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_AP_HDG_HOLD",  TypeKey="G3K AP HDG HOLD",  BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_HDG_HOLD,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_AP_NAV1_HOLD", TypeKey="G3K AP NAV1 HOLD", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_NAV1_HOLD, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_AP_APR_HOLD",  TypeKey="G3K AP APR HOLD",  BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_APR_HOLD,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_AP_VS_HOLD",   TypeKey="G3K AP VS HOLD",   BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_VS_HOLD,   0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_AP_FLC",        TypeKey="G3K AP FLC",        BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_FLC,        0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_AP_FD",         TypeKey="G3K AP FD",         BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_FD,         0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_AP_ALT",        TypeKey="G3K AP ALT",        BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_ALT,        0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_AP_VNV",        TypeKey="G3K AP VNV",        BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_VNV,        0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_AP_BC",         TypeKey="G3K AP BC",         BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_BC,         0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_AP_NOSE_UP", TypeKey="G3K AP NOSE UP", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => {
+                if (_kap140State != 0 && _apVsHold == 1)
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_KAP140_UP,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                else if (_kap140State != 0 && _apFlcActive == 1)
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_SPD_DEC,     0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                else {
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_VS_VAR_INC,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_SPD_DEC,     0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                }
+            }},
+            new() { Name="G3K_AP_NOSE_DN", TypeKey="G3K AP NOSE DN", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => {
+                if (_kap140State != 0 && _apVsHold == 1)
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_KAP140_DN,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                else if (_kap140State != 0 && _apFlcActive == 1)
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_SPD_INC,    0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                else {
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_VS_VAR_DEC, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_SPD_INC,    0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                }
+            }},
             };
 
             LoadCalibrationPositions();
@@ -3219,6 +3271,38 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_TSC2_SK_2, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_TSC2_SK_3, "SFS.G3000_TSC2_SoftKey_3");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_TSC2_SK_3, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_MASTER, "AP_MASTER");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_MASTER, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_HDG_HOLD, "AP_HDG_HOLD_ON");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_HDG_HOLD, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_NAV1_HOLD, "AP_NAV1_HOLD");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_NAV1_HOLD, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_APR_HOLD, "AP_APR_HOLD");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_APR_HOLD, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_VS_HOLD, "AP_VS_HOLD");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_VS_HOLD, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_FLC, "FLIGHT_LEVEL_CHANGE");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_FLC, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_FD, "TOGGLE_FLIGHT_DIRECTOR");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_FD, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_ALT, "AP_ALT_HOLD");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_ALT, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_VNV, "SFS.VNAV_Toggle");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_VNV, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_BC, "AP_BC_HOLD");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_BC, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_KAP140_UP, "AP_KAP140_UP");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_KAP140_UP, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_KAP140_DN, "AP_KAP140_DN");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_KAP140_DN, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_SPD_DEC, "AP_SPD_VAR_DEC");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_SPD_DEC, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_SPD_INC, "AP_SPD_VAR_INC");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_SPD_INC, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_VS_VAR_INC, "AP_VS_VAR_INC");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_VS_VAR_INC, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_VS_VAR_DEC, "AP_VS_VAR_DEC");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_VS_VAR_DEC, false);
 
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.PFD_D_TO, "SFS.G1000_PFD_DTO");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.PFD_D_TO, false);
@@ -3564,6 +3648,9 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "PROP RPM:1", "Rpm", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG THROTTLE LEVER POSITION:1", "Position 16k", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL VALVE:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:KAP140_State", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT VERTICAL HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT FLIGHT LEVEL CHANGE", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
 
@@ -4173,6 +4260,9 @@ namespace SimConnect3
                 if (_elecFuelPump != s1.elecFuelPump) { _elecFuelPump = s1.elecFuelPump; needsRepaint = true; }
                 // _apTrim es gestiona localment, no es llegeix de MSFS
                 _apDisengaged = s1.apDisengaged;
+                _kap140State = s1.kap140State;
+                _apVsHold = s1.apVsHold;
+                _apFlcActive = s1.apFlcActive;
                 _rudderTrimDisabled = s1.rudderTrimDisabled;
                 _aileronTrimDisabled = s1.aileronTrimDisabled;
                 if (_lightingLogo1 != s1.lightingLogo1) { _lightingLogo1 = s1.lightingLogo1; needsRepaint = true; }
