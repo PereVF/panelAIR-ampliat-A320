@@ -254,6 +254,15 @@ namespace SimConnect3
         private Point calibG3kApSliderInputDragStart;
         private int calibG3kApSliderInputStartX;
         private int calibG3kApSliderInputStartY;
+        // LVL indicator zone (green transparent, draggable+resizable)
+        private int _apLvlIndBaseX = 200, _apLvlIndBaseY = 50;
+        private int _apLvlIndW = 60, _apLvlIndH = 40;
+        private Rectangle _apLvlIndRect = new Rectangle(200, 50, 60, 40);
+        private bool _calibDragApLvlInd = false;
+        private bool _calibResizeApLvlInd = false;
+        private Point _calibApLvlIndDragStart;
+        private int _calibApLvlIndStartX, _calibApLvlIndStartY, _calibApLvlIndStartW, _calibApLvlIndStartH;
+
         private bool g3kApSliderDragging = false;
         private int g3kApSliderLastMouseY;
         private int g3kApSliderAccumDelta = 0;
@@ -892,6 +901,14 @@ namespace SimConnect3
         private int _apVsHold = 0;
         private int _apFlcActive = 0;
         private int _apWingLeveler = 0;
+        private int _apHdgLock = 0;
+        private int _apAprHold = 0;
+        private int _apGsHold = 0;
+        private int _apNav1Lock = 0;
+        private int _apFdActive = 0;
+        private int _apAltLock = 0;
+        private int _apVnavBtn = 0;
+        private int _apMaster = 0;
         private int _rudderTrimDisabled = 0;
         private int _aileronTrimDisabled = 0;
         private double _lightingLogo1 = 0;
@@ -1107,6 +1124,14 @@ namespace SimConnect3
             public int apVsHold;               // AUTOPILOT VERTICAL HOLD (Bool)
             public int apFlcActive;            // AUTOPILOT FLIGHT LEVEL CHANGE (Bool)
             public int apWingLeveler;          // AUTOPILOT WING LEVELER (Bool)
+            public int apHdgLock;              // AUTOPILOT HEADING LOCK (Bool)
+            public int apAprHold;              // AUTOPILOT APPROACH HOLD (Bool)
+            public int apGsHold;               // AUTOPILOT GLIDESLOPE HOLD (Bool)
+            public int apNav1Lock;             // AUTOPILOT NAV1 LOCK (Bool)
+            public int apFdActive;             // AUTOPILOT FLIGHT DIRECTOR ACTIVE (Bool)
+            public int apAltLock;              // AUTOPILOT ALTITUDE LOCK (Bool)
+            public int apVnavBtn;              // L:XMLVAR_VNAVButtonValue
+            public int apMaster;               // AUTOPILOT MASTER (Bool)
 
 
 
@@ -3694,6 +3719,14 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT VERTICAL HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT FLIGHT LEVEL CHANGE", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT WING LEVELER", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT HEADING LOCK", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT APPROACH HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT GLIDESLOPE HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT NAV1 LOCK", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT FLIGHT DIRECTOR ACTIVE:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT ALTITUDE LOCK", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_VNAVButtonValue", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT MASTER", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
 
@@ -4307,6 +4340,14 @@ namespace SimConnect3
                 _apVsHold = s1.apVsHold;
                 _apFlcActive = s1.apFlcActive;
                 _apWingLeveler = s1.apWingLeveler;
+                _apHdgLock = s1.apHdgLock;
+                _apAprHold = s1.apAprHold;
+                _apGsHold = s1.apGsHold;
+                _apNav1Lock = s1.apNav1Lock;
+                _apFdActive = s1.apFdActive;
+                _apAltLock = s1.apAltLock;
+                _apVnavBtn = s1.apVnavBtn;
+                _apMaster = s1.apMaster;
                 _rudderTrimDisabled = s1.rudderTrimDisabled;
                 _aileronTrimDisabled = s1.aileronTrimDisabled;
                 if (_lightingLogo1 != s1.lightingLogo1) { _lightingLogo1 = s1.lightingLogo1; needsRepaint = true; }
@@ -4429,6 +4470,226 @@ namespace SimConnect3
                     e.Graphics.FillPath(pressBrush, path);
                 }
 
+                // AP feedback indicators
+                {
+                    var hdgOv = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_AP_HDG_HOLD");
+                    if (hdgOv != null)
+                    {
+                        var r = hdgOv.Bounds;
+                        int indX = r.Right + 5;
+                        int indY = r.Y + 5;
+                        int indH = r.Height - 10;
+                        if (_apHdgLock == 1)
+                        {
+                            using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                        }
+                        else
+                        {
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 35, 35, 30));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                            using var borderPen = new Pen(Color.FromArgb(160, 100, 100, 90), 1);
+                            e.Graphics.DrawRectangle(borderPen, indX, indY, 6, indH - 1);
+                        }
+                    }
+                }
+
+                // APR feedback
+                {
+                    var aprOv = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_AP_APR_HOLD");
+                    if (aprOv != null)
+                    {
+                        var r = aprOv.Bounds;
+                        int indX = r.Right + 5;
+                        int indY = r.Y + 5;
+                        int indH = r.Height - 10;
+                        if (_apAprHold == 1 || _apGsHold == 1)
+                        {
+                            using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                        }
+                        else
+                        {
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 35, 35, 30));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                            using var borderPen = new Pen(Color.FromArgb(160, 100, 100, 90), 1);
+                            e.Graphics.DrawRectangle(borderPen, indX, indY, 6, indH - 1);
+                        }
+                    }
+                }
+
+                // AP MASTER feedback
+                {
+                    var apOv = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_AP_MASTER");
+                    if (apOv != null)
+                    {
+                        var r = apOv.Bounds;
+                        int indX = r.Right + 5; int indY = r.Y + 5; int indH = r.Height - 10;
+                        if (_apMaster == 1)
+                        {
+                            using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                        }
+                        else
+                        {
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 35, 35, 30));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                            using var borderPen = new Pen(Color.FromArgb(160, 100, 100, 90), 1);
+                            e.Graphics.DrawRectangle(borderPen, indX, indY, 6, indH - 1);
+                        }
+                    }
+                }
+
+                // LVL indicator (green transparent zone)
+                if (_apWingLeveler == 1)
+                {
+                    using var lvlBr = new SolidBrush(Color.FromArgb(80, 0, 220, 80));
+                    e.Graphics.FillRectangle(lvlBr, _apLvlIndRect);
+                }
+                if (calibrationMode)
+                {
+                    using var lvlPen = new Pen(Color.Lime, 2);
+                    using var lvlFont = new Font("Arial", 9);
+                    using var handleBr = new SolidBrush(Color.FromArgb(200, 255, 165, 0));
+                    e.Graphics.DrawRectangle(lvlPen, _apLvlIndRect);
+                    e.Graphics.DrawString("LVL", lvlFont, Brushes.Lime, new PointF(_apLvlIndRect.X, _apLvlIndRect.Y - 14));
+                    var resH = new Rectangle(_apLvlIndRect.Right - 8, _apLvlIndRect.Bottom - 8, 8, 8);
+                    e.Graphics.FillRectangle(handleBr, resH);
+                }
+
+                // VNV feedback
+                {
+                    var vnvOv = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_AP_VNV");
+                    if (vnvOv != null)
+                    {
+                        var r = vnvOv.Bounds;
+                        int indX = r.Right; int indY = r.Y + 5; int indH = r.Height - 10;
+                        if (_apVnavBtn == 1)
+                        {
+                            using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                        }
+                        else
+                        {
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 35, 35, 30));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                            using var borderPen = new Pen(Color.FromArgb(160, 100, 100, 90), 1);
+                            e.Graphics.DrawRectangle(borderPen, indX, indY, 6, indH - 1);
+                        }
+                    }
+                }
+
+                // VS / SPD / FLC feedback
+                foreach (var (ovName, isOn, xOff) in new (string, bool, int)[] {
+                    ("G3K_AP_VS_HOLD",  _apVsHold   == 1, 5),
+                    ("G3K_AP_FLC",      _apFlcActive == 1, 0) })
+                {
+                    var ov = g3000OverlayImages.FirstOrDefault(o => o.Name == ovName);
+                    if (ov == null) continue;
+                    var r = ov.Bounds;
+                    int indX = r.Right + xOff; int indY = r.Y + 5; int indH = r.Height - 10;
+                    if (isOn)
+                    {
+                        using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
+                        e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                        using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
+                        e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                    }
+                    else
+                    {
+                        using var coreBr = new SolidBrush(Color.FromArgb(255, 35, 35, 30));
+                        e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                        using var borderPen = new Pen(Color.FromArgb(160, 100, 100, 90), 1);
+                        e.Graphics.DrawRectangle(borderPen, indX, indY, 6, indH - 1);
+                    }
+                }
+
+                // ALT feedback
+                {
+                    var altOv = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_AP_ALT");
+                    if (altOv != null)
+                    {
+                        var r = altOv.Bounds;
+                        int indX = r.Right + 5;
+                        int indY = r.Y + 5;
+                        int indH = r.Height - 10;
+                        if (_apAltLock == 1)
+                        {
+                            using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                        }
+                        else
+                        {
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 35, 35, 30));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                            using var borderPen = new Pen(Color.FromArgb(160, 100, 100, 90), 1);
+                            e.Graphics.DrawRectangle(borderPen, indX, indY, 6, indH - 1);
+                        }
+                    }
+                }
+
+                // FD feedback
+                {
+                    var fdOv = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_AP_FD");
+                    if (fdOv != null)
+                    {
+                        var r = fdOv.Bounds;
+                        int indX = r.Right + 5;
+                        int indY = r.Y + 5;
+                        int indH = r.Height - 10;
+                        if (_apFdActive == 1)
+                        {
+                            using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                        }
+                        else
+                        {
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 35, 35, 30));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                            using var borderPen = new Pen(Color.FromArgb(160, 100, 100, 90), 1);
+                            e.Graphics.DrawRectangle(borderPen, indX, indY, 6, indH - 1);
+                        }
+                    }
+                }
+
+                // NAV feedback
+                {
+                    var navOv = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_AP_NAV1_HOLD");
+                    if (navOv != null)
+                    {
+                        var r = navOv.Bounds;
+                        int indX = r.Right + 5;
+                        int indY = r.Y + 5;
+                        int indH = r.Height - 10;
+                        if (_apNav1Lock == 1)
+                        {
+                            using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                        }
+                        else
+                        {
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 35, 35, 30));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                            using var borderPen = new Pen(Color.FromArgb(160, 100, 100, 90), 1);
+                            e.Graphics.DrawRectangle(borderPen, indX, indY, 6, indH - 1);
+                        }
+                    }
+                }
+
                 // APZ wheel procedural animation
                 {
                     const int stripeH = 10;
@@ -4459,9 +4720,12 @@ namespace SimConnect3
                         e.Graphics.DrawString(ov.Name, smallFont, Brushes.Cyan, new PointF(ov.BasePos.X, ov.BasePos.Y - 14));
                     }
                     // APZ — G3K AP slider zone (input=taronja gran, visual=blanc petit)
-                    e.Graphics.DrawRectangle(new Pen(Color.Orange, 2), new Rectangle(g3kApSliderInputZone.X - 2, g3kApSliderInputZone.Y - 2, g3kApSliderInputZone.Width + 4, g3kApSliderInputZone.Height + 4));
-                    e.Graphics.DrawString("APZ", new Font("Arial", 9), Brushes.Orange, new PointF(g3kApSliderInputZone.X, g3kApSliderInputZone.Y - 16));
-                    e.Graphics.DrawRectangle(new Pen(Color.White, 1), g3kApSliderZone);
+                    using var apzOrangePen = new Pen(Color.Orange, 2);
+                    using var apzWhitePen  = new Pen(Color.White, 1);
+                    using var apzFont      = new Font("Arial", 9);
+                    e.Graphics.DrawRectangle(apzOrangePen, new Rectangle(g3kApSliderInputZone.X - 2, g3kApSliderInputZone.Y - 2, g3kApSliderInputZone.Width + 4, g3kApSliderInputZone.Height + 4));
+                    e.Graphics.DrawString("APZ", apzFont, Brushes.Orange, new PointF(g3kApSliderInputZone.X, g3kApSliderInputZone.Y - 16));
+                    e.Graphics.DrawRectangle(apzWhitePen, g3kApSliderZone);
                 }
                 return;
             }
@@ -4492,7 +4756,8 @@ namespace SimConnect3
             }
 
             // TRIM TAKEOFF MARKER
-            e.Graphics.FillRectangle(new SolidBrush(Color.FromArgb(180, 180, 180)), new Rectangle(trimIndX - 32, 1758 + trimIndYOffset, 20, 2));
+            using var trimMarkerBr = new SolidBrush(Color.FromArgb(180, 180, 180));
+            e.Graphics.FillRectangle(trimMarkerBr, new Rectangle(trimIndX - 32, 1758 + trimIndYOffset, 20, 2));
 
             // FLAPS CIRCLE
             if (flapsNumPositions > 0)
@@ -4538,8 +4803,10 @@ namespace SimConnect3
                 {
                     int trackTop = yUp + flapsIndYOffset;
                     int trackH   = yFull - yUp + diameter;
-                    e.Graphics.DrawRectangle(new Pen(Color.Lime, 2), new Rectangle(flapsIndX - 2, trackTop - 2, diameter + 4, trackH + 4));
-                    e.Graphics.DrawString("FLI", new Font("Arial", 7), Brushes.Lime, new PointF(flapsIndX, trackTop - 16));
+                    using var fliPen  = new Pen(Color.Lime, 2);
+                    using var fliFont = new Font("Arial", 7);
+                    e.Graphics.DrawRectangle(fliPen, new Rectangle(flapsIndX - 2, trackTop - 2, diameter + 4, trackH + 4));
+                    e.Graphics.DrawString("FLI", fliFont, Brushes.Lime, new PointF(flapsIndX, trackTop - 16));
                 }
             }
 
@@ -4572,16 +4839,19 @@ namespace SimConnect3
             {
                 int trkTop = trimYUp + trimIndYOffset;
                 int trkH   = trimYFull - trimYUp + 20;
-                e.Graphics.DrawRectangle(new Pen(Color.Lime, 2), new Rectangle(trimIndX - 2, trkTop - 2, 24, trkH + 4));
-                e.Graphics.DrawString("TRI", new Font("Arial", 7), Brushes.Lime, new PointF(trimIndX, trkTop - 16));
+                using var triPen  = new Pen(Color.Lime, 2);
+                using var triFont = new Font("Arial", 7);
+                e.Graphics.DrawRectangle(triPen, new Rectangle(trimIndX - 2, trkTop - 2, 24, trkH + 4));
+                e.Graphics.DrawString("TRI", triFont, Brushes.Lime, new PointF(trimIndX, trkTop - 16));
                 // TRZ — zona de drag del trim
-                e.Graphics.DrawRectangle(new Pen(Color.Lime, 2), new Rectangle(trimZone.X - 2, trimZone.Y - 2, trimZone.Width + 4, trimZone.Height + 4));
-                e.Graphics.DrawString("TRZ", new Font("Arial", 7), Brushes.Lime, new PointF(trimZone.X, trimZone.Y - 16));
+                e.Graphics.DrawRectangle(triPen, new Rectangle(trimZone.X - 2, trimZone.Y - 2, trimZone.Width + 4, trimZone.Height + 4));
+                e.Graphics.DrawString("TRZ", triFont, Brushes.Lime, new PointF(trimZone.X, trimZone.Y - 16));
                 // APZ — G3K AP slider zone
                 if (_g3000Active)
                 {
-                    e.Graphics.DrawRectangle(new Pen(Color.Cyan, 2), new Rectangle(g3kApSliderZone.X - 2, g3kApSliderZone.Y - 2, g3kApSliderZone.Width + 4, g3kApSliderZone.Height + 4));
-                    e.Graphics.DrawString("APZ", new Font("Arial", 7), Brushes.Cyan, new PointF(g3kApSliderZone.X, g3kApSliderZone.Y - 16));
+                    using var apzVisPen  = new Pen(Color.Cyan, 2);
+                    e.Graphics.DrawRectangle(apzVisPen, new Rectangle(g3kApSliderZone.X - 2, g3kApSliderZone.Y - 2, g3kApSliderZone.Width + 4, g3kApSliderZone.Height + 4));
+                    e.Graphics.DrawString("APZ", triFont, Brushes.Cyan, new PointF(g3kApSliderZone.X, g3kApSliderZone.Y - 16));
                 }
             }
 
@@ -4609,18 +4879,21 @@ namespace SimConnect3
                 int rtX = rtXLeft + (int)(rtNorm * (rtXRight - rtXLeft)) + rudderTrimIndXOffset;
                 // marcador centre (línea vertical)
                 int rtCenter = (rtXLeft + rtXRight) / 2 + rudderTrimIndXOffset;
-                e.Graphics.FillRectangle(new SolidBrush(Color.FromArgb(180, 180, 180)), new Rectangle(rtCenter - 1, rudderTrimIndY - 42, 2, 20));
+                using var rtCenterBr = new SolidBrush(Color.FromArgb(180, 180, 180));
+                e.Graphics.FillRectangle(rtCenterBr, new Rectangle(rtCenter - 1, rudderTrimIndY - 42, 2, 20));
                 // cercle indicador
                 e.Graphics.FillEllipse(Brushes.White, new Rectangle(rtX - 10, rudderTrimIndY - 10, 20, 20));
                 if (calibrationMode)
                 {
                     int trkLeft = rtXLeft + rudderTrimIndXOffset;
                     int trkW    = rtXRight - rtXLeft + 20;
-                    e.Graphics.DrawRectangle(new Pen(Color.Lime, 2), new Rectangle(trkLeft - 2, rudderTrimIndY - 12, trkW + 4, 24));
-                    e.Graphics.DrawString("RRI", new Font("Arial", 7), Brushes.Lime, new PointF(trkLeft, rudderTrimIndY - 28));
+                    using var rriPen  = new Pen(Color.Lime, 2);
+                    using var rriFont = new Font("Arial", 7);
+                    e.Graphics.DrawRectangle(rriPen, new Rectangle(trkLeft - 2, rudderTrimIndY - 12, trkW + 4, 24));
+                    e.Graphics.DrawString("RRI", rriFont, Brushes.Lime, new PointF(trkLeft, rudderTrimIndY - 28));
                     // RRZ — zona de drag
-                    e.Graphics.DrawRectangle(new Pen(Color.Lime, 2), new Rectangle(rudderTrimZone.X - 2, rudderTrimZone.Y - 2, rudderTrimZone.Width + 4, rudderTrimZone.Height + 4));
-                    e.Graphics.DrawString("RRZ", new Font("Arial", 7), Brushes.Lime, new PointF(rudderTrimZone.X, rudderTrimZone.Y - 16));
+                    e.Graphics.DrawRectangle(rriPen, new Rectangle(rudderTrimZone.X - 2, rudderTrimZone.Y - 2, rudderTrimZone.Width + 4, rudderTrimZone.Height + 4));
+                    e.Graphics.DrawString("RRZ", rriFont, Brushes.Lime, new PointF(rudderTrimZone.X, rudderTrimZone.Y - 16));
                 }
             }
 
@@ -4780,7 +5053,7 @@ namespace SimConnect3
                 using var font      = new Font("Arial", 9, FontStyle.Bold);
                 using var smallFont = new Font("Arial", 7, FontStyle.Bold);
                 using var textBrush = new SolidBrush(Color.White);
-                var centerFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                using var centerFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
 
                 foreach (var b in mainSurface.Buttons)
                 {
@@ -4821,7 +5094,8 @@ namespace SimConnect3
                         new PointF(ov.ResizeHandle.X - 30, ov.ResizeHandle.Y + 2));
                 }
 
-                e.Graphics.FillRectangle(new SolidBrush(Color.DarkGreen), calibExportBtnRect);
+                using var exportBtnBrush = new SolidBrush(Color.DarkGreen);
+                e.Graphics.FillRectangle(exportBtnBrush, calibExportBtnRect);
                 e.Graphics.DrawString("EXPORTA\ncoordenades", font, textBrush, calibExportBtnRect, centerFmt);
                 e.Graphics.DrawString("CALIBRATGE ACTIU — F12 per sortir", font, Brushes.Red, new Point(200, 15));
             }
@@ -4925,6 +5199,24 @@ namespace SimConnect3
                         calibG3kApSliderInputDragStart = e.Location;
                         calibG3kApSliderInputStartX    = g3kApSliderInputBaseX;
                         calibG3kApSliderInputStartY    = g3kApSliderInputBaseY;
+                        pbMain.Invalidate(); return;
+                    }
+                    // LVL indicator drag/resize
+                    var lvlResH = new Rectangle(_apLvlIndRect.Right - 8, _apLvlIndRect.Bottom - 8, 8, 8);
+                    if (lvlResH.Contains(e.Location))
+                    {
+                        _calibResizeApLvlInd      = true;
+                        _calibApLvlIndDragStart   = e.Location;
+                        _calibApLvlIndStartW      = _apLvlIndW;
+                        _calibApLvlIndStartH      = _apLvlIndH;
+                        pbMain.Invalidate(); return;
+                    }
+                    if (_apLvlIndRect.Contains(e.Location))
+                    {
+                        _calibDragApLvlInd        = true;
+                        _calibApLvlIndDragStart   = e.Location;
+                        _calibApLvlIndStartX      = _apLvlIndBaseX;
+                        _calibApLvlIndStartY      = _apLvlIndBaseY;
                         pbMain.Invalidate(); return;
                     }
                 }
@@ -5145,6 +5437,20 @@ namespace SimConnect3
                     g3kApSliderInputZone  = new Rectangle(g3kApSliderInputBaseX, g3kApSliderInputBaseY, 70, 300);
                     pbMain.Invalidate(); return;
                 }
+                if (_calibDragApLvlInd)
+                {
+                    _apLvlIndBaseX = _calibApLvlIndStartX + (e.X - _calibApLvlIndDragStart.X);
+                    _apLvlIndBaseY = _calibApLvlIndStartY + (e.Y - _calibApLvlIndDragStart.Y);
+                    _apLvlIndRect  = new Rectangle(_apLvlIndBaseX, _apLvlIndBaseY, _apLvlIndW, _apLvlIndH);
+                    pbMain.Invalidate(); return;
+                }
+                if (_calibResizeApLvlInd)
+                {
+                    _apLvlIndW = Math.Max(10, _calibApLvlIndStartW + (e.X - _calibApLvlIndDragStart.X));
+                    _apLvlIndH = Math.Max(10, _calibApLvlIndStartH + (e.Y - _calibApLvlIndDragStart.Y));
+                    _apLvlIndRect = new Rectangle(_apLvlIndBaseX, _apLvlIndBaseY, _apLvlIndW, _apLvlIndH);
+                    pbMain.Invalidate(); return;
+                }
                 if (calibDragRudderTrimInd)
                 {
                     rudderTrimIndY       = calibRudderTrimIndStartY    + (e.Y - calibRudderTrimIndDragStart.Y);
@@ -5334,6 +5640,18 @@ namespace SimConnect3
                     try { ExportCalibrationPositions(silent: true); } catch { }
                     return;
                 }
+                if (_calibDragApLvlInd)
+                {
+                    _calibDragApLvlInd = false;
+                    try { ExportCalibrationPositions(silent: true); } catch { }
+                    return;
+                }
+                if (_calibResizeApLvlInd)
+                {
+                    _calibResizeApLvlInd = false;
+                    try { ExportCalibrationPositions(silent: true); } catch { }
+                    return;
+                }
                 if (calibResizeBtn != null)
                 {
                     calibResizeBtn = null;
@@ -5432,6 +5750,7 @@ namespace SimConnect3
             sb.AppendLine($"TRIMZ:tz:{trimZoneBaseX}:{trimZoneBaseY}");
             sb.AppendLine($"G3KAPZ:apz:{g3kApSliderBaseX}:{g3kApSliderBaseY}");
             sb.AppendLine($"G3KAPZIN:apzin:{g3kApSliderInputBaseX}:{g3kApSliderInputBaseY}");
+            sb.AppendLine($"LVLIND:lvlind:{_apLvlIndBaseX}:{_apLvlIndBaseY}:{_apLvlIndW}:{_apLvlIndH}");
             sb.AppendLine($"RRI:rri:{rudderTrimIndXOffset}:{rudderTrimIndY}");
             sb.AppendLine($"RRZ:rrz:{rudderTrimZoneBaseX}:{rudderTrimZoneBaseY}");
             sb.AppendLine($"TACBTN:tactile:{_tactileBtn.Location.X}:{_tactileBtn.Location.Y}");
@@ -5538,6 +5857,13 @@ namespace SimConnect3
                     g3kApSliderInputBaseX = x;
                     g3kApSliderInputBaseY = y;
                     g3kApSliderInputZone  = new Rectangle(g3kApSliderInputBaseX, g3kApSliderInputBaseY, 70, 300);
+                }
+                else if (type == "LVLIND" && parts.Length >= 6 &&
+                         int.TryParse(parts[4], out int lvlW) && int.TryParse(parts[5], out int lvlH))
+                {
+                    _apLvlIndBaseX = x; _apLvlIndBaseY = y;
+                    _apLvlIndW = lvlW; _apLvlIndH = lvlH;
+                    _apLvlIndRect = new Rectangle(_apLvlIndBaseX, _apLvlIndBaseY, _apLvlIndW, _apLvlIndH);
                 }
                 else if (type == "RRI")
                 {
