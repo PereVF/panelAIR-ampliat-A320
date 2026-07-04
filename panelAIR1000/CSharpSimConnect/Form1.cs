@@ -238,6 +238,27 @@ namespace SimConnect3
 
         private bool trimDragging = false;
         private int trimLastMouseY;
+        // G3K AP slider (nose up / nose dn)
+        private int g3kApSliderBaseX = 10;
+        private int g3kApSliderBaseY = 10;
+        private Rectangle g3kApSliderZone      = new Rectangle(10, 10, 30, 200);
+        private bool calibDragG3kApSlider = false;
+        private Point calibG3kApSliderDragStart;
+        private int calibG3kApSliderStartX;
+        private int calibG3kApSliderStartY;
+        // G3K AP input zone (zona d'input, independent de la visual)
+        private int g3kApSliderInputBaseX = 10;
+        private int g3kApSliderInputBaseY = 10;
+        private Rectangle g3kApSliderInputZone = new Rectangle(10, 10, 70, 300);
+        private bool calibDragG3kApSliderInput = false;
+        private Point calibG3kApSliderInputDragStart;
+        private int calibG3kApSliderInputStartX;
+        private int calibG3kApSliderInputStartY;
+        private bool g3kApSliderDragging = false;
+        private int g3kApSliderLastMouseY;
+        private int g3kApSliderAccumDelta = 0;
+        private const int G3K_AP_SLIDER_TICK_PIXELS = 40;
+        private float _g3kApWheelOffset = 0f;
         private Image[] trimFrames = new Image[26];
         private float trimFramePos = 0f;
         private const float TRIM_PIXELS_PER_FRAME = 9f;
@@ -585,6 +606,10 @@ namespace SimConnect3
             G3K_AP_ALT,
             G3K_AP_VNV,
             G3K_AP_BC,
+            G3K_AP_MACH_TOGGLE,
+            G3K_AP_YAW_DAMPER,
+            G3K_AP_LVL,
+            G3K_AP_BANK_INC,
             G3K_AP_KAP140_UP,
             G3K_AP_KAP140_DN,
             G3K_AP_SPD_DEC,
@@ -866,6 +891,7 @@ namespace SimConnect3
         private int _kap140State = 0;
         private int _apVsHold = 0;
         private int _apFlcActive = 0;
+        private int _apWingLeveler = 0;
         private int _rudderTrimDisabled = 0;
         private int _aileronTrimDisabled = 0;
         private double _lightingLogo1 = 0;
@@ -1080,6 +1106,7 @@ namespace SimConnect3
             public int kap140State;            // L:KAP140_State
             public int apVsHold;               // AUTOPILOT VERTICAL HOLD (Bool)
             public int apFlcActive;            // AUTOPILOT FLIGHT LEVEL CHANGE (Bool)
+            public int apWingLeveler;          // AUTOPILOT WING LEVELER (Bool)
 
 
 
@@ -1339,7 +1366,7 @@ namespace SimConnect3
                     SetAPTrimPos(0);
                     _thrHandleLeftRail = false;
                     _lastThrLeverPos = double.NaN;
-                    _thrIgnoreFollowUntil = DateTime.UtcNow.AddSeconds(3);
+                    _thrIgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                     var thrH = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
                     if (thrH != null)
                     {
@@ -1350,15 +1377,16 @@ namespace SimConnect3
                     if (simconnect != null)
                     {
                         simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_FUELSEL_AUTO, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); _fuelSelectionSet = 2;
-                        simconnect.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 1 });
-                        simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-16383)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        //simconnect.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 1 }); // DISABLED — causa HIGH IDLE si MSFS a CUTOFF
+                        //simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); // DISABLED — idem
+                        //simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-16383)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        //simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         Task.Run(async () => { await Task.Delay(500); this.BeginInvoke(new Action(() => {
-                            simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 1 });
-                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-16383)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            //simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 1 }); // DISABLED — idem
+                            //simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); // DISABLED — idem
+                            //simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-16383)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            //simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            SyncThrHandleFromMsfs();
                         })); });
                     }
                     CheckTBM930Mod();
@@ -2227,7 +2255,7 @@ namespace SimConnect3
                             if (!landActive && !taxiActive) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_LIGHT_TAXI, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                             else if (taxiActive && !landActive) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_LIGHT_LDG, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         } },
-                new() { Name="G3K_LIGHT_DN",     TypeKey="G3K light click", BasePos=new Point(20, 200), ZoomWidth=97, ZoomHeight=97,
+                new() { Name="G3K_LIGHT_DN",     TypeKey="G3K light click", BasePos=new Point(30, 200), ZoomWidth=97, ZoomHeight=97,
                         OnClick = () => {
                             if (landActive) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_LIGHT_TAXI, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                             else if (taxiActive) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_LIGHT_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
@@ -2425,6 +2453,10 @@ namespace SimConnect3
             new() { Name="G3K_AP_ALT",        TypeKey="G3K AP ALT",        BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_ALT,        0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_AP_VNV",        TypeKey="G3K AP VNV",        BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_VNV,        0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_AP_BC",         TypeKey="G3K AP BC",         BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_BC,         0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_AP_MACH_TOG",   TypeKey="G3K AP MACH TOG",   BasePos=new Point(10,  10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_MACH_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_AP_YAW_DMPR",   TypeKey="G3K AP YAW DMPR",   BasePos=new Point(10,  10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_YAW_DAMPER,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_AP_LVL",         TypeKey="G3K AP LVL",         BasePos=new Point(10,  10), ZoomWidth=93, ZoomHeight=63, OnClick = () => { if (_apWingLeveler == 0) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_LVL, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } },
+            new() { Name="G3K_AP_BANK_INC",    TypeKey="G3K AP BANK INC",    BasePos=new Point(10,  10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_BANK_INC,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_AP_NOSE_UP", TypeKey="G3K AP NOSE UP", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => {
                 if (_kap140State != 0 && _apVsHold == 1)
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_KAP140_UP,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
@@ -2434,6 +2466,7 @@ namespace SimConnect3
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_VS_VAR_INC,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_SPD_DEC,     0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                 }
+                _g3kApWheelOffset += 15; pbMain.Invalidate();
             }},
             new() { Name="G3K_AP_NOSE_DN", TypeKey="G3K AP NOSE DN", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => {
                 if (_kap140State != 0 && _apVsHold == 1)
@@ -2444,6 +2477,7 @@ namespace SimConnect3
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_VS_VAR_DEC, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_SPD_INC,    0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                 }
+                _g3kApWheelOffset -= 15; pbMain.Invalidate();
             }},
             };
 
@@ -3273,7 +3307,7 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_TSC2_SK_3, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_MASTER, "AP_MASTER");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_MASTER, false);
-                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_HDG_HOLD, "AP_HDG_HOLD_ON");
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_HDG_HOLD, "AP_HDG_HOLD");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_HDG_HOLD, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_NAV1_HOLD, "AP_NAV1_HOLD");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_NAV1_HOLD, false);
@@ -3291,6 +3325,14 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_VNV, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_BC, "AP_BC_HOLD");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_BC, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_MACH_TOGGLE, "AP_MANAGED_SPEED_IN_MACH_TOGGLE");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_MACH_TOGGLE, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_YAW_DAMPER, "YAW_DAMPER_TOGGLE");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_YAW_DAMPER, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_LVL, "AP_WING_LEVELER");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_LVL, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_BANK_INC, "AP_MAX_BANK_INC");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_BANK_INC, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_KAP140_UP, "AP_KAP140_UP");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_KAP140_UP, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_KAP140_DN, "AP_KAP140_DN");
@@ -3651,6 +3693,7 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:KAP140_State", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT VERTICAL HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT FLIGHT LEVEL CHANGE", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT WING LEVELER", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
 
@@ -4263,6 +4306,7 @@ namespace SimConnect3
                 _kap140State = s1.kap140State;
                 _apVsHold = s1.apVsHold;
                 _apFlcActive = s1.apFlcActive;
+                _apWingLeveler = s1.apWingLeveler;
                 _rudderTrimDisabled = s1.rudderTrimDisabled;
                 _aileronTrimDisabled = s1.aileronTrimDisabled;
                 if (_lightingLogo1 != s1.lightingLogo1) { _lightingLogo1 = s1.lightingLogo1; needsRepaint = true; }
@@ -4385,6 +4429,22 @@ namespace SimConnect3
                     e.Graphics.FillPath(pressBrush, path);
                 }
 
+                // APZ wheel procedural animation
+                {
+                    const int stripeH = 10;
+                    const int period  = stripeH * 2;
+                    int startOff = ((int)_g3kApWheelOffset % period + period) % period;
+                    int sy = g3kApSliderZone.Y - startOff;
+                    var gs = e.Graphics.Save();
+                    e.Graphics.SetClip(g3kApSliderZone);
+                    using var darkBr  = new SolidBrush(Color.FromArgb(20, 20, 20));
+                    using var lightBr = new SolidBrush(Color.FromArgb(65, 65, 65));
+                    for (int y = sy, i = 0; y < g3kApSliderZone.Bottom; y += stripeH, i++)
+                        e.Graphics.FillRectangle(i % 2 == 0 ? darkBr : lightBr,
+                            g3kApSliderZone.X, y, g3kApSliderZone.Width, stripeH);
+                    e.Graphics.Restore(gs);
+                }
+
                 if (calibrationMode)
                 {
                     using var ovPen = new Pen(Color.Cyan, 2);
@@ -4398,6 +4458,10 @@ namespace SimConnect3
                         e.Graphics.FillRectangle(handleBr, ov.ResizeHandle);
                         e.Graphics.DrawString(ov.Name, smallFont, Brushes.Cyan, new PointF(ov.BasePos.X, ov.BasePos.Y - 14));
                     }
+                    // APZ — G3K AP slider zone (input=taronja gran, visual=blanc petit)
+                    e.Graphics.DrawRectangle(new Pen(Color.Orange, 2), new Rectangle(g3kApSliderInputZone.X - 2, g3kApSliderInputZone.Y - 2, g3kApSliderInputZone.Width + 4, g3kApSliderInputZone.Height + 4));
+                    e.Graphics.DrawString("APZ", new Font("Arial", 9), Brushes.Orange, new PointF(g3kApSliderInputZone.X, g3kApSliderInputZone.Y - 16));
+                    e.Graphics.DrawRectangle(new Pen(Color.White, 1), g3kApSliderZone);
                 }
                 return;
             }
@@ -4513,6 +4577,12 @@ namespace SimConnect3
                 // TRZ — zona de drag del trim
                 e.Graphics.DrawRectangle(new Pen(Color.Lime, 2), new Rectangle(trimZone.X - 2, trimZone.Y - 2, trimZone.Width + 4, trimZone.Height + 4));
                 e.Graphics.DrawString("TRZ", new Font("Arial", 7), Brushes.Lime, new PointF(trimZone.X, trimZone.Y - 16));
+                // APZ — G3K AP slider zone
+                if (_g3000Active)
+                {
+                    e.Graphics.DrawRectangle(new Pen(Color.Cyan, 2), new Rectangle(g3kApSliderZone.X - 2, g3kApSliderZone.Y - 2, g3kApSliderZone.Width + 4, g3kApSliderZone.Height + 4));
+                    e.Graphics.DrawString("APZ", new Font("Arial", 7), Brushes.Cyan, new PointF(g3kApSliderZone.X, g3kApSliderZone.Y - 16));
+                }
             }
 
             // TRIM WHEEL IMAGE — segueix rudderTrimZone
@@ -4694,6 +4764,10 @@ namespace SimConnect3
 
                 // Rudder trim wheel horitzontal
                 e.Graphics.FillRectangle(overlayBrush, rudderTrimZone);
+
+                // G3K AP slider zone
+                if (_g3000Active)
+                    e.Graphics.FillRectangle(overlayBrush, g3kApSliderInputZone);
             }
 
 
@@ -4779,6 +4853,11 @@ namespace SimConnect3
                     pbMain.Invalidate();
                     return;
                 }
+                if (g3kApSliderZone.Contains(e.Location))
+                {
+                    g3kApSliderDragging = true;
+                    g3kApSliderLastMouseY = e.Y;
+                }
                 return;
             }
 
@@ -4822,6 +4901,30 @@ namespace SimConnect3
                         calibTrimZoneDragStart = e.Location;
                         calibTrimZoneStartX   = trimZoneBaseX;
                         calibTrimZoneStartY   = trimZoneBaseY;
+                        pbMain.Invalidate(); return;
+                    }
+                }
+                // G3K AP slider zone drag (APZ)
+                if (_g3000Active)
+                {
+                    // Zona visual (blanc, petita) — prioritat alta
+                    var vizRect = new Rectangle(g3kApSliderZone.X - 2, g3kApSliderZone.Y - 2, g3kApSliderZone.Width + 4, g3kApSliderZone.Height + 4);
+                    if (vizRect.Contains(e.Location))
+                    {
+                        calibDragG3kApSlider      = true;
+                        calibG3kApSliderDragStart = e.Location;
+                        calibG3kApSliderStartX    = g3kApSliderBaseX;
+                        calibG3kApSliderStartY    = g3kApSliderBaseY;
+                        pbMain.Invalidate(); return;
+                    }
+                    // Zona input (taronja, gran)
+                    var apzRect = new Rectangle(g3kApSliderInputZone.X - 2, g3kApSliderInputZone.Y - 2, g3kApSliderInputZone.Width + 4, g3kApSliderInputZone.Height + 4);
+                    if (apzRect.Contains(e.Location))
+                    {
+                        calibDragG3kApSliderInput      = true;
+                        calibG3kApSliderInputDragStart = e.Location;
+                        calibG3kApSliderInputStartX    = g3kApSliderInputBaseX;
+                        calibG3kApSliderInputStartY    = g3kApSliderInputBaseY;
                         pbMain.Invalidate(); return;
                     }
                 }
@@ -4926,6 +5029,11 @@ namespace SimConnect3
                 trimDragging = true;
                 trimLastMouseY = e.Y;
             }
+            if (_g3000Active && g3kApSliderInputZone.Contains(e.Location))
+            {
+                g3kApSliderDragging = true;
+                g3kApSliderLastMouseY = e.Y;
+            }
             if (rudderTrimZone.Contains(e.Location))
             {
                 rudderTrimDragging = true;
@@ -5023,6 +5131,20 @@ namespace SimConnect3
                     trimArrowDownPos = new Point(trimZoneBaseX + 50, trimZoneBaseY + 42);
                     pbMain.Invalidate(); return;
                 }
+                if (calibDragG3kApSlider)
+                {
+                    g3kApSliderBaseX = calibG3kApSliderStartX + (e.X - calibG3kApSliderDragStart.X);
+                    g3kApSliderBaseY = calibG3kApSliderStartY + (e.Y - calibG3kApSliderDragStart.Y);
+                    g3kApSliderZone  = new Rectangle(g3kApSliderBaseX, g3kApSliderBaseY, 30, 200);
+                    pbMain.Invalidate(); return;
+                }
+                if (calibDragG3kApSliderInput)
+                {
+                    g3kApSliderInputBaseX = calibG3kApSliderInputStartX + (e.X - calibG3kApSliderInputDragStart.X);
+                    g3kApSliderInputBaseY = calibG3kApSliderInputStartY + (e.Y - calibG3kApSliderInputDragStart.Y);
+                    g3kApSliderInputZone  = new Rectangle(g3kApSliderInputBaseX, g3kApSliderInputBaseY, 70, 300);
+                    pbMain.Invalidate(); return;
+                }
                 if (calibDragRudderTrimInd)
                 {
                     rudderTrimIndY       = calibRudderTrimIndStartY    + (e.Y - calibRudderTrimIndDragStart.Y);
@@ -5083,6 +5205,16 @@ namespace SimConnect3
                                + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
                 pbMain.Invalidate();
             }
+            if (g3kApSliderDragging)
+            {
+                int deltaY = e.Y - g3kApSliderLastMouseY; // positiu = swipe avall = nose up (invertit)
+                g3kApSliderLastMouseY = e.Y;
+                _g3kApWheelOffset -= deltaY * 0.5f;
+                g3kApSliderAccumDelta += deltaY;
+                while (g3kApSliderAccumDelta >= G3K_AP_SLIDER_TICK_PIXELS)  { SendG3kApSliderTick(+1); g3kApSliderAccumDelta -= G3K_AP_SLIDER_TICK_PIXELS; }
+                while (g3kApSliderAccumDelta <= -G3K_AP_SLIDER_TICK_PIXELS) { SendG3kApSliderTick(-1); g3kApSliderAccumDelta += G3K_AP_SLIDER_TICK_PIXELS; }
+                pbMain.Invalidate();
+            }
             if (rudderTrimDragging)
             {
                 int deltaX = e.X - rudderTrimLastMouseX;   // dreta = positiu
@@ -5121,6 +5253,33 @@ namespace SimConnect3
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.RUDDER_TRIM_RIGHT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             else
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.RUDDER_TRIM_LEFT,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+        }
+
+        private void SendG3kApSliderTick(int dir)
+        {
+            if (simconnect == null) return;
+            if (dir > 0) // swipe up = nose up
+            {
+                if (_kap140State != 0 && _apVsHold == 1)
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_KAP140_UP, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                else if (_kap140State != 0 && _apFlcActive == 1)
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_SPD_DEC,   0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                else {
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_VS_VAR_INC, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_SPD_DEC,    0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                }
+            }
+            else // swipe down = nose down
+            {
+                if (_kap140State != 0 && _apVsHold == 1)
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_KAP140_DN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                else if (_kap140State != 0 && _apFlcActive == 1)
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_SPD_INC,   0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                else {
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_VS_VAR_DEC, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_SPD_INC,    0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                }
+            }
         }
 
 
@@ -5163,6 +5322,18 @@ namespace SimConnect3
                     try { ExportCalibrationPositions(silent: true); } catch { }
                     return;
                 }
+                if (calibDragG3kApSlider)
+                {
+                    calibDragG3kApSlider = false;
+                    try { ExportCalibrationPositions(silent: true); } catch { }
+                    return;
+                }
+                if (calibDragG3kApSliderInput)
+                {
+                    calibDragG3kApSliderInput = false;
+                    try { ExportCalibrationPositions(silent: true); } catch { }
+                    return;
+                }
                 if (calibResizeBtn != null)
                 {
                     calibResizeBtn = null;
@@ -5186,6 +5357,8 @@ namespace SimConnect3
             trimLastDir = 0;
             rudderTrimDragging = false;
             rudderTrimLastDir = 0;
+            g3kApSliderDragging = false;
+            g3kApSliderAccumDelta = 0;
             pbMain.Invalidate();
         }
 
@@ -5257,6 +5430,8 @@ namespace SimConnect3
             sb.AppendLine($"FLI:fli:{flapsIndX}:{flapsIndYOffset}");
             sb.AppendLine($"TRIND:tri:{trimIndX}:{trimIndYOffset}");
             sb.AppendLine($"TRIMZ:tz:{trimZoneBaseX}:{trimZoneBaseY}");
+            sb.AppendLine($"G3KAPZ:apz:{g3kApSliderBaseX}:{g3kApSliderBaseY}");
+            sb.AppendLine($"G3KAPZIN:apzin:{g3kApSliderInputBaseX}:{g3kApSliderInputBaseY}");
             sb.AppendLine($"RRI:rri:{rudderTrimIndXOffset}:{rudderTrimIndY}");
             sb.AppendLine($"RRZ:rrz:{rudderTrimZoneBaseX}:{rudderTrimZoneBaseY}");
             sb.AppendLine($"TACBTN:tactile:{_tactileBtn.Location.X}:{_tactileBtn.Location.Y}");
@@ -5351,6 +5526,18 @@ namespace SimConnect3
                     trimZone       = new Rectangle(trimZoneBaseX, trimZoneBaseY, 100, 507);
                     trimArrowUpPos   = new Point(trimZoneBaseX + 50, trimZoneBaseY + 465);
                     trimArrowDownPos = new Point(trimZoneBaseX + 50, trimZoneBaseY + 42);
+                }
+                else if (type == "G3KAPZ")
+                {
+                    g3kApSliderBaseX = x;
+                    g3kApSliderBaseY = y;
+                    g3kApSliderZone  = new Rectangle(g3kApSliderBaseX, g3kApSliderBaseY, 30, 200);
+                }
+                else if (type == "G3KAPZIN")
+                {
+                    g3kApSliderInputBaseX = x;
+                    g3kApSliderInputBaseY = y;
+                    g3kApSliderInputZone  = new Rectangle(g3kApSliderInputBaseX, g3kApSliderInputBaseY, 70, 300);
                 }
                 else if (type == "RRI")
                 {
