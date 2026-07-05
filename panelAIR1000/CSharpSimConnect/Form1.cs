@@ -609,6 +609,7 @@ namespace SimConnect3
             G3K_AP_HDG_HOLD,
             G3K_AP_NAV1_HOLD,
             G3K_AP_APR_HOLD,
+            G3K_XFR,
             G3K_AP_VS_HOLD,
             G3K_AP_FLC,
             G3K_AP_FD,
@@ -619,6 +620,9 @@ namespace SimConnect3
             G3K_AP_YAW_DAMPER,
             G3K_AP_LVL,
             G3K_AP_BANK_INC,
+            G3K_HDG_SYNC,
+            G3K_CRS1_DIR,
+            G3K_CRS2_DIR,
             G3K_AP_KAP140_UP,
             G3K_AP_KAP140_DN,
             G3K_AP_SPD_DEC,
@@ -885,6 +889,7 @@ namespace SimConnect3
             public Action?     OnClick;
             public DateTime    PressedUntilUtc = DateTime.MinValue;
             public int         PressVisualMs   = 120;
+            public bool        IsRound         = false;
             public bool IsVisuallyPressed(DateTime now) => now < PressedUntilUtc;
         }
         private List<OverlayImage> overlayImages = new();
@@ -908,7 +913,12 @@ namespace SimConnect3
         private int _apFdActive = 0;
         private int _apAltLock = 0;
         private int _apVnavBtn = 0;
+        private int _apYawDamper = 0;
+        private double _apMaxBank = 1.0;
+        private int _apBcHold = 0;
         private int _apMaster = 0;
+        private int _xfrPushL = 0;
+        private double _headingIndicator = 0;
         private int _rudderTrimDisabled = 0;
         private int _aileronTrimDisabled = 0;
         private double _lightingLogo1 = 0;
@@ -1131,7 +1141,12 @@ namespace SimConnect3
             public int apFdActive;             // AUTOPILOT FLIGHT DIRECTOR ACTIVE (Bool)
             public int apAltLock;              // AUTOPILOT ALTITUDE LOCK (Bool)
             public int apVnavBtn;              // L:XMLVAR_VNAVButtonValue
+            public int apYawDamper;            // AUTOPILOT YAW DAMPER (Bool)
+            public double apMaxBank;           // AUTOPILOT MAX BANK (Radians)
+            public int apBcHold;               // AUTOPILOT BACKCOURSE HOLD (Bool)
             public int apMaster;               // AUTOPILOT MASTER (Bool)
+            public int xfrPushL;               // L:XMLVAR_PushXFR
+            public double headingIndicator;    // HEADING INDICATOR (degrees)
 
 
 
@@ -1227,7 +1242,10 @@ namespace SimConnect3
                     {
                         string tk = calibSelectedOverlay.TypeKey;
                         foreach (var ov in overlayImages.Concat(g3000OverlayImages).Where(o => o.TypeKey == tk))
+                        {
                             ov.ZoomWidth = w;
+                            if (ov.IsRound) ov.ZoomHeight = w;
+                        }
                         try { ExportCalibrationPositions(silent: true); } catch { }
                         pbMain.Invalidate();
                     }
@@ -2472,6 +2490,7 @@ namespace SimConnect3
             new() { Name="G3K_AP_HDG_HOLD",  TypeKey="G3K AP HDG HOLD",  BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_HDG_HOLD,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_AP_NAV1_HOLD", TypeKey="G3K AP NAV1 HOLD", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_NAV1_HOLD, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_AP_APR_HOLD",  TypeKey="G3K AP APR HOLD",  BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_APR_HOLD,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_XFR",          TypeKey="G3K XFR",          BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_XFR,          0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_AP_VS_HOLD",   TypeKey="G3K AP VS HOLD",   BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_VS_HOLD,   0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_AP_FLC",        TypeKey="G3K AP FLC",        BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_FLC,        0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_AP_FD",         TypeKey="G3K AP FD",         BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_FD,         0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
@@ -2482,6 +2501,9 @@ namespace SimConnect3
             new() { Name="G3K_AP_YAW_DMPR",   TypeKey="G3K AP YAW DMPR",   BasePos=new Point(10,  10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_YAW_DAMPER,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_AP_LVL",         TypeKey="G3K AP LVL",         BasePos=new Point(10,  10), ZoomWidth=93, ZoomHeight=63, OnClick = () => { if (_apWingLeveler == 0) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_LVL, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } },
             new() { Name="G3K_AP_BANK_INC",    TypeKey="G3K AP BANK INC",    BasePos=new Point(10,  10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_BANK_INC,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_HDG_SYNC", TypeKey="G3K HDG SYNC", BasePos=new Point(200, 200), ZoomWidth=70, ZoomHeight=70, IsRound=true, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_HDG_SYNC, (uint)Math.Round(_headingIndicator), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_CRS1_DIR", TypeKey="G3K CRS1 DIR", BasePos=new Point(300, 200), ZoomWidth=70, ZoomHeight=70, IsRound=true, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_CRS1_DIR, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_CRS2_DIR", TypeKey="G3K CRS2 DIR", BasePos=new Point(400, 200), ZoomWidth=117, ZoomHeight=117, IsRound=true, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_CRS2_DIR, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_AP_NOSE_UP", TypeKey="G3K AP NOSE UP", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => {
                 if (_kap140State != 0 && _apVsHold == 1)
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_KAP140_UP,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
@@ -3338,6 +3360,8 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_NAV1_HOLD, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_APR_HOLD, "AP_APR_HOLD");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_APR_HOLD, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_XFR, "SFS.XFR_Toggle");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_XFR, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_VS_HOLD, "AP_VS_HOLD");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_VS_HOLD, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_FLC, "FLIGHT_LEVEL_CHANGE");
@@ -3358,6 +3382,12 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_LVL, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_BANK_INC, "AP_MAX_BANK_INC");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_BANK_INC, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_HDG_SYNC, "HEADING_BUG_SET");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_HDG_SYNC, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_CRS1_DIR, "SFS.G3000_PFD1_CRS_Push");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_CRS1_DIR, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_CRS2_DIR, "SFS.G3000_PFD1_CRS_Push");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_CRS2_DIR, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_KAP140_UP, "AP_KAP140_UP");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_KAP140_UP, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_KAP140_DN, "AP_KAP140_DN");
@@ -3726,7 +3756,12 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT FLIGHT DIRECTOR ACTIVE:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT ALTITUDE LOCK", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_VNAVButtonValue", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT YAW DAMPER", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT MAX BANK", "Radians", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT BACKCOURSE HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT MASTER", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_PushXFR", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "HEADING INDICATOR", "degrees", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
 
@@ -4347,7 +4382,12 @@ namespace SimConnect3
                 _apFdActive = s1.apFdActive;
                 _apAltLock = s1.apAltLock;
                 _apVnavBtn = s1.apVnavBtn;
+                _apYawDamper = s1.apYawDamper;
+                _apMaxBank = s1.apMaxBank;
+                _apBcHold = s1.apBcHold;
                 _apMaster = s1.apMaster;
+                _xfrPushL = s1.xfrPushL;
+                _headingIndicator = s1.headingIndicator;
                 _rudderTrimDisabled = s1.rudderTrimDisabled;
                 _aileronTrimDisabled = s1.aileronTrimDisabled;
                 if (_lightingLogo1 != s1.lightingLogo1) { _lightingLogo1 = s1.lightingLogo1; needsRepaint = true; }
@@ -4466,8 +4506,13 @@ namespace SimConnect3
                     if (!ov.IsVisuallyPressed(now)) continue;
                     var r = ov.Bounds;
                     var inner = new Rectangle(r.X + 4, r.Y + 4, r.Width - 8, r.Height - 8);
-                    using var path = CreateRoundedRect(inner, BTN_RADIUS);
-                    e.Graphics.FillPath(pressBrush, path);
+                    if (ov.IsRound)
+                        e.Graphics.FillEllipse(pressBrush, inner);
+                    else
+                    {
+                        using var path = CreateRoundedRect(inner, BTN_RADIUS);
+                        e.Graphics.FillPath(pressBrush, path);
+                    }
                 }
 
                 // AP feedback indicators
@@ -4478,11 +4523,11 @@ namespace SimConnect3
                         var r = hdgOv.Bounds;
                         int indX = r.Right + 5;
                         int indY = r.Y + 5;
-                        int indH = r.Height - 10;
+                        int indH = 53;
                         if (_apHdgLock == 1)
                         {
                             using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
-                            e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY, 13, indH);
                             using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
                             e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
                         }
@@ -4504,11 +4549,83 @@ namespace SimConnect3
                         var r = aprOv.Bounds;
                         int indX = r.Right + 5;
                         int indY = r.Y + 5;
-                        int indH = r.Height - 10;
-                        if (_apAprHold == 1 || _apGsHold == 1)
+                        int indH = 53;
+                        if (_apAprHold == 1 && _apGsHold == 1)
                         {
                             using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
-                            e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY, 13, indH);
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                        }
+                        else
+                        {
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 35, 35, 30));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                            using var borderPen = new Pen(Color.FromArgb(160, 100, 100, 90), 1);
+                            e.Graphics.DrawRectangle(borderPen, indX, indY, 6, indH - 1);
+                        }
+                    }
+                }
+
+                // BC feedback
+                {
+                    var bcOv = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_AP_BC");
+                    if (bcOv != null)
+                    {
+                        var r = bcOv.Bounds;
+                        int indX = r.Right + 0; int indY = r.Y + 5; int indH = 53;
+                        if (_apBcHold == 1)
+                        {
+                            using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY, 13, indH);
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                        }
+                        else
+                        {
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 35, 35, 30));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                            using var borderPen = new Pen(Color.FromArgb(160, 100, 100, 90), 1);
+                            e.Graphics.DrawRectangle(borderPen, indX, indY, 6, indH - 1);
+                        }
+                    }
+                }
+
+                // BANK HOLD feedback
+                {
+                    var bankOv = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_AP_BANK_INC");
+                    if (bankOv != null)
+                    {
+                        var r = bankOv.Bounds;
+                        int indX = r.Right + 5; int indY = r.Y + 5; int indH = 53;
+                        if (_apMaxBank < 0.5)
+                        {
+                            using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY, 13, indH);
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                        }
+                        else
+                        {
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 35, 35, 30));
+                            e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
+                            using var borderPen = new Pen(Color.FromArgb(160, 100, 100, 90), 1);
+                            e.Graphics.DrawRectangle(borderPen, indX, indY, 6, indH - 1);
+                        }
+                    }
+                }
+
+                // YAW DAMPER feedback
+                {
+                    var ydOv = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_AP_YAW_DMPR");
+                    if (ydOv != null)
+                    {
+                        var r = ydOv.Bounds;
+                        int indX = r.Right + 0; int indY = r.Y + 5; int indH = 53;
+                        if (_apYawDamper == 1)
+                        {
+                            using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY, 13, indH);
                             using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
                             e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
                         }
@@ -4528,11 +4645,11 @@ namespace SimConnect3
                     if (apOv != null)
                     {
                         var r = apOv.Bounds;
-                        int indX = r.Right + 5; int indY = r.Y + 5; int indH = r.Height - 10;
+                        int indX = r.Right + 2; int indY = r.Y + 2; int indH = 53;
                         if (_apMaster == 1)
                         {
                             using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
-                            e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY, 13, indH);
                             using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
                             e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
                         }
@@ -4569,11 +4686,11 @@ namespace SimConnect3
                     if (vnvOv != null)
                     {
                         var r = vnvOv.Bounds;
-                        int indX = r.Right; int indY = r.Y + 5; int indH = r.Height - 10;
+                        int indX = r.Right; int indY = r.Y + 5; int indH = 53;
                         if (_apVnavBtn == 1)
                         {
                             using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
-                            e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY, 13, indH);
                             using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
                             e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
                         }
@@ -4595,11 +4712,11 @@ namespace SimConnect3
                     var ov = g3000OverlayImages.FirstOrDefault(o => o.Name == ovName);
                     if (ov == null) continue;
                     var r = ov.Bounds;
-                    int indX = r.Right + xOff; int indY = r.Y + 5; int indH = r.Height - 10;
+                    int indX = r.Right + xOff; int indY = r.Y + 5; int indH = 53;
                     if (isOn)
                     {
                         using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
-                        e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                        e.Graphics.FillRectangle(glowBr, indX - 3, indY, 13, indH);
                         using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
                         e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
                     }
@@ -4620,11 +4737,11 @@ namespace SimConnect3
                         var r = altOv.Bounds;
                         int indX = r.Right + 5;
                         int indY = r.Y + 5;
-                        int indH = r.Height - 10;
+                        int indH = 53;
                         if (_apAltLock == 1)
                         {
                             using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
-                            e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY, 13, indH);
                             using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
                             e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
                         }
@@ -4646,11 +4763,11 @@ namespace SimConnect3
                         var r = fdOv.Bounds;
                         int indX = r.Right + 5;
                         int indY = r.Y + 5;
-                        int indH = r.Height - 10;
+                        int indH = 53;
                         if (_apFdActive == 1)
                         {
                             using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
-                            e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY, 13, indH);
                             using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
                             e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
                         }
@@ -4672,11 +4789,11 @@ namespace SimConnect3
                         var r = navOv.Bounds;
                         int indX = r.Right + 5;
                         int indY = r.Y + 5;
-                        int indH = r.Height - 10;
+                        int indH = 53;
                         if (_apNav1Lock == 1)
                         {
                             using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
-                            e.Graphics.FillRectangle(glowBr, indX - 3, indY - 2, 13, indH + 4);
+                            e.Graphics.FillRectangle(glowBr, indX - 3, indY, 13, indH);
                             using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
                             e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
                         }
@@ -4686,6 +4803,60 @@ namespace SimConnect3
                             e.Graphics.FillRectangle(coreBr, indX, indY, 7, indH);
                             using var borderPen = new Pen(Color.FromArgb(160, 100, 100, 90), 1);
                             e.Graphics.DrawRectangle(borderPen, indX, indY, 6, indH - 1);
+                        }
+                    }
+                }
+
+                // XFR feedback — triangle esquerra ◀ (encès quan L:XMLVAR_PushXFR == 0)
+                {
+                    var xfrOv = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_XFR");
+                    if (xfrOv != null)
+                    {
+                        var r = xfrOv.Bounds;
+                        int side = 26; int w = 22; int indY = r.Y + r.Height / 2 - side / 2;
+                        int baseX = r.X - 5;
+                        Point[] tri     = { new(baseX,     indY),     new(baseX,     indY + side),     new(baseX - w,     indY + side / 2) };
+                        Point[] triGlow = { new(baseX + 3, indY - 3), new(baseX + 3, indY + side + 3), new(baseX - w - 3, indY + side / 2) };
+                        if (_xfrPushL == 0)
+                        {
+                            using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
+                            e.Graphics.FillPolygon(glowBr, triGlow);
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
+                            e.Graphics.FillPolygon(coreBr, tri);
+                        }
+                        else
+                        {
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 35, 35, 30));
+                            e.Graphics.FillPolygon(coreBr, tri);
+                            using var borderPen = new Pen(Color.FromArgb(160, 100, 100, 90), 1);
+                            e.Graphics.DrawPolygon(borderPen, tri);
+                        }
+                    }
+                }
+
+                // XFR feedback — triangle dreta ▶ (encès quan L:XMLVAR_PushXFR == 1)
+                {
+                    var xfrOv = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_XFR");
+                    if (xfrOv != null)
+                    {
+                        var r = xfrOv.Bounds;
+                        int side = 26; int w = 22; int indY = r.Y + r.Height / 2 - side / 2;
+                        int baseX = r.Right + 5;
+                        Point[] tri     = { new(baseX,     indY),     new(baseX,     indY + side),     new(baseX + w,     indY + side / 2) };
+                        Point[] triGlow = { new(baseX - 3, indY - 3), new(baseX - 3, indY + side + 3), new(baseX + w + 3, indY + side / 2) };
+                        if (_xfrPushL == 1)
+                        {
+                            using var glowBr = new SolidBrush(Color.FromArgb(80, 255, 255, 200));
+                            e.Graphics.FillPolygon(glowBr, triGlow);
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 255, 255, 220));
+                            e.Graphics.FillPolygon(coreBr, tri);
+                        }
+                        else
+                        {
+                            using var coreBr = new SolidBrush(Color.FromArgb(255, 35, 35, 30));
+                            e.Graphics.FillPolygon(coreBr, tri);
+                            using var borderPen = new Pen(Color.FromArgb(160, 100, 100, 90), 1);
+                            e.Graphics.DrawPolygon(borderPen, tri);
                         }
                     }
                 }
@@ -4715,7 +4886,14 @@ namespace SimConnect3
                     foreach (var ov in g3000OverlayImages)
                     {
                         var pen = (ov == calibSelectedOverlay) ? selPen : ovPen;
-                        e.Graphics.DrawRectangle(pen, ov.Bounds);
+                        if (ov.IsRound)
+                        {
+                            using var roundFill = new SolidBrush(Color.FromArgb(50, 0, 220, 220));
+                            e.Graphics.FillEllipse(roundFill, ov.Bounds);
+                            e.Graphics.DrawEllipse(pen, ov.Bounds);
+                        }
+                        else
+                            e.Graphics.DrawRectangle(pen, ov.Bounds);
                         e.Graphics.FillRectangle(handleBr, ov.ResizeHandle);
                         e.Graphics.DrawString(ov.Name, smallFont, Brushes.Cyan, new PointF(ov.BasePos.X, ov.BasePos.Y - 14));
                     }
@@ -5312,6 +5490,11 @@ namespace SimConnect3
                 return;
             }
 
+            if (_g3000Active)
+                foreach (var ov in g3000OverlayImages.Where(o => o.IsRound))
+                    if (ov.OnClick != null && ov.Bounds.Contains(e.Location))
+                    { ov.PressedUntilUtc = DateTime.UtcNow.AddMilliseconds(ov.PressVisualMs); ov.OnClick.Invoke(); pbMain.Invalidate(); return; }
+
             foreach (var ov in overlayImages)
                 if (ov.OnClick != null && ov.Bounds.Contains(e.Location))
                 { ov.OnClick.Invoke(); return; }
@@ -5479,7 +5662,9 @@ namespace SimConnect3
                     foreach (var ov in overlayImages.Concat(g3000OverlayImages).Where(o => o.TypeKey == tk))
                     {
                         ov.ZoomWidth = newW;
-                        if (ov.ZoomHeight > 0)
+                        if (ov.IsRound)
+                            ov.ZoomHeight = newW;
+                        else if (ov.ZoomHeight > 0)
                             ov.ZoomHeight = Math.Max(10, calibResizeStartHeight + (e.Y - calibResizeStartMouseY));
                     }
                     calibZoomBox.Text = ((int)newW).ToString();
