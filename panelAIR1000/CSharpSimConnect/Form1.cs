@@ -198,6 +198,9 @@ namespace SimConnect3
         private int fuel1Pos = 0; // 0=OFF(-30°), 1=ON(0°), 2=CROSSFEED(+30°)
         private int fuel2Pos = 0; // 0=CROSSFEED(-30°), 1=ON(0°), 2=OFF(+30°)
         private int numEngines = 2; // detectat automàticament de MSFS
+        private float _g3kFuelSelAngle = -1f;       // -1 = no inicialitzat
+        private float _g3kFuelSelTargetAngle = 0f;
+        private DateTime _g3kFuelSelLastPaint = DateTime.MinValue;
 
         int gearNosePercent = 0;
         int gearLeftPercent = 0;
@@ -623,6 +626,10 @@ namespace SimConnect3
             G3K_HDG_SYNC,
             G3K_CRS1_DIR,
             G3K_CRS2_DIR,
+            G3K_TSC1_TKP,
+            G3K_TSC1_BKP,
+            G3K_MASTER_WARN,
+            G3K_MASTER_CAUT,
             G3K_AP_KAP140_UP,
             G3K_AP_KAP140_DN,
             G3K_AP_SPD_DEC,
@@ -890,6 +897,7 @@ namespace SimConnect3
             public DateTime    PressedUntilUtc = DateTime.MinValue;
             public int         PressVisualMs   = 120;
             public bool        IsRound         = false;
+            public bool        NoResize        = false;
             public bool IsVisuallyPressed(DateTime now) => now < PressedUntilUtc;
         }
         private List<OverlayImage> overlayImages = new();
@@ -919,6 +927,8 @@ namespace SimConnect3
         private int _apMaster = 0;
         private int _xfrPushL = 0;
         private double _headingIndicator = 0;
+        private int _masterCautionActive = 0;
+        private int _masterWarningActive = 0;
         private int _rudderTrimDisabled = 0;
         private int _aileronTrimDisabled = 0;
         private double _lightingLogo1 = 0;
@@ -1147,6 +1157,8 @@ namespace SimConnect3
             public int apMaster;               // AUTOPILOT MASTER (Bool)
             public int xfrPushL;               // L:XMLVAR_PushXFR
             public double headingIndicator;    // HEADING INDICATOR (degrees)
+            public int masterCautionActive;    // L:Generic_Master_Caution_Active
+            public int masterWarningActive;    // L:Generic_Master_Warning_Active
 
 
 
@@ -2504,6 +2516,16 @@ namespace SimConnect3
             new() { Name="G3K_HDG_SYNC", TypeKey="G3K HDG SYNC", BasePos=new Point(200, 200), ZoomWidth=70, ZoomHeight=70, IsRound=true, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_HDG_SYNC, (uint)Math.Round(_headingIndicator), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_CRS1_DIR", TypeKey="G3K CRS1 DIR", BasePos=new Point(300, 200), ZoomWidth=70, ZoomHeight=70, IsRound=true, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_CRS1_DIR, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_CRS2_DIR", TypeKey="G3K CRS2 DIR", BasePos=new Point(400, 200), ZoomWidth=117, ZoomHeight=117, IsRound=true, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_CRS2_DIR, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_TSC1_TKP", TypeKey="G3K TSC1 TKP", BasePos=new Point(500, 200), ZoomWidth=70, ZoomHeight=70, IsRound=true, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_TSC1_TKP, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_TSC1_BKP", TypeKey="G3K TSC1 BKP", BasePos=new Point(600, 200), ZoomWidth=70, ZoomHeight=70, IsRound=true, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_TSC1_BKP, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_MASTER_WARN", TypeKey="G3K Master Warn", BasePos=new Point(700, 200), ZoomWidth=100, ZoomHeight=60, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_MASTER_WARN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_MASTER_CAUT", TypeKey="G3K Master Caut", BasePos=new Point(820, 200), ZoomWidth=100, ZoomHeight=60, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_MASTER_CAUT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_CAUT_LIGHT", TypeKey="G3K Caut Light", BasePos=new Point(900, 200), ZoomWidth=108, ZoomHeight=105, NoResize=true, Img=LoadOverlayImage("MASTER CAUTION LIGHT.png"), ShowWhen=() => _masterCautionActive != 0 },
+            new() { Name="G3K_WARN_LIGHT", TypeKey="G3K Warn Light", BasePos=new Point(1020, 200), ZoomWidth=111, ZoomHeight=107, NoResize=true, Img=LoadOverlayImage("MASTER WARNING LIGHT.png"), ShowWhen=() => _masterWarningActive != 0 },
+            new() { Name="G3K_FSEL_L", TypeKey="G3K Fuel Sel L", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 2, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_FSEL_R", TypeKey="G3K Fuel Sel R", BasePos=new Point(300, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 3, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_FSEL_OFF", TypeKey="G3K Fuel Sel Off", BasePos=new Point(400, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_FSEL_SW", TypeKey="G3K Fuel Sel SW", BasePos=new Point(500, 100), ZoomWidth=244, ZoomHeight=244, Img=LoadOverlayImage("FUEL SEL SW.png") },
             new() { Name="G3K_AP_NOSE_UP", TypeKey="G3K AP NOSE UP", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => {
                 if (_kap140State != 0 && _apVsHold == 1)
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_KAP140_UP,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
@@ -3388,6 +3410,14 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_CRS1_DIR, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_CRS2_DIR, "SFS.G3000_PFD1_CRS_Push");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_CRS2_DIR, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_TSC1_TKP, "SFS.G3000_TSC1_TopKnob_Push");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_TSC1_TKP, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_TSC1_BKP, "SFS.G3000_TSC1_BottomKnob_Push");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_TSC1_BKP, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_MASTER_WARN, "MASTER_WARNING_ACKNOWLEDGE");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_MASTER_WARN, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_MASTER_CAUT, "MASTER_CAUTION_ACKNOWLEDGE");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_MASTER_CAUT, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_KAP140_UP, "AP_KAP140_UP");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.G3K_AP_KAP140_UP, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.G3K_AP_KAP140_DN, "AP_KAP140_DN");
@@ -3762,6 +3792,8 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT MASTER", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_PushXFR", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "HEADING INDICATOR", "degrees", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:Generic_Master_Caution_Active", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:Generic_Master_Warning_Active", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
 
@@ -4388,6 +4420,23 @@ namespace SimConnect3
                 _apMaster = s1.apMaster;
                 _xfrPushL = s1.xfrPushL;
                 _headingIndicator = s1.headingIndicator;
+                _masterCautionActive = s1.masterCautionActive;
+                _masterWarningActive = s1.masterWarningActive;
+                // G3K fuel selector animation
+                {
+                    float fselTarget = s1.fuel_selector_1 == 2 ? 245f : (s1.fuel_selector_1 == 3 ? 113f : 0f);
+                    if (_g3kFuelSelAngle < 0f)
+                    {
+                        _g3kFuelSelAngle = fselTarget;
+                        _g3kFuelSelTargetAngle = fselTarget;
+                    }
+                    else if (fselTarget != _g3kFuelSelTargetAngle)
+                    {
+                        _g3kFuelSelTargetAngle = fselTarget;
+                        _g3kFuelSelLastPaint = DateTime.MinValue;
+                        needsRepaint = true;
+                    }
+                }
                 _rudderTrimDisabled = s1.rudderTrimDisabled;
                 _aileronTrimDisabled = s1.aileronTrimDisabled;
                 if (_lightingLogo1 != s1.lightingLogo1) { _lightingLogo1 = s1.lightingLogo1; needsRepaint = true; }
@@ -4496,8 +4545,43 @@ namespace SimConnect3
             if (_g3000Active)
             {
                 foreach (var ov in g3000OverlayImages)
+                {
+                    if (ov.Name == "G3K_FSEL_SW") continue;
                     if (ov.Img != null && (calibrationMode || (ov.ShowWhen?.Invoke() ?? true)))
                         e.Graphics.DrawImage(ov.Img, ov.AnimatedBounds);
+                }
+
+                // G3K_FSEL_SW — selector combustible animat (rotació CCW)
+                {
+                    var sw = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_FSEL_SW");
+                    if (sw?.Img != null && _g3kFuelSelAngle >= 0f)
+                    {
+                        var nowAnim = DateTime.UtcNow;
+                        if (_g3kFuelSelAngle != _g3kFuelSelTargetAngle)
+                        {
+                            float elapsed = _g3kFuelSelLastPaint == DateTime.MinValue ? 0f
+                                : Math.Min((float)(nowAnim - _g3kFuelSelLastPaint).TotalSeconds, 0.1f);
+                            float step = 90f * elapsed;
+                            if (_g3kFuelSelTargetAngle > _g3kFuelSelAngle)
+                                _g3kFuelSelAngle = Math.Min(_g3kFuelSelAngle + step, _g3kFuelSelTargetAngle);
+                            else
+                                _g3kFuelSelAngle = Math.Max(_g3kFuelSelAngle - step, _g3kFuelSelTargetAngle);
+                            if (_g3kFuelSelAngle != _g3kFuelSelTargetAngle)
+                                this.BeginInvoke(new Action(() => pbMain.Invalidate()));
+                        }
+                        _g3kFuelSelLastPaint = nowAnim;
+
+                        float baseW = sw.Img.Width;
+                        float baseH = sw.Img.Height;
+                        float cx = sw.BasePos.X + baseW / 2f;
+                        float cy = sw.BasePos.Y + baseH / 2f;
+                        var state = e.Graphics.Save();
+                        e.Graphics.TranslateTransform(cx, cy);
+                        e.Graphics.RotateTransform(-_g3kFuelSelAngle);
+                        e.Graphics.DrawImage(sw.Img, -baseW / 2f, -baseH / 2f, baseW, baseH);
+                        e.Graphics.Restore(state);
+                    }
+                }
 
                 var now = DateTime.UtcNow;
                 using var pressBrush = new SolidBrush(Color.FromArgb(90, Color.White));
@@ -4894,7 +4978,7 @@ namespace SimConnect3
                         }
                         else
                             e.Graphics.DrawRectangle(pen, ov.Bounds);
-                        e.Graphics.FillRectangle(handleBr, ov.ResizeHandle);
+                        if (!ov.NoResize) e.Graphics.FillRectangle(handleBr, ov.ResizeHandle);
                         e.Graphics.DrawString(ov.Name, smallFont, Brushes.Cyan, new PointF(ov.BasePos.X, ov.BasePos.Y - 14));
                     }
                     // APZ — G3K AP slider zone (input=taronja gran, visual=blanc petit)
@@ -5440,7 +5524,7 @@ namespace SimConnect3
                 var activeOverlays = _g3000Active ? g3000OverlayImages : overlayImages;
                 foreach (var ov in activeOverlays)
                 {
-                    if (ov.ResizeHandle.Contains(e.Location))
+                    if (!ov.NoResize && ov.ResizeHandle.Contains(e.Location))
                     {
                         calibResizeOverlay     = ov;
                         calibSelectedOverlay   = ov;

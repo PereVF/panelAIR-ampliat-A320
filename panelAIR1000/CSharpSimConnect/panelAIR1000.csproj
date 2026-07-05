@@ -110,6 +110,9 @@
     <EmbeddedResource Include="Resources\animació roda de trim\fotograma-28-Photoroom.png"><LogicalName>panelAIR1000.trimframe28.png</LogicalName></EmbeddedResource>
     <EmbeddedResource Include="Resources\animació roda de trim\fotograma-29-Photoroom.png"><LogicalName>panelAIR1000.trimframe29.png</LogicalName></EmbeddedResource>
     <EmbeddedResource Include="Resources\animació roda de trim\fotograma-30-Photoroom.png"><LogicalName>panelAIR1000.trimframe30.png</LogicalName></EmbeddedResource>
+    <EmbeddedResource Include="Resources\FUEL SEL SW.png" />
+    <EmbeddedResource Include="Resources\MASTER CAUTION LIGHT.png" />
+    <EmbeddedResource Include="Resources\MASTER WARNING LIGHT.png" />
   </ItemGroup>
 
   <ItemGroup>
