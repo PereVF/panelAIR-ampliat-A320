@@ -1030,6 +1030,20 @@ namespace SimConnect3
 
         private int flapsAnimOffsetY = 0;
         private int flapsAnimDir     = 0;
+        // G3K flaps
+        private int   _g3kFlapsAnimDir          = 0;
+        private int   _g3kFlapsPoscLast         = -1;
+        private float _g3kFlapsCircleY_Current  = 0f;
+        private float _g3kFlapsCircleY_Target   = 0f;
+        private float _g3kFlapsCircleY_Start    = 0f;
+        private DateTime _g3kFlapsAnimStartTime;
+        private float _g3kFlapsAnimDurationSec  = 0f;
+        private int   _g3kFlapsIndX             = 400;
+        private int   _g3kFlapsIndYOffset       = 0;
+        private bool  _calibDragG3kFlapsInd     = false;
+        private Point _calibG3kFlapsIndDragStart;
+        private int   _calibG3kFlapsIndStartX;
+        private int   _calibG3kFlapsIndStartYOff;
         private int  lgearAnimOffsetY = 0;
         private bool lgearHandleUp   = false; // true=UP, false=DN — estat visual de la palanca
         private int flapsIndX        = 3335;
@@ -2518,8 +2532,39 @@ namespace SimConnect3
             new() { Name="G3K_CRS2_DIR", TypeKey="G3K CRS2 DIR", BasePos=new Point(400, 200), ZoomWidth=117, ZoomHeight=117, IsRound=true, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_CRS2_DIR, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_TSC1_TKP", TypeKey="G3K TSC1 TKP", BasePos=new Point(500, 200), ZoomWidth=70, ZoomHeight=70, IsRound=true, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_TSC1_TKP, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_TSC1_BKP", TypeKey="G3K TSC1 BKP", BasePos=new Point(600, 200), ZoomWidth=70, ZoomHeight=70, IsRound=true, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_TSC1_BKP, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
-            new() { Name="G3K_MASTER_WARN", TypeKey="G3K Master Warn", BasePos=new Point(700, 200), ZoomWidth=100, ZoomHeight=60, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_MASTER_WARN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
-            new() { Name="G3K_MASTER_CAUT", TypeKey="G3K Master Caut", BasePos=new Point(820, 200), ZoomWidth=100, ZoomHeight=60, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_MASTER_CAUT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_MASTER_WARN", TypeKey="G3K Master Warn", BasePos=new Point(700, 200), ZoomWidth=100, ZoomHeight=60, PressVisualMs=0, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_MASTER_WARN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_MASTER_CAUT", TypeKey="G3K Master Caut", BasePos=new Point(820, 200), ZoomWidth=100, ZoomHeight=60, PressVisualMs=0, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_MASTER_CAUT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_FLAPS_SW",  TypeKey="G3K Flaps SW",  BasePos=new Point(400, 400), ZoomWidth=217, Img=LoadOverlayImage("SW flaps.png") },
+            // Gear LEDs — mateixa lògica que G1000, mides × 14/11.75
+            new() { Name="G3K_LED_GEAR_LEFT",    TypeKey="G3K LED Gear Left",    BasePos=new Point(720,  1710), ZoomWidth=51, Img=ledGreenImg,
+                    ShowWhen = () => mainBusVolts >= 5.0 && gearLeftPercent  >= 100 },
+            new() { Name="G3K_LED_GEAR_NOSE",    TypeKey="G3K LED Gear Nose",    BasePos=new Point(770,  1664), ZoomWidth=51, Img=ledGreenImg,
+                    ShowWhen = () => mainBusVolts >= 5.0 && gearNosePercent  >= 100 },
+            new() { Name="G3K_LED_GEAR_RIGHT",   TypeKey="G3K LED Gear Right",   BasePos=new Point(822,  1710), ZoomWidth=51, Img=ledGreenImg,
+                    ShowWhen = () => mainBusVolts >= 5.0 && gearRightPercent >= 100 },
+            new() { Name="G3K_LGEAR_SW",  TypeKey="G3K LGear SW",  BasePos=new Point(890, 1640), ZoomWidth=118, Img=swLgearImg },
+            new() { Name="G3K_PBRAKE_SW", TypeKey="G3K PBrake SW", BasePos=new Point(1010, 1640), ZoomWidth=260, Img=swPbrakeImg },
+            new() { Name="G3K_PBRAKE_CK", TypeKey="G3K PBrake CK", BasePos=new Point(1010, 1640), ZoomWidth=260, ZoomHeight=130, PressVisualMs=0,
+                    OnClick = () => { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PBRAKE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); pbMain.Invalidate(); } },
+            new() { Name="G3K_LED_PBRAKE", TypeKey="G3K LED PBrake", BasePos=new Point(1280, 1620), ZoomWidth=50, Img=ledRedImg,
+                    ShowWhen = () => mainBusVolts >= 5.0 && pbrakeActive },
+            new() { Name="G3K_LGEAR_UP",  TypeKey="G3K LGear UP",  BasePos=new Point(890, 1590), ZoomWidth=118, ZoomHeight=70, PressVisualMs=0,
+                    OnClick = () => { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_UP, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } },
+            new() { Name="G3K_LGEAR_DN",  TypeKey="G3K LGear DN",  BasePos=new Point(890, 1750), ZoomWidth=118, ZoomHeight=70, PressVisualMs=0,
+                    OnClick = () => { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_DN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } },
+            new() { Name="G3K_LED_GEAR_TRANSIT", TypeKey="G3K LED Gear Transit", BasePos=new Point(770,  1601), ZoomWidth=47, Img=ledRedImg,
+                    ShowWhen = () => mainBusVolts >= 5.0 &&
+                                     ((gearLeftPercent  > 0 && gearLeftPercent  < 100) ||
+                                      (gearNosePercent  > 0 && gearNosePercent  < 100) ||
+                                      (gearRightPercent > 0 && gearRightPercent < 100)) },
+            new() { Name="G3K_FLAPS_UP",  TypeKey="G3K Flaps UP",  BasePos=new Point(400, 370), ZoomWidth=217, ZoomHeight=60, PressVisualMs=0,
+                    OnClick = () => { _g3kFlapsAnimDir = -1; pbMain.Invalidate();
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        Task.Delay(150).ContinueWith(_ => this.BeginInvoke(() => { _g3kFlapsAnimDir = 0; pbMain.Invalidate(); })); } },
+            new() { Name="G3K_FLAPS_DN",  TypeKey="G3K Flaps DN",  BasePos=new Point(400, 450), ZoomWidth=217, ZoomHeight=60, PressVisualMs=0,
+                    OnClick = () => { _g3kFlapsAnimDir =  1; pbMain.Invalidate();
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_DN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        Task.Delay(150).ContinueWith(_ => this.BeginInvoke(() => { _g3kFlapsAnimDir = 0; pbMain.Invalidate(); })); } },
             new() { Name="G3K_CAUT_LIGHT", TypeKey="G3K Caut Light", BasePos=new Point(900, 200), ZoomWidth=108, ZoomHeight=105, NoResize=true, Img=LoadOverlayImage("MASTER CAUTION LIGHT.png"), ShowWhen=() => _masterCautionActive != 0 },
             new() { Name="G3K_WARN_LIGHT", TypeKey="G3K Warn Light", BasePos=new Point(1020, 200), ZoomWidth=111, ZoomHeight=107, NoResize=true, Img=LoadOverlayImage("MASTER WARNING LIGHT.png"), ShowWhen=() => _masterWarningActive != 0 },
             new() { Name="G3K_FSEL_L", TypeKey="G3K Fuel Sel L", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 2, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
@@ -4547,8 +4592,29 @@ namespace SimConnect3
                 foreach (var ov in g3000OverlayImages)
                 {
                     if (ov.Name == "G3K_FSEL_SW") continue;
+                    if (ov.Name == "G3K_PBRAKE_SW") continue;
                     if (ov.Img != null && (calibrationMode || (ov.ShowWhen?.Invoke() ?? true)))
                         e.Graphics.DrawImage(ov.Img, ov.AnimatedBounds);
+                }
+
+                // G3K_PBRAKE_SW — manual draw amb rotació quan actiu
+                {
+                    var swG3kPbrake = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_PBRAKE_SW");
+                    if (swG3kPbrake?.Img != null)
+                    {
+                        float baseW = swG3kPbrake.ZoomWidth;
+                        float baseH = baseW / swG3kPbrake.AspectRatio;
+                        float drawW = pbrakeActive ? baseW * 1.15f : baseW;
+                        float drawH = pbrakeActive ? baseH * 1.15f : baseH;
+                        float angle = pbrakeActive ? 30f : 0f;
+                        float cx    = swG3kPbrake.BasePos.X + baseW / 2f;
+                        float cy    = swG3kPbrake.BasePos.Y + baseH / 2f;
+                        var state = e.Graphics.Save();
+                        e.Graphics.TranslateTransform(cx, cy);
+                        e.Graphics.RotateTransform(angle);
+                        e.Graphics.DrawImage(swG3kPbrake.Img, -drawW / 2f, -drawH / 2f, drawW, drawH);
+                        e.Graphics.Restore(state);
+                    }
                 }
 
                 // G3K_FSEL_SW — selector combustible animat (rotació CCW)
@@ -4959,6 +5025,82 @@ namespace SimConnect3
                         e.Graphics.FillRectangle(i % 2 == 0 ? darkBr : lightBr,
                             g3kApSliderZone.X, y, g3kApSliderZone.Width, stripeH);
                     e.Graphics.Restore(gs);
+                }
+
+                // G3K_FLAPS_SW — AnimOffsetY quan es prem UP/DN
+                {
+                    var swG3kFlaps = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_FLAPS_SW");
+                    if (swG3kFlaps != null) swG3kFlaps.AnimOffsetY = _g3kFlapsAnimDir != 0 ? _g3kFlapsAnimDir * 30 : 0;
+                }
+                // G3K_LGEAR_SW — AnimOffsetY sincronitzat amb MSFS gear handle
+                {
+                    var swG3kLgear = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_LGEAR_SW");
+                    if (swG3kLgear != null) swG3kLgear.AnimOffsetY = lgearHandleUp ? -50 : 50;
+                }
+
+                // G3K FLI — marcadors + cercle animat (escala 11.75/14 respecte G1000)
+                if (flapsNumPositions > 0)
+                {
+                    const int G3K_FLI_RANGE = 193; // 230 × 11.75/14
+                    const int G3K_FLI_DIAM  = 17;
+                    const int G3K_FLI_BASE_Y = 450;
+                    int yUp   = G3K_FLI_BASE_Y + _g3kFlapsIndYOffset;
+                    int yFull = yUp + G3K_FLI_RANGE;
+                    int g3kFmX = _g3kFlapsIndX - 21;
+
+                    // Marcadors UP i FULL
+                    e.Graphics.FillRectangle(Brushes.White, new Rectangle(g3kFmX, yUp,   17, 4));
+                    e.Graphics.FillRectangle(Brushes.White, new Rectangle(g3kFmX, yFull, 17, 4));
+
+                    // Marcadors intermedis
+                    int spaces = flapsNumPositions;
+                    float stepY = G3K_FLI_RANGE / (float)spaces;
+                    for (int i = 1; i < spaces; i++)
+                        e.Graphics.FillRectangle(Brushes.White, new Rectangle(g3kFmX, (int)(yUp + stepY * i), 17, 4));
+
+                    // Cercle animat
+                    float stepYInd = G3K_FLI_RANGE / (float)flapsNumPositions;
+                    _g3kFlapsCircleY_Target = yUp + stepYInd * flapsPoscPalanca;
+
+                    if (flapsPoscPalanca != _g3kFlapsPoscLast)
+                    {
+                        if (_g3kFlapsPoscLast < 0)
+                        {
+                            _g3kFlapsCircleY_Current = _g3kFlapsCircleY_Target;
+                            _g3kFlapsAnimDurationSec = 0f;
+                        }
+                        else
+                        {
+                            _g3kFlapsCircleY_Start   = _g3kFlapsCircleY_Current;
+                            _g3kFlapsAnimStartTime   = DateTime.Now;
+                            float dist = Math.Abs(_g3kFlapsCircleY_Target - _g3kFlapsCircleY_Current);
+                            _g3kFlapsAnimDurationSec = 8f * (dist / G3K_FLI_RANGE);
+                        }
+                        _g3kFlapsPoscLast = flapsPoscPalanca;
+                    }
+
+                    if (_g3kFlapsAnimDurationSec > 0f)
+                    {
+                        float t = Math.Min((float)(DateTime.Now - _g3kFlapsAnimStartTime).TotalSeconds / _g3kFlapsAnimDurationSec, 1f);
+                        _g3kFlapsCircleY_Current = _g3kFlapsCircleY_Start + (_g3kFlapsCircleY_Target - _g3kFlapsCircleY_Start) * t;
+                        if (t >= 1f) _g3kFlapsAnimDurationSec = 0f;
+                    }
+                    else
+                        _g3kFlapsCircleY_Current = _g3kFlapsCircleY_Target;
+
+                    int drawY = (int)Math.Round(_g3kFlapsCircleY_Current) - G3K_FLI_DIAM / 2;
+                    e.Graphics.FillEllipse(Brushes.White, new Rectangle(_g3kFlapsIndX, drawY, G3K_FLI_DIAM, G3K_FLI_DIAM));
+
+                    if (_g3kFlapsAnimDurationSec > 0f)
+                        this.BeginInvoke(new Action(() => pbMain.Invalidate()));
+
+                    if (calibrationMode)
+                    {
+                        using var fliPen  = new Pen(Color.Lime, 2);
+                        using var fliFont = new Font("Arial", 7);
+                        e.Graphics.DrawRectangle(fliPen, new Rectangle(_g3kFlapsIndX - 2, yUp - 2, G3K_FLI_DIAM + 4, G3K_FLI_RANGE + G3K_FLI_DIAM + 4));
+                        e.Graphics.DrawString("FLI", fliFont, Brushes.Lime, new PointF(_g3kFlapsIndX, yUp - 16));
+                    }
                 }
 
                 if (calibrationMode)
@@ -5481,6 +5623,20 @@ namespace SimConnect3
                         _calibApLvlIndStartY      = _apLvlIndBaseY;
                         pbMain.Invalidate(); return;
                     }
+                    // G3K FLI drag
+                    {
+                        const int G3K_FLI_RANGE = 193; const int G3K_FLI_DIAM = 17;
+                        int yUp = 450 + _g3kFlapsIndYOffset;
+                        var fliRect = new Rectangle(_g3kFlapsIndX - 2, yUp - 2, G3K_FLI_DIAM + 4, G3K_FLI_RANGE + G3K_FLI_DIAM + 4);
+                        if (fliRect.Contains(e.Location))
+                        {
+                            _calibDragG3kFlapsInd       = true;
+                            _calibG3kFlapsIndDragStart  = e.Location;
+                            _calibG3kFlapsIndStartX     = _g3kFlapsIndX;
+                            _calibG3kFlapsIndStartYOff  = _g3kFlapsIndYOffset;
+                            pbMain.Invalidate(); return;
+                        }
+                    }
                 }
                 // Rudder trim indicator drag (RRI)
                 {
@@ -5673,6 +5829,12 @@ namespace SimConnect3
                 {
                     flapsIndX       = calibFlapsIndStartX    + (e.X - calibFlapsIndDragStart.X);
                     flapsIndYOffset = calibFlapsIndStartYOff + (e.Y - calibFlapsIndDragStart.Y);
+                    pbMain.Invalidate(); return;
+                }
+                if (_calibDragG3kFlapsInd)
+                {
+                    _g3kFlapsIndX       = _calibG3kFlapsIndStartX    + (e.X - _calibG3kFlapsIndDragStart.X);
+                    _g3kFlapsIndYOffset = _calibG3kFlapsIndStartYOff + (e.Y - _calibG3kFlapsIndDragStart.Y);
                     pbMain.Invalidate(); return;
                 }
                 if (calibDragTrimInd)
@@ -5873,6 +6035,12 @@ namespace SimConnect3
                     try { ExportCalibrationPositions(silent: true); } catch { }
                     return;
                 }
+                if (_calibDragG3kFlapsInd)
+                {
+                    _calibDragG3kFlapsInd = false;
+                    try { ExportCalibrationPositions(silent: true); } catch { }
+                    return;
+                }
                 if (calibDragTrimInd)
                 {
                     calibDragTrimInd = false;
@@ -6015,6 +6183,7 @@ namespace SimConnect3
                     : $"G3K:{ov.Name}:{ov.BasePos.X}:{saveY}:{(int)ov.ZoomWidth}");
             }
             sb.AppendLine($"FLI:fli:{flapsIndX}:{flapsIndYOffset}");
+            sb.AppendLine($"G3KFLI:g3kfli:{_g3kFlapsIndX}:{_g3kFlapsIndYOffset}");
             sb.AppendLine($"TRIND:tri:{trimIndX}:{trimIndYOffset}");
             sb.AppendLine($"TRIMZ:tz:{trimZoneBaseX}:{trimZoneBaseY}");
             sb.AppendLine($"G3KAPZ:apz:{g3kApSliderBaseX}:{g3kApSliderBaseY}");
@@ -6101,6 +6270,11 @@ namespace SimConnect3
                 {
                     flapsIndX = x;
                     flapsIndYOffset = y;
+                }
+                else if (type == "G3KFLI")
+                {
+                    _g3kFlapsIndX = x;
+                    _g3kFlapsIndYOffset = y;
                 }
                 else if (type == "TRIND")
                 {
