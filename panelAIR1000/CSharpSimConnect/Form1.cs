@@ -311,6 +311,52 @@ namespace SimConnect3
         // sensibilitat (equivalent a SCROLL_TICK)
         private const float TRIM_SENSITIVITY = 0.0025f;
 
+        // G3K Trim wheel
+        private int _g3kTrimZoneBaseX = 3685;
+        private int _g3kTrimZoneBaseY = 1564;
+        private Rectangle _g3kTrimZone = new Rectangle(3685, 1564, 119, 603);
+        private bool _g3kTrimDragging = false;
+        private int _g3kTrimLastMouseY;
+        private int _g3kTrimAccumulatedDelta = 0;
+        private int _g3kTrimLastDir = 0;
+        private bool _calibDragG3kTrimZone = false;
+        private Point _calibG3kTrimZoneDragStart;
+        private int _calibG3kTrimZoneStartX;
+        private int _calibG3kTrimZoneStartY;
+        // G3K Trim indicator
+        private int _g3kTrimIndX = 3620;
+        private int _g3kTrimIndYOffset = 0;
+        private bool _calibDragG3kTrimInd = false;
+        private Point _calibG3kTrimIndDragStart;
+        private int _calibG3kTrimIndStartX;
+        private int _calibG3kTrimIndStartYOff;
+        // G3K Trim zone resize (ratio fix 119:603)
+        private bool _calibResizeG3kTrimZone = false;
+        private Point _calibResizeG3kTrimZoneDragStart;
+        private int _calibResizeG3kTrimZoneStartH;
+        // G3K Rudder Trim wheel (horitzontal, frames sense rotar)
+        private int _g3kRudderTrimZoneBaseX = 1280;
+        private int _g3kRudderTrimZoneBaseY = 2000;
+        private Rectangle _g3kRudderTrimZone = new Rectangle(1280, 2000, 385, 76);
+        private bool _g3kRudderTrimDragging = false;
+        private int _g3kRudderTrimLastMouseX;
+        private int _g3kRudderTrimAccumulatedDelta = 0;
+        private int _g3kRudderTrimLastDir = 0;
+        private bool _calibDragG3kRudderTrimZone = false;
+        private Point _calibG3kRudderTrimZoneDragStart;
+        private int _calibG3kRudderTrimZoneStartX;
+        private int _calibG3kRudderTrimZoneStartY;
+        private bool _calibResizeG3kRudderTrimZone = false;
+        private Point _calibResizeG3kRudderTrimZoneDragStart;
+        private int _calibResizeG3kRudderTrimZoneStartW;
+        // G3K Rudder Trim indicator
+        private int _g3kRudderTrimIndY = 2038;
+        private int _g3kRudderTrimIndXOffset = 0;
+        private bool _calibDragG3kRudderTrimInd = false;
+        private Point _calibG3kRudderTrimIndDragStart;
+        private int _calibG3kRudderTrimIndStartY;
+        private int _calibG3kRudderTrimIndStartXOff;
+
         
 
 
@@ -5038,6 +5084,83 @@ namespace SimConnect3
                     if (swG3kLgear != null) swG3kLgear.AnimOffsetY = lgearHandleUp ? -50 : 50;
                 }
 
+                // G3K Trim wheel (fotogrames rotats 90°)
+                {
+                    int frameIdx = (int)trimFramePos % TRIM_FRAME_COUNT;
+                    var frameImg = trimFrames[frameIdx];
+                    if (frameImg != null)
+                    {
+                        int th = (int)(_g3kTrimZone.Height * 0.95f);
+                        int tw = (int)(th * (double)frameImg.Width / frameImg.Height);
+                        int tx = _g3kTrimZone.X + (_g3kTrimZone.Width - tw) / 2;
+                        int ty = _g3kTrimZone.Y + (_g3kTrimZone.Height - th) / 2;
+                        e.Graphics.DrawImage(frameImg, tx, ty, tw, th);
+                    }
+                }
+                // G3K Trim indicator + takeoff marker
+                {
+                    int g3kTrimYUp   = _g3kTrimZone.Y;
+                    int g3kTrimYFull = _g3kTrimZone.Bottom;
+                    float g3kTrimNorm = (float)((elevatorTrim + 1.0) / 2.0);
+                    int g3kTrimY  = g3kTrimYUp + (int)(g3kTrimNorm * (g3kTrimYFull - g3kTrimYUp)) + _g3kTrimIndYOffset;
+                    int g3kMarkerY = g3kTrimYUp + (int)(0.5f * (g3kTrimYFull - g3kTrimYUp)) + _g3kTrimIndYOffset;
+                    using var g3kMarkerBr = new SolidBrush(Color.FromArgb(180, 180, 180));
+                    e.Graphics.FillRectangle(g3kMarkerBr, new Rectangle(_g3kTrimIndX - 27, g3kMarkerY, 17, 2));
+                    e.Graphics.FillEllipse(Brushes.White, new Rectangle(_g3kTrimIndX, g3kTrimY - 8, 17, 17));
+                    if (calibrationMode)
+                    {
+                        using var triPen  = new Pen(Color.Lime, 2);
+                        using var triFont = new Font("Arial", 7);
+                        using var g3kOvBr = new SolidBrush(Color.FromArgb(60, Color.Gray));
+                        e.Graphics.DrawRectangle(triPen, new Rectangle(_g3kTrimIndX - 2, g3kTrimYUp + _g3kTrimIndYOffset - 2, 21, g3kTrimYFull - g3kTrimYUp + 21));
+                        e.Graphics.DrawString("G3KTRI", triFont, Brushes.Lime, new PointF(_g3kTrimIndX, g3kTrimYUp + _g3kTrimIndYOffset - 16));
+                        e.Graphics.DrawRectangle(triPen, new Rectangle(_g3kTrimZone.X - 2, _g3kTrimZone.Y - 2, _g3kTrimZone.Width + 4, _g3kTrimZone.Height + 4));
+                        e.Graphics.DrawString("G3KTRZ", triFont, Brushes.Lime, new PointF(_g3kTrimZone.X, _g3kTrimZone.Y - 16));
+                        e.Graphics.FillRectangle(g3kOvBr, _g3kTrimZone);
+                        // resize handle (bottom-right)
+                        e.Graphics.FillRectangle(Brushes.Yellow, new Rectangle(_g3kTrimZone.Right - 7, _g3kTrimZone.Bottom - 7, 14, 14));
+                    }
+                }
+
+                // G3K Rudder Trim wheel (horitzontal, frames originals sense rotar)
+                {
+                    int frameIdx = (int)rudderTrimFramePos % RUDDER_TRIM_FRAME_COUNT;
+                    var frameImg = rudderTrimFrames[frameIdx];
+                    if (frameImg != null)
+                    {
+                        int tw = (int)(_g3kRudderTrimZone.Width * 0.95f);
+                        int th = (int)(tw * (double)frameImg.Height / frameImg.Width);
+                        int tx = _g3kRudderTrimZone.X + (_g3kRudderTrimZone.Width - tw) / 2;
+                        int ty = _g3kRudderTrimZone.Y + (_g3kRudderTrimZone.Height - th) / 2;
+                        e.Graphics.DrawImage(frameImg, tx, ty, tw, th);
+                    }
+                }
+                // G3K Rudder Trim indicator + centre marker
+                {
+                    int rtXLeft  = _g3kRudderTrimZone.X;
+                    int rtXRight = _g3kRudderTrimZone.Right;
+                    float rtNorm = (float)((rudderTrim + 1.0) / 2.0);
+                    int rtX = rtXLeft + (int)(rtNorm * (rtXRight - rtXLeft)) + _g3kRudderTrimIndXOffset;
+                    int rtCenter = (rtXLeft + rtXRight) / 2 + _g3kRudderTrimIndXOffset;
+                    using var g3kRtCenterBr = new SolidBrush(Color.FromArgb(180, 180, 180));
+                    e.Graphics.FillRectangle(g3kRtCenterBr, new Rectangle(rtCenter - 1, _g3kRudderTrimIndY - 36, 2, 17));
+                    e.Graphics.FillEllipse(Brushes.White, new Rectangle(rtX - 8, _g3kRudderTrimIndY - 8, 17, 17));
+                    if (calibrationMode)
+                    {
+                        using var rriPen  = new Pen(Color.Lime, 2);
+                        using var rriFont = new Font("Arial", 7);
+                        using var g3kRrOvBr = new SolidBrush(Color.FromArgb(60, Color.Gray));
+                        int trkW = rtXRight - rtXLeft + 17;
+                        e.Graphics.DrawRectangle(rriPen, new Rectangle(rtXLeft + _g3kRudderTrimIndXOffset - 2, _g3kRudderTrimIndY - 10, trkW + 4, 20));
+                        e.Graphics.DrawString("G3KRRI", rriFont, Brushes.Lime, new PointF(rtXLeft + _g3kRudderTrimIndXOffset, _g3kRudderTrimIndY - 24));
+                        e.Graphics.DrawRectangle(rriPen, new Rectangle(_g3kRudderTrimZone.X - 2, _g3kRudderTrimZone.Y - 2, _g3kRudderTrimZone.Width + 4, _g3kRudderTrimZone.Height + 4));
+                        e.Graphics.DrawString("G3KRRZ", rriFont, Brushes.Lime, new PointF(_g3kRudderTrimZone.X, _g3kRudderTrimZone.Y - 16));
+                        e.Graphics.FillRectangle(g3kRrOvBr, _g3kRudderTrimZone);
+                        // resize handle (bottom-right)
+                        e.Graphics.FillRectangle(Brushes.Yellow, new Rectangle(_g3kRudderTrimZone.Right - 7, _g3kRudderTrimZone.Bottom - 7, 14, 14));
+                    }
+                }
+
                 // G3K FLI — marcadors + cercle animat (escala 11.75/14 respecte G1000)
                 if (flapsNumPositions > 0)
                 {
@@ -5536,6 +5659,16 @@ namespace SimConnect3
                     g3kApSliderDragging = true;
                     g3kApSliderLastMouseY = e.Y;
                 }
+                if (_g3kTrimZone.Contains(e.Location))
+                {
+                    _g3kTrimDragging = true;
+                    _g3kTrimLastMouseY = e.Y;
+                }
+                if (_g3kRudderTrimZone.Contains(e.Location))
+                {
+                    _g3kRudderTrimDragging = true;
+                    _g3kRudderTrimLastMouseX = e.X;
+                }
                 return;
             }
 
@@ -5634,6 +5767,77 @@ namespace SimConnect3
                             _calibG3kFlapsIndDragStart  = e.Location;
                             _calibG3kFlapsIndStartX     = _g3kFlapsIndX;
                             _calibG3kFlapsIndStartYOff  = _g3kFlapsIndYOffset;
+                            pbMain.Invalidate(); return;
+                        }
+                    }
+                    // G3K Trim indicator drag (G3KTRI)
+                    {
+                        var r = new Rectangle(_g3kTrimIndX - 2, _g3kTrimZone.Y + _g3kTrimIndYOffset - 2, 21, _g3kTrimZone.Height + 21);
+                        if (r.Contains(e.Location))
+                        {
+                            _calibDragG3kTrimInd = true;
+                            _calibG3kTrimIndDragStart = e.Location;
+                            _calibG3kTrimIndStartX = _g3kTrimIndX;
+                            _calibG3kTrimIndStartYOff = _g3kTrimIndYOffset;
+                            pbMain.Invalidate(); return;
+                        }
+                    }
+                    // G3K Trim zone resize handle (bottom-right, ha d'anar ABANS del drag)
+                    {
+                        var rh = new Rectangle(_g3kTrimZone.Right - 7, _g3kTrimZone.Bottom - 7, 14, 14);
+                        if (rh.Contains(e.Location))
+                        {
+                            _calibResizeG3kTrimZone = true;
+                            _calibResizeG3kTrimZoneDragStart = e.Location;
+                            _calibResizeG3kTrimZoneStartH = _g3kTrimZone.Height;
+                            pbMain.Invalidate(); return;
+                        }
+                    }
+                    // G3K Trim zone drag (G3KTRZ)
+                    {
+                        var r = new Rectangle(_g3kTrimZone.X - 2, _g3kTrimZone.Y - 2, _g3kTrimZone.Width + 4, _g3kTrimZone.Height + 4);
+                        if (r.Contains(e.Location))
+                        {
+                            _calibDragG3kTrimZone = true;
+                            _calibG3kTrimZoneDragStart = e.Location;
+                            _calibG3kTrimZoneStartX = _g3kTrimZoneBaseX;
+                            _calibG3kTrimZoneStartY = _g3kTrimZoneBaseY;
+                            pbMain.Invalidate(); return;
+                        }
+                    }
+                    // G3K Rudder Trim indicator drag (G3KRRI)
+                    {
+                        int trkW = _g3kRudderTrimZone.Width + 17;
+                        var r = new Rectangle(_g3kRudderTrimZone.X + _g3kRudderTrimIndXOffset - 2, _g3kRudderTrimIndY - 10, trkW + 4, 20);
+                        if (r.Contains(e.Location))
+                        {
+                            _calibDragG3kRudderTrimInd = true;
+                            _calibG3kRudderTrimIndDragStart = e.Location;
+                            _calibG3kRudderTrimIndStartY = _g3kRudderTrimIndY;
+                            _calibG3kRudderTrimIndStartXOff = _g3kRudderTrimIndXOffset;
+                            pbMain.Invalidate(); return;
+                        }
+                    }
+                    // G3K Rudder Trim zone resize handle (ABANS del drag)
+                    {
+                        var rh = new Rectangle(_g3kRudderTrimZone.Right - 7, _g3kRudderTrimZone.Bottom - 7, 14, 14);
+                        if (rh.Contains(e.Location))
+                        {
+                            _calibResizeG3kRudderTrimZone = true;
+                            _calibResizeG3kRudderTrimZoneDragStart = e.Location;
+                            _calibResizeG3kRudderTrimZoneStartW = _g3kRudderTrimZone.Width;
+                            pbMain.Invalidate(); return;
+                        }
+                    }
+                    // G3K Rudder Trim zone drag (G3KRRZ)
+                    {
+                        var r = new Rectangle(_g3kRudderTrimZone.X - 2, _g3kRudderTrimZone.Y - 2, _g3kRudderTrimZone.Width + 4, _g3kRudderTrimZone.Height + 4);
+                        if (r.Contains(e.Location))
+                        {
+                            _calibDragG3kRudderTrimZone = true;
+                            _calibG3kRudderTrimZoneDragStart = e.Location;
+                            _calibG3kRudderTrimZoneStartX = _g3kRudderTrimZoneBaseX;
+                            _calibG3kRudderTrimZoneStartY = _g3kRudderTrimZoneBaseY;
                             pbMain.Invalidate(); return;
                         }
                     }
@@ -5852,6 +6056,46 @@ namespace SimConnect3
                     trimArrowDownPos = new Point(trimZoneBaseX + 50, trimZoneBaseY + 42);
                     pbMain.Invalidate(); return;
                 }
+                if (_calibDragG3kTrimInd)
+                {
+                    _g3kTrimIndX      = _calibG3kTrimIndStartX   + (e.X - _calibG3kTrimIndDragStart.X);
+                    _g3kTrimIndYOffset = _calibG3kTrimIndStartYOff + (e.Y - _calibG3kTrimIndDragStart.Y);
+                    pbMain.Invalidate(); return;
+                }
+                if (_calibResizeG3kTrimZone)
+                {
+                    int newH = Math.Max(50, _calibResizeG3kTrimZoneStartH + (e.Y - _calibResizeG3kTrimZoneDragStart.Y));
+                    int newW = Math.Max(10, (int)(newH * 119.0 / 603.0));
+                    _g3kTrimZone = new Rectangle(_g3kTrimZoneBaseX, _g3kTrimZoneBaseY, newW, newH);
+                    pbMain.Invalidate(); return;
+                }
+                if (_calibDragG3kTrimZone)
+                {
+                    _g3kTrimZoneBaseX = _calibG3kTrimZoneStartX + (e.X - _calibG3kTrimZoneDragStart.X);
+                    _g3kTrimZoneBaseY = _calibG3kTrimZoneStartY + (e.Y - _calibG3kTrimZoneDragStart.Y);
+                    _g3kTrimZone = new Rectangle(_g3kTrimZoneBaseX, _g3kTrimZoneBaseY, _g3kTrimZone.Width, _g3kTrimZone.Height);
+                    pbMain.Invalidate(); return;
+                }
+                if (_calibDragG3kRudderTrimInd)
+                {
+                    _g3kRudderTrimIndY       = _calibG3kRudderTrimIndStartY    + (e.Y - _calibG3kRudderTrimIndDragStart.Y);
+                    _g3kRudderTrimIndXOffset = _calibG3kRudderTrimIndStartXOff + (e.X - _calibG3kRudderTrimIndDragStart.X);
+                    pbMain.Invalidate(); return;
+                }
+                if (_calibResizeG3kRudderTrimZone)
+                {
+                    int newW = Math.Max(50, _calibResizeG3kRudderTrimZoneStartW + (e.X - _calibResizeG3kRudderTrimZoneDragStart.X));
+                    int newH = Math.Max(10, (int)(newW * 76.0 / 385.0));
+                    _g3kRudderTrimZone = new Rectangle(_g3kRudderTrimZoneBaseX, _g3kRudderTrimZoneBaseY, newW, newH);
+                    pbMain.Invalidate(); return;
+                }
+                if (_calibDragG3kRudderTrimZone)
+                {
+                    _g3kRudderTrimZoneBaseX = _calibG3kRudderTrimZoneStartX + (e.X - _calibG3kRudderTrimZoneDragStart.X);
+                    _g3kRudderTrimZoneBaseY = _calibG3kRudderTrimZoneStartY + (e.Y - _calibG3kRudderTrimZoneDragStart.Y);
+                    _g3kRudderTrimZone = new Rectangle(_g3kRudderTrimZoneBaseX, _g3kRudderTrimZoneBaseY, _g3kRudderTrimZone.Width, _g3kRudderTrimZone.Height);
+                    pbMain.Invalidate(); return;
+                }
                 if (calibDragG3kApSlider)
                 {
                     g3kApSliderBaseX = calibG3kApSliderStartX + (e.X - calibG3kApSliderDragStart.X);
@@ -5940,6 +6184,32 @@ namespace SimConnect3
                 trimFramePos += deltaY / TRIM_PIXELS_PER_FRAME;
                 trimFramePos = ((trimFramePos % RUDDER_TRIM_FRAME_COUNT)
                                + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
+                pbMain.Invalidate();
+            }
+            if (_g3kTrimDragging)
+            {
+                int deltaY = _g3kTrimLastMouseY - e.Y;
+                if (deltaY > 0) _g3kTrimLastDir = +1;
+                else if (deltaY < 0) _g3kTrimLastDir = -1;
+                _g3kTrimLastMouseY = e.Y;
+                _g3kTrimAccumulatedDelta += deltaY;
+                while (_g3kTrimAccumulatedDelta >= TRIM_TICK_PIXELS)  { SendTrimTick(+1); _g3kTrimAccumulatedDelta -= TRIM_TICK_PIXELS; }
+                while (_g3kTrimAccumulatedDelta <= -TRIM_TICK_PIXELS) { SendTrimTick(-1); _g3kTrimAccumulatedDelta += TRIM_TICK_PIXELS; }
+                trimFramePos += deltaY / TRIM_PIXELS_PER_FRAME;
+                trimFramePos = ((trimFramePos % TRIM_FRAME_COUNT) + TRIM_FRAME_COUNT) % TRIM_FRAME_COUNT;
+                pbMain.Invalidate();
+            }
+            if (_g3kRudderTrimDragging)
+            {
+                int deltaX = e.X - _g3kRudderTrimLastMouseX;
+                if (deltaX > 0) _g3kRudderTrimLastDir = +1;
+                else if (deltaX < 0) _g3kRudderTrimLastDir = -1;
+                _g3kRudderTrimLastMouseX = e.X;
+                _g3kRudderTrimAccumulatedDelta += deltaX;
+                while (_g3kRudderTrimAccumulatedDelta >= RUDDER_TRIM_TICK_PIXELS)  { SendRudderTrimTick(+1); _g3kRudderTrimAccumulatedDelta -= RUDDER_TRIM_TICK_PIXELS; }
+                while (_g3kRudderTrimAccumulatedDelta <= -RUDDER_TRIM_TICK_PIXELS) { SendRudderTrimTick(-1); _g3kRudderTrimAccumulatedDelta += RUDDER_TRIM_TICK_PIXELS; }
+                rudderTrimFramePos -= deltaX / RUDDER_TRIM_PIXELS_PER_FRAME;
+                rudderTrimFramePos = ((rudderTrimFramePos % RUDDER_TRIM_FRAME_COUNT) + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
                 pbMain.Invalidate();
             }
             if (g3kApSliderDragging)
@@ -6053,6 +6323,42 @@ namespace SimConnect3
                     try { ExportCalibrationPositions(silent: true); } catch { }
                     return;
                 }
+                if (_calibDragG3kTrimInd)
+                {
+                    _calibDragG3kTrimInd = false;
+                    try { ExportCalibrationPositions(silent: true); } catch { }
+                    return;
+                }
+                if (_calibResizeG3kTrimZone)
+                {
+                    _calibResizeG3kTrimZone = false;
+                    try { ExportCalibrationPositions(silent: true); } catch { }
+                    return;
+                }
+                if (_calibDragG3kTrimZone)
+                {
+                    _calibDragG3kTrimZone = false;
+                    try { ExportCalibrationPositions(silent: true); } catch { }
+                    return;
+                }
+                if (_calibDragG3kRudderTrimInd)
+                {
+                    _calibDragG3kRudderTrimInd = false;
+                    try { ExportCalibrationPositions(silent: true); } catch { }
+                    return;
+                }
+                if (_calibResizeG3kRudderTrimZone)
+                {
+                    _calibResizeG3kRudderTrimZone = false;
+                    try { ExportCalibrationPositions(silent: true); } catch { }
+                    return;
+                }
+                if (_calibDragG3kRudderTrimZone)
+                {
+                    _calibDragG3kRudderTrimZone = false;
+                    try { ExportCalibrationPositions(silent: true); } catch { }
+                    return;
+                }
                 if (calibDragRudderTrimInd)
                 {
                     calibDragRudderTrimInd = false;
@@ -6110,6 +6416,10 @@ namespace SimConnect3
             // flapsAnimDir es reseteja automàticament pel Task.Delay dels OnClick
             trimDragging = false;
             trimLastDir = 0;
+            _g3kTrimDragging = false;
+            _g3kTrimLastDir = 0;
+            _g3kRudderTrimDragging = false;
+            _g3kRudderTrimLastDir = 0;
             rudderTrimDragging = false;
             rudderTrimLastDir = 0;
             g3kApSliderDragging = false;
@@ -6184,6 +6494,10 @@ namespace SimConnect3
             }
             sb.AppendLine($"FLI:fli:{flapsIndX}:{flapsIndYOffset}");
             sb.AppendLine($"G3KFLI:g3kfli:{_g3kFlapsIndX}:{_g3kFlapsIndYOffset}");
+            sb.AppendLine($"G3KTRIND:g3ktri:{_g3kTrimIndX}:{_g3kTrimIndYOffset}");
+            sb.AppendLine($"G3KTRIMZ:g3ktrz:{_g3kTrimZoneBaseX}:{_g3kTrimZoneBaseY}:{_g3kTrimZone.Width}:{_g3kTrimZone.Height}");
+            sb.AppendLine($"G3KRRI:g3krri:{_g3kRudderTrimIndXOffset}:{_g3kRudderTrimIndY}");
+            sb.AppendLine($"G3KRRZ:g3krrz:{_g3kRudderTrimZoneBaseX}:{_g3kRudderTrimZoneBaseY}:{_g3kRudderTrimZone.Width}:{_g3kRudderTrimZone.Height}");
             sb.AppendLine($"TRIND:tri:{trimIndX}:{trimIndYOffset}");
             sb.AppendLine($"TRIMZ:tz:{trimZoneBaseX}:{trimZoneBaseY}");
             sb.AppendLine($"G3KAPZ:apz:{g3kApSliderBaseX}:{g3kApSliderBaseY}");
@@ -6275,6 +6589,30 @@ namespace SimConnect3
                 {
                     _g3kFlapsIndX = x;
                     _g3kFlapsIndYOffset = y;
+                }
+                else if (type == "G3KTRIND")
+                {
+                    _g3kTrimIndX = x;
+                    _g3kTrimIndYOffset = y;
+                }
+                else if (type == "G3KTRIMZ")
+                {
+                    _g3kTrimZoneBaseX = x; _g3kTrimZoneBaseY = y;
+                    int loadH = (parts.Length >= 6 && int.TryParse(parts[5], out int th)) ? th : 603;
+                    int loadW = (parts.Length >= 5 && int.TryParse(parts[4], out int tw)) ? tw : (int)(loadH * 119.0 / 603.0);
+                    _g3kTrimZone = new Rectangle(x, y, loadW, loadH);
+                }
+                else if (type == "G3KRRI")
+                {
+                    _g3kRudderTrimIndXOffset = x;
+                    _g3kRudderTrimIndY = y;
+                }
+                else if (type == "G3KRRZ")
+                {
+                    _g3kRudderTrimZoneBaseX = x; _g3kRudderTrimZoneBaseY = y;
+                    int loadW = (parts.Length >= 5 && int.TryParse(parts[4], out int rw)) ? rw : 385;
+                    int loadH = (parts.Length >= 6 && int.TryParse(parts[5], out int rh)) ? rh : (int)(loadW * 76.0 / 385.0);
+                    _g3kRudderTrimZone = new Rectangle(x, y, loadW, loadH);
                 }
                 else if (type == "TRIND")
                 {
