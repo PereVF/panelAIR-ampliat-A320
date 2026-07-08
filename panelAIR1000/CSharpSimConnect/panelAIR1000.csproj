@@ -51,6 +51,10 @@
     <EmbeddedResource Include="Resources\switch-up-black.png" />
     <EmbeddedResource Include="Resources\switch-center-black.png" />
     <EmbeddedResource Include="Resources\switch-down-black.png" />
+    <EmbeddedResource Include="Resources\ail trim sw left.png" />
+    <EmbeddedResource Include="Resources\ail trim sw right.png" />
+    <EmbeddedResource Include="Resources\SW ice sysrem_up.png" />
+    <EmbeddedResource Include="Resources\SW ice sysrem_dn.png" />
   </ItemGroup>
 
   <ItemGroup>

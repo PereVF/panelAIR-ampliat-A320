@@ -356,8 +356,13 @@ namespace SimConnect3
         private Point _calibG3kRudderTrimIndDragStart;
         private int _calibG3kRudderTrimIndStartY;
         private int _calibG3kRudderTrimIndStartXOff;
+        // G3K Aileron Trim buttons
+        private double _aileronTrimFrac = 0.0;
+        private int _aileronTrimPos = 0;       // -16383..+16383, 328 units per 1%
+        private DateTime _ailTrimIndLeftUntilUtc  = DateTime.MinValue;
+        private DateTime _ailTrimIndRightUntilUtc = DateTime.MinValue;
 
-        
+
 
 
 
@@ -518,6 +523,7 @@ namespace SimConnect3
             ElecStarterWrite,
             ElecIgnitionWrite,
             APTrimWrite,
+            AileronTrimWrite,
             LightingLogo1Write,
             FuelSelectionWrite,
             CondLeverCutoffWrite,
@@ -544,6 +550,8 @@ namespace SimConnect3
         struct CondLeverCutoffStruct { public double value; }
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct PropLeverStruct { public double value; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct AileronTrimWriteStruct { public double value; }
 
         enum REQUESTS
         {
@@ -717,6 +725,7 @@ namespace SimConnect3
             SWITCH_RECOGN,
             SWITCH_PANELLIGHT,
             SWITCH_DEICE,
+            WING_LIGHTS_SET,
             COWL_FLAP_L_SET,
             COWL_FLAP_R_SET,
             SWITCH_PITOTHEAT,
@@ -748,6 +757,10 @@ namespace SimConnect3
             AUTOPILOT_DISENGAGE_TOGGLE,
             RUDDER_TRIM_DISABLED_SET,
             AILERON_TRIM_DISABLED_SET,
+            AXIS_AILERONTRIM_SET,
+            AILERON_TRIM_RIGHT,
+            AILERON_TRIM_LEFT,
+            AILERON_TRIM_SET_EX1,
             TBM930_PULSELIGHT_TOGGLE,
             TBM930_LIGHT_LDG,
             TBM930_LIGHT_TAXI,
@@ -978,6 +991,7 @@ namespace SimConnect3
         private int _rudderTrimDisabled = 0;
         private int _aileronTrimDisabled = 0;
         private double _lightingLogo1 = 0;
+        private double _lightingWing1 = 0;
         private int _lightLogo = 0;
         private int _circuitConn17 = 0;
         private double _fuelSelectionSet = 2;
@@ -1219,6 +1233,8 @@ namespace SimConnect3
             public double headingIndicator;    // HEADING INDICATOR (degrees)
             public int masterCautionActive;    // L:Generic_Master_Caution_Active
             public int masterWarningActive;    // L:Generic_Master_Warning_Active
+            public double aileronTrimFrac;     // AILERON TRIM PCT (-1..+1)
+            public double lightingWing1;       // L:LIGHTING_WING_1 (0=OFF, 1=ON)
 
 
 
@@ -2580,6 +2596,14 @@ namespace SimConnect3
             new() { Name="G3K_TSC1_BKP", TypeKey="G3K TSC1 BKP", BasePos=new Point(600, 200), ZoomWidth=70, ZoomHeight=70, IsRound=true, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_TSC1_BKP, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_MASTER_WARN", TypeKey="G3K Master Warn", BasePos=new Point(700, 200), ZoomWidth=100, ZoomHeight=60, PressVisualMs=0, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_MASTER_WARN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_MASTER_CAUT", TypeKey="G3K Master Caut", BasePos=new Point(820, 200), ZoomWidth=100, ZoomHeight=60, PressVisualMs=0, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_MASTER_CAUT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_AILTRIM_INC", TypeKey="G3K AilTrim Inc", BasePos=new Point(3380, 2020), ZoomWidth=120, ZoomHeight=70, PressVisualMs=0, OnClick = () => { _aileronTrimPos = Math.Clamp(_aileronTrimPos + 328, -16383, 16383); SendAileronTrimSet(_aileronTrimPos); _ailTrimIndRightUntilUtc = DateTime.UtcNow.AddMilliseconds(250); } },
+            new() { Name="G3K_AILTRIM_DEC", TypeKey="G3K AilTrim Dec", BasePos=new Point(3520, 2020), ZoomWidth=120, ZoomHeight=70, PressVisualMs=0, OnClick = () => { _aileronTrimPos = Math.Clamp(_aileronTrimPos - 328, -16383, 16383); SendAileronTrimSet(_aileronTrimPos); _ailTrimIndLeftUntilUtc = DateTime.UtcNow.AddMilliseconds(250); } },
+            new() { Name="G3K_AILTRIM_IND_L", TypeKey="G3K AilTrim Ind L", BasePos=new Point(3380, 1930), ZoomWidth=164, ZoomHeight=88, NoResize=true, Img=LoadOverlayImage("ail trim sw left.png"), ShowWhen=() => DateTime.UtcNow < _ailTrimIndLeftUntilUtc },
+            new() { Name="G3K_AILTRIM_IND_R", TypeKey="G3K AilTrim Ind R", BasePos=new Point(3520, 1930), ZoomWidth=164, ZoomHeight=88, NoResize=true, Img=LoadOverlayImage("ail trim sw right.png"), ShowWhen=() => DateTime.UtcNow < _ailTrimIndRightUntilUtc },
+            new() { Name="G3K_STRUCT_DEICE", TypeKey="G3K Struct Deice", BasePos=new Point(5, 2000), ZoomWidth=150, ZoomHeight=100, PressVisualMs=0, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_DEICE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_STRUCT_DEICE_UP", TypeKey="G3K Struct Deice Up", BasePos=new Point(5, 2000), ZoomWidth=46, ZoomHeight=78, NoResize=true, Img=LoadOverlayImage("SW ice sysrem_up.png"), ShowWhen=() => deiceActive },
+            new() { Name="G3K_STRUCT_DEICE_DN", TypeKey="G3K Struct Deice Dn", BasePos=new Point(5, 2000), ZoomWidth=43, ZoomHeight=74, NoResize=true, Img=LoadOverlayImage("SW ice sysrem_dn.png"), ShowWhen=() => !deiceActive },
+            new() { Name="G3K_WING_LIGHTS", TypeKey="G3K Wing Lights", BasePos=new Point(400, 2000), ZoomWidth=150, ZoomHeight=100, PressVisualMs=0, OnClick = () => ToggleWingLights() },
             new() { Name="G3K_FLAPS_SW",  TypeKey="G3K Flaps SW",  BasePos=new Point(400, 400), ZoomWidth=217, Img=LoadOverlayImage("SW flaps.png") },
             // Gear LEDs — mateixa lògica que G1000, mides × 14/11.75
             new() { Name="G3K_LED_GEAR_LEFT",    TypeKey="G3K LED Gear Left",    BasePos=new Point(720,  1710), ZoomWidth=51, Img=ledGreenImg,
@@ -2655,6 +2679,8 @@ namespace SimConnect3
                 if (!needsRepaint && _g3000Active)
                     foreach (var ov in g3000OverlayImages)
                         if (ov.IsVisuallyPressed(now)) { needsRepaint = true; break; }
+                if (!needsRepaint && _g3000Active && (now < _ailTrimIndLeftUntilUtc || now < _ailTrimIndRightUntilUtc))
+                    needsRepaint = true;
                 if (needsRepaint)
                 {
                     foreach (var srf in uiSurfaces)
@@ -3018,6 +3044,13 @@ namespace SimConnect3
         {
             if (simconnect == null) return;
             simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_PULSELIGHT_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+        }
+
+        private void ToggleWingLights()
+        {
+            if (simconnect == null) return;
+            uint newState = _lightingWing1 < 0.5 ? 1u : 0u;
+            simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.WING_LIGHTS_SET, newState, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
         }
 
         private void SetFuelPump(double pos)
@@ -3682,6 +3715,8 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_PANELLIGHT, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SWITCH_DEICE, "TOGGLE_STRUCTURAL_DEICE");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_DEICE, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.WING_LIGHTS_SET, "WING_LIGHTS_SET");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.WING_LIGHTS_SET, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.COWL_FLAP_L_SET, "COWLFLAP1_SET");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.COWL_FLAP_L_SET, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.COWL_FLAP_R_SET, "COWLFLAP2_SET");
@@ -3885,6 +3920,8 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "HEADING INDICATOR", "degrees", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:Generic_Master_Caution_Active", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:Generic_Master_Warning_Active", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AILERON TRIM PCT", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:LIGHTING_WING_1", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
 
@@ -3904,6 +3941,8 @@ namespace SimConnect3
                 simconnect.RegisterDataDefineStruct<ElecIgnitionStruct>(DEFINITIONS.ElecIgnitionWrite);
                 simconnect.AddToDataDefinition(DEFINITIONS.APTrimWrite, "L:XMLVAR_APTrim", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<APTrimStruct>(DEFINITIONS.APTrimWrite);
+                simconnect.AddToDataDefinition(DEFINITIONS.AileronTrimWrite, "AILERON TRIM PCT", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<AileronTrimWriteStruct>(DEFINITIONS.AileronTrimWrite);
 
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.ELECT_FUEL_PUMP1_SET, "ELECT_FUEL_PUMP1_SET");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.ELECT_FUEL_PUMP1_SET, false);
@@ -3917,6 +3956,14 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.RUDDER_TRIM_DISABLED_SET, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AILERON_TRIM_DISABLED_SET, "AILERON_TRIM_DISABLED_SET");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AILERON_TRIM_DISABLED_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AXIS_AILERONTRIM_SET, "AXIS_AILERONTRIM_SET");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AXIS_AILERONTRIM_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AILERON_TRIM_RIGHT, "AILERON_TRIM_RIGHT");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AILERON_TRIM_RIGHT, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AILERON_TRIM_LEFT, "AILERON_TRIM_LEFT");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AILERON_TRIM_LEFT, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AILERON_TRIM_SET_EX1, "AILERON_TRIM_SET_EX1");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AILERON_TRIM_SET_EX1, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TBM930_PULSELIGHT_TOGGLE, "SFS.TBM930_PulseLight_Toggle");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.TBM930_PULSELIGHT_TOGGLE, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.TBM930_LIGHT_LDG, "SFS.TBM930_Light_LDG");
@@ -4513,6 +4560,7 @@ namespace SimConnect3
                 _headingIndicator = s1.headingIndicator;
                 _masterCautionActive = s1.masterCautionActive;
                 _masterWarningActive = s1.masterWarningActive;
+                _aileronTrimFrac = s1.aileronTrimFrac;
                 // G3K fuel selector animation
                 {
                     float fselTarget = s1.fuel_selector_1 == 2 ? 245f : (s1.fuel_selector_1 == 3 ? 113f : 0f);
@@ -4531,6 +4579,7 @@ namespace SimConnect3
                 _rudderTrimDisabled = s1.rudderTrimDisabled;
                 _aileronTrimDisabled = s1.aileronTrimDisabled;
                 if (_lightingLogo1 != s1.lightingLogo1) { _lightingLogo1 = s1.lightingLogo1; needsRepaint = true; }
+                _lightingWing1 = s1.lightingWing1;
                 _lightLogo = s1.lightLogo;
                 _circuitConn17 = s1.circuitConn17;
                 if (_g3000Active && pbMain.IsHandleCreated)
@@ -6260,6 +6309,12 @@ namespace SimConnect3
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.RUDDER_TRIM_RIGHT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             else
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.RUDDER_TRIM_LEFT,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+        }
+
+        private void SendAileronTrimSet(int axisVal)
+        {
+            if (simconnect == null) return;
+            simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.AILERON_TRIM_SET_EX1, (uint)axisVal, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
         }
 
         private void SendG3kApSliderTick(int dir)
