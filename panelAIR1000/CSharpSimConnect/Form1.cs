@@ -176,6 +176,7 @@ namespace SimConnect3
         bool recognActive;
         bool panelLightActive;
         bool deiceActive;
+        bool propDeiceActive;
         private System.Windows.Forms.Timer? trialTimer;
         private System.Threading.Timer? trialBgTimer;
         int cowlFlapL; // 0=closed, 1=center, 2=open
@@ -725,6 +726,7 @@ namespace SimConnect3
             SWITCH_RECOGN,
             SWITCH_PANELLIGHT,
             SWITCH_DEICE,
+            PROPDEICE_TOGGLE,
             WING_LIGHTS_SET,
             COWL_FLAP_L_SET,
             COWL_FLAP_R_SET,
@@ -1235,6 +1237,7 @@ namespace SimConnect3
             public int masterWarningActive;    // L:Generic_Master_Warning_Active
             public double aileronTrimFrac;     // AILERON TRIM PCT (-1..+1)
             public double lightingWing1;       // L:LIGHTING_WING_1 (0=OFF, 1=ON)
+            public int read_propdeice;         // PROP DEICE SWITCH:1 (Bool)
 
 
 
@@ -2214,6 +2217,8 @@ namespace SimConnect3
                 OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PANELLIGHT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_DEICE", BasePos=new Point(1984, 1653), W=75, H=75, Resizable=true, NoShadow=true,
                 OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_DEICE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
+            cockpitRight.Buttons.Add(new UiButton { Name="BTN_PROPDEICE", BasePos=new Point(0, 0), W=75, H=75, Resizable=true, NoShadow=true,
+                OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROPDEICE_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_L_INC", BasePos=new Point(1500, 1560), W=75, H=40, Resizable=true, NoShadow=true,
                 OnClick = () => { uint target = cowlFlapL == 0 ? 8191u : 16383u;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_L_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
@@ -2603,7 +2608,12 @@ namespace SimConnect3
             new() { Name="G3K_STRUCT_DEICE", TypeKey="G3K Struct Deice", BasePos=new Point(5, 2000), ZoomWidth=150, ZoomHeight=100, PressVisualMs=0, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_DEICE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_STRUCT_DEICE_UP", TypeKey="G3K Struct Deice Up", BasePos=new Point(5, 2000), ZoomWidth=46, ZoomHeight=78, NoResize=true, Img=LoadOverlayImage("SW ice sysrem_up.png"), ShowWhen=() => deiceActive },
             new() { Name="G3K_STRUCT_DEICE_DN", TypeKey="G3K Struct Deice Dn", BasePos=new Point(5, 2000), ZoomWidth=43, ZoomHeight=74, NoResize=true, Img=LoadOverlayImage("SW ice sysrem_dn.png"), ShowWhen=() => !deiceActive },
-            new() { Name="G3K_WING_LIGHTS", TypeKey="G3K Wing Lights", BasePos=new Point(400, 2000), ZoomWidth=150, ZoomHeight=100, PressVisualMs=0, OnClick = () => ToggleWingLights() },
+            new() { Name="G3K_WING_LIGHTS", TypeKey="G3K Wing Lights", BasePos=new Point(400, 2000), ZoomWidth=64, ZoomHeight=135, PressVisualMs=0, OnClick = () => ToggleWingLights() },
+            new() { Name="G3K_WING_LIGHTS_UP", TypeKey="G3K Wing Lights Up", BasePos=new Point(399, 1715), ZoomWidth=46, ZoomHeight=78, NoResize=true, Img=LoadOverlayImage("SW ice sysrem_up.png"), ShowWhen=() => _lightingWing1 >= 0.5 },
+            new() { Name="G3K_WING_LIGHTS_DN", TypeKey="G3K Wing Lights Dn", BasePos=new Point(399, 1778), ZoomWidth=43, ZoomHeight=74, NoResize=true, Img=LoadOverlayImage("SW ice sysrem_dn.png"), ShowWhen=() => _lightingWing1 < 0.5 },
+            new() { Name="G3K_PROPDEICE", TypeKey="G3K Prop Deice", BasePos=new Point(429, 1716), ZoomWidth=64, ZoomHeight=135, PressVisualMs=0, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROPDEICE_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_PROPDEICE_UP", TypeKey="G3K Prop Deice Up", BasePos=new Point(437, 1714), ZoomWidth=46, ZoomHeight=78, NoResize=true, Img=LoadOverlayImage("SW ice sysrem_up.png"), ShowWhen=() => propDeiceActive },
+            new() { Name="G3K_PROPDEICE_DN", TypeKey="G3K Prop Deice Dn", BasePos=new Point(437, 1777), ZoomWidth=43, ZoomHeight=74, NoResize=true, Img=LoadOverlayImage("SW ice sysrem_dn.png"), ShowWhen=() => !propDeiceActive },
             new() { Name="G3K_FLAPS_SW",  TypeKey="G3K Flaps SW",  BasePos=new Point(400, 400), ZoomWidth=217, Img=LoadOverlayImage("SW flaps.png") },
             // Gear LEDs — mateixa lògica que G1000, mides × 14/11.75
             new() { Name="G3K_LED_GEAR_LEFT",    TypeKey="G3K LED Gear Left",    BasePos=new Point(720,  1710), ZoomWidth=51, Img=ledGreenImg,
@@ -3715,6 +3725,8 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_PANELLIGHT, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SWITCH_DEICE, "TOGGLE_STRUCTURAL_DEICE");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_DEICE, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.PROPDEICE_TOGGLE, "SFS.TBM930_PropDeice_Toggle");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.PROPDEICE_TOGGLE, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.WING_LIGHTS_SET, "WING_LIGHTS_SET");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.WING_LIGHTS_SET, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.COWL_FLAP_L_SET, "COWLFLAP1_SET");
@@ -3922,6 +3934,7 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:Generic_Master_Warning_Active", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AILERON TRIM PCT", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:LIGHTING_WING_1", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "PROP DEICE SWITCH:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
 
@@ -4401,6 +4414,12 @@ namespace SimConnect3
                 if (newDeice != deiceActive)
                 {
                     deiceActive = newDeice;
+                    needsRepaint = true;
+                }
+                bool newPropDeice = (s1.read_propdeice & 1) != 0;
+                if (newPropDeice != propDeiceActive)
+                {
+                    propDeiceActive = newPropDeice;
                     needsRepaint = true;
                 }
                 int newCowlL = s1.read_cowlflap_l < 10 ? 0 : s1.read_cowlflap_l < 70 ? 1 : 2;
