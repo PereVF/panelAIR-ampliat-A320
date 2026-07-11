@@ -177,6 +177,10 @@ namespace SimConnect3
         bool panelLightActive;
         bool deiceActive;
         bool propDeiceActive;
+        bool antiIceEng1Active;
+        double _isDeiceAirframe;
+        double _isDeiceAirframe2;
+        bool _ltsTestActive;
         bool pitotHeatLActive;
         bool pitotHeatRActive;
         bool windshieldDeiceActive;
@@ -533,6 +537,7 @@ namespace SimConnect3
             CondLeverCutoffWrite,
             PropLeverWrite,
             PropDeiceWrite,
+            LtsTestWrite,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -557,6 +562,8 @@ namespace SimConnect3
         struct PropLeverStruct { public double value; }
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct PropDeiceWriteStruct { public double value; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct LtsTestWriteStruct { public double value; }
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct AileronTrimWriteStruct { public double value; }
 
@@ -733,6 +740,7 @@ namespace SimConnect3
             SWITCH_PANELLIGHT,
             SWITCH_DEICE,
             PROPDEICE_TOGGLE,
+            INERT_SEP_TOGGLE,
             PITOTHEAT_ON,
             PITOTHEAT_OFF,
             PITOTHEAT2_ON,
@@ -1252,6 +1260,9 @@ namespace SimConnect3
             public int read_windshielddeice;   // WINDSHIELD DEICE SWITCH (Bool)
             public int read_pitot1;            // L:DEICE_Pitot_1 (Bool)
             public int read_pitot2;            // L:DEICE_Pitot_2 (Bool)
+            public int read_antiice1;          // ENG ANTI ICE:1 (Bool)
+            public double read_isDeiceAirframe; // L:XMLVAR_IsDeiceAirFrame (Number)
+            public double read_isDeiceAirframe2; // L:XMLVAR_IsDeiceAirFrame2 (Number)
 
 
 
@@ -2634,6 +2645,10 @@ namespace SimConnect3
             new() { Name="G3K_PITOTHEAT_R", TypeKey="G3K Pitot Heat R", BasePos=new Point(442, 1954), ZoomWidth=64, ZoomHeight=135, PressVisualMs=0, OnClick = () => TogglePitotHeatR() },
             new() { Name="G3K_PITOTHEAT_R_UP", TypeKey="G3K Pitot Heat R Up", BasePos=new Point(450, 1952), ZoomWidth=46, ZoomHeight=78, NoResize=true, Img=LoadOverlayImage("SW ice sysrem_up.png"), ShowWhen=() => pitotHeatRActive },
             new() { Name="G3K_PITOTHEAT_R_DN", TypeKey="G3K Pitot Heat R Dn", BasePos=new Point(450, 2015), ZoomWidth=43, ZoomHeight=74, NoResize=true, Img=LoadOverlayImage("SW ice sysrem_dn.png"), ShowWhen=() => !pitotHeatRActive },
+            new() { Name="G3K_INERTSEP", TypeKey="G3K Inert Sep", BasePos=new Point(564, 1954), ZoomWidth=64, ZoomHeight=135, PressVisualMs=0, OnClick = () => { if (antiIceEng1Active) SendInertSepOff(); else SendInertSepOn(); } },
+            new() { Name="G3K_INERTSEP_UP", TypeKey="G3K Inert Sep Up", BasePos=new Point(572, 1952), ZoomWidth=46, ZoomHeight=78, NoResize=true, Img=LoadOverlayImage("SW ice sysrem_up.png"), ShowWhen=() => antiIceEng1Active },
+            new() { Name="G3K_INERTSEP_DN", TypeKey="G3K Inert Sep Dn", BasePos=new Point(572, 2015), ZoomWidth=43, ZoomHeight=74, NoResize=true, Img=LoadOverlayImage("SW ice sysrem_dn.png"), ShowWhen=() => !antiIceEng1Active },
+            new() { Name="G3K_LTS_TEST", TypeKey="G3K Lts Test", BasePos=new Point(686, 1954), ZoomWidth=64, ZoomHeight=135, PressVisualMs=0, OnClick = () => SendLtsTest() },
             new() { Name="G3K_WINDSHIELD_DEICE", TypeKey="G3K Windshield Deice", BasePos=new Point(551, 1716), ZoomWidth=64, ZoomHeight=135, PressVisualMs=0, OnClick = () => ToggleWindshieldDeice() },
             new() { Name="G3K_WINDSHIELD_DEICE_UP", TypeKey="G3K Windshield Deice Up", BasePos=new Point(559, 1714), ZoomWidth=46, ZoomHeight=78, NoResize=true, Img=LoadOverlayImage("SW ice sysrem_up.png"), ShowWhen=() => windshieldDeiceActive },
             new() { Name="G3K_WINDSHIELD_DEICE_DN", TypeKey="G3K Windshield Deice Dn", BasePos=new Point(559, 1777), ZoomWidth=43, ZoomHeight=74, NoResize=true, Img=LoadOverlayImage("SW ice sysrem_dn.png"), ShowWhen=() => !windshieldDeiceActive },
@@ -2645,6 +2660,16 @@ namespace SimConnect3
                     ShowWhen = () => mainBusVolts >= 5.0 && gearNosePercent  >= 100 },
             new() { Name="G3K_LED_GEAR_RIGHT",   TypeKey="G3K LED Gear Right",   BasePos=new Point(822,  1710), ZoomWidth=51, Img=ledGreenImg,
                     ShowWhen = () => mainBusVolts >= 5.0 && gearRightPercent >= 100 },
+            new() { Name="G3K_LED_DEICE_AIRFRAME", TypeKey="G3K LED Deice Airframe", BasePos=new Point(188, 1643), ZoomWidth=22, Img=ledGreenImg,
+                    ShowWhen = () => _isDeiceAirframe >= 0.5 || _ltsTestActive },
+            new() { Name="G3K_LED_DEICE_AIRFRAME2", TypeKey="G3K LED Deice Airframe2", BasePos=new Point(238, 1643), ZoomWidth=22, Img=ledGreenImg,
+                    ShowWhen = () => _isDeiceAirframe2 >= 0.5 || _ltsTestActive },
+            new() { Name="G3K_LED_PROPDEICE", TypeKey="G3K LED Propdeice", BasePos=new Point(288, 1643), ZoomWidth=22, Img=ledGreenImg,
+                    ShowWhen = () => propDeiceActive || _ltsTestActive },
+            new() { Name="G3K_LED_WINDSHIELDDEICE", TypeKey="G3K LED Windshielddeice", BasePos=new Point(338, 1643), ZoomWidth=22, Img=ledGreenImg,
+                    ShowWhen = () => windshieldDeiceActive || _ltsTestActive },
+            new() { Name="G3K_LED_WINDSHIELDDEICE2", TypeKey="G3K LED Windshielddeice2", BasePos=new Point(388, 1643), ZoomWidth=22, Img=ledGreenImg,
+                    ShowWhen = () => windshieldDeiceActive || _ltsTestActive },
             new() { Name="G3K_LGEAR_SW",  TypeKey="G3K LGear SW",  BasePos=new Point(890, 1640), ZoomWidth=118, Img=swLgearImg },
             new() { Name="G3K_PBRAKE_SW", TypeKey="G3K PBrake SW", BasePos=new Point(1010, 1640), ZoomWidth=260, Img=swPbrakeImg },
             new() { Name="G3K_PBRAKE_CK", TypeKey="G3K PBrake CK", BasePos=new Point(1010, 1640), ZoomWidth=260, ZoomHeight=130, PressVisualMs=0,
@@ -3100,6 +3125,34 @@ namespace SimConnect3
             if (propDeiceActive)
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROPDEICE_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             simconnect.SetDataOnSimObject(DEFINITIONS.PropDeiceWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new PropDeiceWriteStruct { value = 0 });
+        }
+
+        private void SendInertSepOn()
+        {
+            if (simconnect == null) return;
+            if (!antiIceEng1Active)
+                simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.INERT_SEP_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+        }
+
+        private void SendInertSepOff()
+        {
+            if (simconnect == null) return;
+            if (antiIceEng1Active)
+                simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.INERT_SEP_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+        }
+
+        private void SendLtsTest()
+        {
+            if (simconnect == null) return;
+            simconnect.SetDataOnSimObject(DEFINITIONS.LtsTestWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new LtsTestWriteStruct { value = 1 });
+            _ltsTestActive = true;
+            pbMain.Invalidate();
+            Task.Delay(1000).ContinueWith(_ => this.Invoke(() =>
+            {
+                simconnect?.SetDataOnSimObject(DEFINITIONS.LtsTestWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new LtsTestWriteStruct { value = 0 });
+                _ltsTestActive = false;
+                pbMain.Invalidate();
+            }));
         }
 
         private void TogglePitotHeatL()
@@ -3785,6 +3838,8 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_DEICE, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.PROPDEICE_TOGGLE, "TOGGLE_PROPELLER_DEICE");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.PROPDEICE_TOGGLE, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.INERT_SEP_TOGGLE, "ANTI_ICE_TOGGLE_ENG1");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.INERT_SEP_TOGGLE, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.PITOTHEAT_ON, "SFS.TBM930_PitotHeat_On");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.PITOTHEAT_ON, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.PITOTHEAT_OFF, "SFS.TBM930_PitotHeat_Off");
@@ -4006,6 +4061,9 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "WINDSHIELD DEICE SWITCH", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:DEICE_Pitot_1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:DEICE_Pitot_2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "ENG ANTI ICE:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_IsDeiceAirFrame", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_IsDeiceAirFrame2", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
 
@@ -4064,6 +4122,8 @@ namespace SimConnect3
                 simconnect.RegisterDataDefineStruct<LightingLogo1Struct>(DEFINITIONS.LightingLogo1Write);
                 simconnect.AddToDataDefinition(DEFINITIONS.PropDeiceWrite, "L:DEICE_Propeller_1", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<PropDeiceWriteStruct>(DEFINITIONS.PropDeiceWrite);
+                simconnect.AddToDataDefinition(DEFINITIONS.LtsTestWrite, "L:XMLVAR_LTS_Test", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LtsTestWriteStruct>(DEFINITIONS.LtsTestWrite);
                 simconnect.AddToDataDefinition(DEFINITIONS.FuelSelectionWrite, "L:TBM930_FUEL_SELECTION_SET", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<FuelSelectionStruct>(DEFINITIONS.FuelSelectionWrite);
                 simconnect.AddToDataDefinition(DEFINITIONS.CondLeverCutoffWrite, "L:Condition_Lever_CutOff_1", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -4507,6 +4567,14 @@ namespace SimConnect3
                     pitotHeatRActive = newPitotR;
                     needsRepaint = true;
                 }
+                bool newAntiIce1 = (s1.read_antiice1 & 1) != 0;
+                if (newAntiIce1 != antiIceEng1Active)
+                {
+                    antiIceEng1Active = newAntiIce1;
+                    needsRepaint = true;
+                }
+                _isDeiceAirframe = s1.read_isDeiceAirframe;
+                _isDeiceAirframe2 = s1.read_isDeiceAirframe2;
                 bool newWindshieldDeice = (s1.read_windshielddeice & 1) != 0;
                 if (newWindshieldDeice != windshieldDeiceActive)
                 {
