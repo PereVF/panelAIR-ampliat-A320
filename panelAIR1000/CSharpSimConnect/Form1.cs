@@ -877,6 +877,7 @@ namespace SimConnect3
                 : Rectangle.Empty;
 
             public bool NoShadow = false;
+            public bool IsRound = false;
             public bool IsVisuallyPressed(DateTime now) => !NoShadow && now < PressedUntilUtc;
             public Func<bool>? ShowWhen;
             public bool IsVisible() => ShowWhen == null || ShowWhen();
@@ -888,6 +889,7 @@ namespace SimConnect3
             public PictureBox Pb;
             public List<UiButton> Buttons = new();
             public Func<bool>? SuppressInput;
+            public Func<bool>? HideAreasWhenActive;
             public bool ShowAllAreas = false;
 
             public UiSurface(PictureBox pb)
@@ -927,19 +929,29 @@ namespace SimConnect3
             private void OnPaint(object? sender, PaintEventArgs e)
             {
                 using var brush = new SolidBrush(Color.FromArgb(90, Color.White));
-                using var allAreasBrush = new SolidBrush(Color.FromArgb(60, Color.Gray));
+                using var allAreasBrush = new SolidBrush(Color.FromArgb(60, Color.Orange));
                 var now = DateTime.UtcNow;
                 foreach (var b in Buttons)
                 {
                     if (!b.IsVisible()) continue;
-                    if (ShowAllAreas)
+                    if (ShowAllAreas && !(HideAreasWhenActive?.Invoke() ?? false))
                     {
-                        e.Graphics.FillRectangle(allAreasBrush, b.ClickRect);
+                        if (b.IsRound)
+                            e.Graphics.FillEllipse(allAreasBrush, b.ClickRect);
+                        else
+                            e.Graphics.FillRectangle(allAreasBrush, b.ClickRect);
                     }
                     else if (b.IsVisuallyPressed(now))
                     {
-                        using var path = frmMain.CreateRoundedRect(b.ShadowRect, BTN_RADIUS);
-                        e.Graphics.FillPath(brush, path);
+                        if (b.IsRound)
+                        {
+                            e.Graphics.FillEllipse(brush, b.ClickRect);
+                        }
+                        else
+                        {
+                            using var path = frmMain.CreateRoundedRect(b.ShadowRect, BTN_RADIUS);
+                            e.Graphics.FillPath(brush, path);
+                        }
                     }
                 }
             }
@@ -1025,6 +1037,7 @@ namespace SimConnect3
         private bool  _showAreasBtnDragging = false;
         private Point _showAreasBtnDragOffset;
         private System.Windows.Forms.Button _gearBtn = null!;
+        private System.Windows.Forms.Button _overlayGearBtn = null!;
         private bool  _gearBtnDragging = false;
         private Point _gearBtnDragOffset;
         private bool  _panelVisible = false;
@@ -1340,6 +1353,7 @@ namespace SimConnect3
             pbMain.MouseUp += PbMain_MouseUp;
 
             mainSurface = new UiSurface(pbMain);
+            mainSurface.HideAreasWhenActive = () => _g3000Active;
             uiSurfaces.Add(mainSurface);
             mainSurface.SuppressInput = () => calibrationMode || _g3000Active;
 
@@ -1411,20 +1425,25 @@ namespace SimConnect3
             {
                 FormBorderStyle = FormBorderStyle.None,
                 StartPosition = FormStartPosition.Manual,
-                BackColor = Color.Black,
+                BackColor = Color.FromArgb(40, 40, 40),
                 ShowInTaskbar = false,
-                Size = new Size(3840, 270),
-                Location = new Point(this.Left, this.Top + 1160)
+                Size = new Size(3440, 270),
+                Location = new Point(this.Left + 200, this.Top + 1160)
             };
             _overlayPanel.KeyPreview = true;
             _overlayPanel.KeyDown += (s, e) => handleF12(e);
+            _overlayPanel.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.Orange, 1);
+                e.Graphics.DrawRectangle(pen, 0, 0, _overlayPanel.Width - 1, _overlayPanel.Height - 1);
+            };
 
             _tactileBtn = new System.Windows.Forms.Button
             {
                 Text = "🖐  Make this screen touch",
                 Location = new Point(3477, 1230),
                 Size = new Size(363, 63),
-                BackColor = Color.Black,
+                BackColor = Color.FromArgb(40, 40, 40),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold),
@@ -1463,7 +1482,7 @@ namespace SimConnect3
             {
                 Location = new Point(1870, 30),
                 Size = new Size(363, 126),
-                BackColor = Color.Black
+                BackColor = Color.FromArgb(40, 40, 40)
             };
             _fsConnPanel.Paint += (s, e) =>
             {
@@ -1478,7 +1497,7 @@ namespace SimConnect3
                 TextAlign = ContentAlignment.MiddleCenter,
                 Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold),
                 ForeColor = Color.White,
-                BackColor = Color.Black
+                BackColor = Color.FromArgb(40, 40, 40)
             };
             textBox21.Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold);
             textBox21.Size = new Size(353, 55);
@@ -1506,15 +1525,16 @@ namespace SimConnect3
             _fsConnTitle.MouseUp += (s, e) => { _tb21Dragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             _overlayPanel.Controls.Add(_fsConnPanel);
 
-            _g3000Btn = MakeGroupBtn("TBM 930", 363, 63);
+            _g3000Btn = MakeGroupBtn("TBM 930 cockpit", 363, 63);
             _g3000Btn.Location = new Point(3100, 100);
             _g3000Btn.Click += (s, e) =>
             {
                 if (calibrationMode) return;
                 _g3000Active = !_g3000Active;
-                _g3000Btn.Text = _g3000Active ? "G1000" : "TBM 930";
+                _g3000Btn.Text = _g3000Active ? "G1000 cockpit" : "TBM 930 cockpit";
                 _panelVisible = false;
-                _gearBtn.BackColor = Color.Black;
+                _gearBtn.BackColor = Color.FromArgb(40, 40, 40);
+                _gearBtn.Text = "⚙";
                 _overlayPanel!.Hide();
                 _thrQuadrantBtn.Visible = _g3000Active;
                 if (!_g3000Active) { _thrQuadrantVisible = false; }
@@ -1587,7 +1607,7 @@ namespace SimConnect3
                                 }
                                 else
                                 {
-                                    _tipLbl.Text = "If you no longer need G3000 mode, close the MSFS G3000 pop‑out windows to restore full panel functionality.  [" + i + "]";
+                                    _tipLbl.Text = "If you no longer need G3000 mode, close the MSFS G3000 pop‑out windows to restore full G1000 panel functionality.  [" + i + "]";
                                 }
                             }));
                         }
@@ -1682,7 +1702,7 @@ namespace SimConnect3
             {
                 if (calibrationMode) return;
                 mainSurface.ShowAllAreas = !mainSurface.ShowAllAreas;
-                _showAreasBtn.BackColor = mainSurface.ShowAllAreas ? Color.LimeGreen : Color.DimGray;
+                _showAreasBtn.BackColor = mainSurface.ShowAllAreas ? Color.Orange : Color.DimGray;
                 pbMain.Invalidate();
             };
             _showAreasBtn.MouseDown += (s, e) =>
@@ -1707,7 +1727,7 @@ namespace SimConnect3
                 Text = "⚙",
                 Location = new Point(3477, 1040),
                 Size = new Size(63, 63),
-                BackColor = Color.Black,
+                BackColor = Color.FromArgb(40, 40, 40),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI Emoji", 28f, FontStyle.Bold),
@@ -1715,12 +1735,12 @@ namespace SimConnect3
             };
             _gearBtn.FlatAppearance.BorderSize = 1;
             _gearBtn.FlatAppearance.BorderColor = Color.White;
-            var _overlayGearBtn = new System.Windows.Forms.Button
+            _overlayGearBtn = new System.Windows.Forms.Button
             {
-                Text = "⚙",
+                Text = "",
                 Location = new Point(1896, 22),
                 Size = new Size(63, 63),
-                BackColor = Color.LimeGreen,
+                BackColor = Color.Red,
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI Emoji", 28f, FontStyle.Bold),
@@ -1728,6 +1748,13 @@ namespace SimConnect3
             };
             _overlayGearBtn.FlatAppearance.BorderSize = 1;
             _overlayGearBtn.FlatAppearance.BorderColor = Color.White;
+            _overlayGearBtn.Paint += (s, e) =>
+            {
+                using var xPen = new Pen(Color.White, 3);
+                int m = 14;
+                e.Graphics.DrawLine(xPen, m, m, _overlayGearBtn.Width - m, _overlayGearBtn.Height - m);
+                e.Graphics.DrawLine(xPen, _overlayGearBtn.Width - m, m, m, _overlayGearBtn.Height - m);
+            };
             bool _overlayGearDragging = false;
             Point _overlayGearDragOffset = Point.Empty;
             _overlayGearBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _overlayGearDragging = true; _overlayGearDragOffset = e.Location; };
@@ -1745,11 +1772,21 @@ namespace SimConnect3
             {
                 if (calibrationMode) return;
                 _panelVisible = !_panelVisible;
-                _gearBtn.BackColor = _panelVisible ? Color.LimeGreen : Color.Black;
+                _gearBtn.BackColor = _panelVisible ? Color.Red : Color.FromArgb(40, 40, 40);
+                _gearBtn.Text = _panelVisible ? "" : "⚙";
+                _gearBtn.Invalidate();
                 if (_panelVisible)
                     _overlayPanel!.Show(this);
                 else
                     _overlayPanel!.Hide();
+            };
+            _gearBtn.Paint += (s, e) =>
+            {
+                if (!_panelVisible) return;
+                using var xPen = new Pen(Color.White, 3);
+                int m = 14;
+                e.Graphics.DrawLine(xPen, m, m, _gearBtn.Width - m, _gearBtn.Height - m);
+                e.Graphics.DrawLine(xPen, _gearBtn.Width - m, m, m, _gearBtn.Height - m);
             };
             _gearBtn.Click += (s, e) => toggleOverlay();
             _overlayGearBtn.Click += (s, e) => toggleOverlay();
@@ -1807,7 +1844,7 @@ namespace SimConnect3
                 var b = new System.Windows.Forms.Button
                 {
                     Text = text, Size = new Size(w, h),
-                    BackColor = Color.Black, ForeColor = Color.White,
+                    BackColor = Color.FromArgb(40, 40, 40), ForeColor = Color.White,
                     FlatStyle = FlatStyle.Flat,
                     Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold),
                     Cursor = Cursors.Hand
@@ -2070,7 +2107,7 @@ namespace SimConnect3
             pfdAudio.Buttons.Add(new UiButton { Name = "MAN_SQ",      BasePos = new Point(1867, 754),  OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_MAN_SQ,       0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             pfdAudio.Buttons.Add(new UiButton { Name = "PILOT",       BasePos = new Point(1972, 832),  OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_PILOT,        0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             pfdAudio.Buttons.Add(new UiButton { Name = "COPILOT",     BasePos = new Point(1867, 832),  OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_COPILOT,      0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
-            pfdAudio.Buttons.Add(new UiButton { Name = "DISPLAY_BKUP", BasePos = new Point(1920, 1082), W = 60, H = 60, OnClick = () => { if (!displayBackupActive_bool) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_DISPLAY_BKUP_ON, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); else simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_DISPLAY_BKUP_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
+            pfdAudio.Buttons.Add(new UiButton { Name = "DISPLAY_BKUP", BasePos = new Point(1920, 1082), W = 60, H = 60, IsRound = true, OnClick = () => { if (!displayBackupActive_bool) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_DISPLAY_BKUP_ON, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); else simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_DISPLAY_BKUP_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
 
             var mfdBottom = mainSurface;
             mfdBottom.Buttons.Add(new UiButton { Name = "MFD_softkey_1",  BasePos = new Point(2340, 1088), OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.MFD_SK_1,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
@@ -2242,8 +2279,6 @@ namespace SimConnect3
                 OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PANELLIGHT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_DEICE", BasePos=new Point(1984, 1653), W=75, H=75, Resizable=true, NoShadow=true,
                 OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_DEICE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
-            cockpitRight.Buttons.Add(new UiButton { Name="BTN_PROPDEICE", BasePos=new Point(0, 0), W=75, H=75, Resizable=true, NoShadow=true,
-                OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROPDEICE_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_L_INC", BasePos=new Point(1500, 1560), W=75, H=40, Resizable=true, NoShadow=true,
                 OnClick = () => { uint target = cowlFlapL == 0 ? 8191u : 16383u;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_L_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
@@ -5481,6 +5516,28 @@ namespace SimConnect3
                     e.Graphics.DrawString("APZ", apzFont, Brushes.Orange, new PointF(g3kApSliderInputZone.X, g3kApSliderInputZone.Y - 16));
                     e.Graphics.DrawRectangle(apzWhitePen, g3kApSliderZone);
                 }
+
+                if (mainSurface.ShowAllAreas)
+                {
+                    using var overlayBrush = new SolidBrush(Color.FromArgb(60, Color.Orange));
+                    foreach (var ov in g3000OverlayImages)
+                    {
+                        if (ov.OnClick == null) continue;
+                        if (ov.IsRound)
+                            e.Graphics.FillEllipse(overlayBrush, ov.Bounds);
+                        else
+                            e.Graphics.FillRectangle(overlayBrush, ov.Bounds);
+                    }
+                    e.Graphics.FillRectangle(overlayBrush, g3kApSliderInputZone);
+
+                    // Zones arrossegables (throttle, trim vertical, trim de rudder)
+                    var thrHandleOv = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
+                    if (thrHandleOv != null && _thrQuadrantVisible)
+                        e.Graphics.FillRectangle(overlayBrush, thrHandleOv.Bounds);
+                    e.Graphics.FillRectangle(overlayBrush, _g3kTrimZone);
+                    e.Graphics.FillRectangle(overlayBrush, _g3kRudderTrimZone);
+                }
+
                 return;
             }
 
@@ -5777,9 +5834,9 @@ namespace SimConnect3
 
             if (mainSurface.ShowAllAreas)
             {
-                using var overlayBrush = new SolidBrush(Color.FromArgb(60, Color.Gray));
+                using var overlayBrush = new SolidBrush(Color.FromArgb(60, Color.Orange));
 
-                // OverlayImages amb OnClick
+                // OverlayImages amb OnClick (G1000 — el G3000 ja ha fet return abans d'arribar aquí)
                 foreach (var ov in overlayImages)
                 {
                     if (ov.OnClick != null)
@@ -5791,10 +5848,6 @@ namespace SimConnect3
 
                 // Rudder trim wheel horitzontal
                 e.Graphics.FillRectangle(overlayBrush, rudderTrimZone);
-
-                // G3K AP slider zone
-                if (_g3000Active)
-                    e.Graphics.FillRectangle(overlayBrush, g3kApSliderInputZone);
             }
 
 
@@ -6742,6 +6795,7 @@ namespace SimConnect3
             sb.AppendLine($"CLOSEBTN:close:{closeButton.Location.X}:{closeButton.Location.Y}");
             sb.AppendLine($"SHOWBTN:show:{_showAreasBtn.Location.X}:{_showAreasBtn.Location.Y}");
             sb.AppendLine($"GEARBTN:gear:{_gearBtn.Location.X}:{_gearBtn.Location.Y}");
+            sb.AppendLine($"OVGEARBTN:ovgear:{_overlayGearBtn.Location.X}:{_overlayGearBtn.Location.Y}");
             sb.AppendLine($"VOLGRP:vg:{_volGrpAnchor.X}:{_volGrpAnchor.Y}");
             sb.AppendLine($"FSBTN:fs:{_fullscreenBtn.Location.X}:{_fullscreenBtn.Location.Y}");
             sb.AppendLine($"ENDBTN:end:{_msfsEndBtn.Location.X}:{_msfsEndBtn.Location.Y}");
@@ -6907,6 +6961,10 @@ namespace SimConnect3
                 else if (type == "GEARBTN")
                 {
                     _gearBtn.Location = new Point(x, y);
+                }
+                else if (type == "OVGEARBTN")
+                {
+                    _overlayGearBtn.Location = new Point(x, y);
                 }
                 else if (type == "VOLGRP")
                 {

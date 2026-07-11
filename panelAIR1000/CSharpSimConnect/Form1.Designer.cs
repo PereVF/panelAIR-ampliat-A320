@@ -39,7 +39,7 @@ namespace SimConnect3
             //
             // textBox21
             //
-            textBox21.BackColor = Color.Black;
+            textBox21.BackColor = Color.FromArgb(40, 40, 40);
             textBox21.BorderStyle = BorderStyle.None;
             textBox21.Font = new Font("Segoe UI Emoji", 17.5F, FontStyle.Bold, GraphicsUnit.Point);
             textBox21.ForeColor = Color.Cyan;
@@ -63,7 +63,7 @@ namespace SimConnect3
             closeButton.Name = "closeButton";
             closeButton.Size = new Size(363, 63);
             closeButton.TabIndex = 0;
-            closeButton.Text = "✕  EXIT APP";
+            closeButton.Text = "✕  EXIT pnanelAIR";
             closeButton.UseVisualStyleBackColor = false;
             closeButton.Click += closeButton_Click;
             //
