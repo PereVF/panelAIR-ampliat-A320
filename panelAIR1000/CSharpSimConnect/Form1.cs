@@ -6805,8 +6805,7 @@ namespace SimConnect3
             sb.AppendLine($"G3KBTN:g3k:{_g3000Btn.Location.X}:{_g3000Btn.Location.Y}");
             sb.AppendLine($"THRQBTN:tq:{_thrQuadrantBtn.Location.X}:{_thrQuadrantBtn.Location.Y}:0:0");
             if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
-            string projectDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.StartupPath, @"..\..\..\..\.."));
-            string path = System.IO.Path.Combine(projectDir, "calibration_export.txt");
+            string path = System.IO.Path.Combine(Application.StartupPath, "calibration_export.txt");
             System.IO.File.WriteAllText(path, sb.ToString());
             if (!silent)
                 MessageBox.Show($"Exportat a:\n{path}", "Calibratge", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -6814,8 +6813,7 @@ namespace SimConnect3
 
         private void LoadCalibrationPositions()
         {
-            string projectDir = System.IO.Path.GetFullPath(System.IO.Path.Combine(Application.StartupPath, @"..\..\..\..\.."));
-            string path = System.IO.Path.Combine(projectDir, "calibration_export.txt");
+            string path = System.IO.Path.Combine(Application.StartupPath, "calibration_export.txt");
             if (!System.IO.File.Exists(path)) return;
             foreach (var line in System.IO.File.ReadAllLines(path))
             {
