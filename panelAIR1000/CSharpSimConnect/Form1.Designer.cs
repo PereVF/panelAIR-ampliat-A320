@@ -57,7 +57,7 @@ namespace SimConnect3
             closeButton.FlatAppearance.BorderSize = 1;
             closeButton.FlatAppearance.BorderColor = Color.White;
             closeButton.FlatStyle = FlatStyle.Flat;
-            closeButton.Font = new Font("Segoe UI Emoji", 17.5F, FontStyle.Bold, GraphicsUnit.Point);
+            closeButton.Font = new Font("Segoe UI Emoji", 26F, FontStyle.Bold, GraphicsUnit.Pixel);
             closeButton.ForeColor = Color.White;
             closeButton.Location = new Point(3477, 1100);
             closeButton.Name = "closeButton";
@@ -80,7 +80,7 @@ namespace SimConnect3
             // frmMain
             //
             AutoScaleDimensions = new SizeF(7F, 15F);
-            AutoScaleMode = AutoScaleMode.Font;
+            AutoScaleMode = AutoScaleMode.None;
             BackColor = Color.Black;
             ClientSize = new Size(3840, 2160);
             Controls.Add(pbMain);

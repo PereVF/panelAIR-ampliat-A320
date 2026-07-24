@@ -1446,7 +1446,7 @@ namespace SimConnect3
                 BackColor = Color.FromArgb(40, 40, 40),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold),
+                Font = new Font("Segoe UI Emoji", 26f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Cursor = Cursors.Hand
             };
             _tactileBtn.FlatAppearance.BorderSize = 2;
@@ -1495,11 +1495,11 @@ namespace SimConnect3
                 Location = new Point(5, 5),
                 Size = new Size(353, 55),
                 TextAlign = ContentAlignment.MiddleCenter,
-                Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold),
+                Font = new Font("Segoe UI Emoji", 26f, FontStyle.Bold, GraphicsUnit.Pixel),
                 ForeColor = Color.White,
                 BackColor = Color.FromArgb(40, 40, 40)
             };
-            textBox21.Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold);
+            textBox21.Font = new Font("Segoe UI Emoji", 26f, FontStyle.Bold, GraphicsUnit.Pixel);
             textBox21.Size = new Size(353, 55);
             textBox21.Location = new Point(5, 63);
             _fsConnPanel.Controls.Add(_fsConnTitle);
@@ -1638,7 +1638,7 @@ namespace SimConnect3
                 Size = new Size(79, 79),
                 BackColor = Color.FromArgb(40, 40, 40), ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI Emoji", 15f, FontStyle.Bold),
+                Font = new Font("Segoe UI Emoji", 22f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Cursor = Cursors.Hand,
                 Visible = false
             };
@@ -1693,7 +1693,7 @@ namespace SimConnect3
                 BackColor = Color.DimGray,
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold),
+                Font = new Font("Segoe UI Emoji", 26f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Cursor = Cursors.Hand
             };
             _showAreasBtn.FlatAppearance.BorderSize = 1;
@@ -1730,7 +1730,7 @@ namespace SimConnect3
                 BackColor = Color.FromArgb(40, 40, 40),
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI Emoji", 28f, FontStyle.Bold),
+                Font = new Font("Segoe UI Emoji", 34f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Cursor = Cursors.Hand
             };
             _gearBtn.FlatAppearance.BorderSize = 1;
@@ -1743,7 +1743,7 @@ namespace SimConnect3
                 BackColor = Color.Red,
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI Emoji", 28f, FontStyle.Bold),
+                Font = new Font("Segoe UI Emoji", 34f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Cursor = Cursors.Hand
             };
             _overlayGearBtn.FlatAppearance.BorderSize = 1;
@@ -1846,7 +1846,7 @@ namespace SimConnect3
                     Text = text, Size = new Size(w, h),
                     BackColor = Color.FromArgb(40, 40, 40), ForeColor = Color.White,
                     FlatStyle = FlatStyle.Flat,
-                    Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold),
+                    Font = new Font("Segoe UI Emoji", 26f, FontStyle.Bold, GraphicsUnit.Pixel),
                     Cursor = Cursors.Hand
                 };
                 b.FlatAppearance.BorderSize = 1;
@@ -1909,7 +1909,7 @@ namespace SimConnect3
 
             // ── Botó MSFS END KEY ──────────────────────────────────────────
             _msfsEndBtn = MakeGroupBtn("CAM IN/EXT", 220, 63);
-            _msfsEndBtn.Font = new Font("Segoe UI Emoji", 17.5f, FontStyle.Bold);
+            _msfsEndBtn.Font = new Font("Segoe UI Emoji", 26f, FontStyle.Bold, GraphicsUnit.Pixel);
             _msfsEndBtn.Location = new Point(1920, 1380);
             _msfsEndBtn.Click += (s, e) =>
             {
