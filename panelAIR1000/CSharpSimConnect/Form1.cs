@@ -55,6 +55,7 @@ namespace SimConnect3
         private System.Threading.Timer? _sfsCheckTimer;
         private System.Windows.Forms.Button _tactileBtn = null!;
         private System.Windows.Forms.Button _showAreasBtn = null!;
+        private System.Windows.Forms.Label _aircraftTitleLbl = null!;
 
 
 
@@ -191,6 +192,20 @@ namespace SimConnect3
         bool pitotheatActive;
         bool fuelpump1Active;
         bool fuelpump2Active;
+        bool _isMsfs2024; // true si connectat a MSFS2024 (sistema de combustible nou)
+        string _currentAircraftTitle = "";
+
+        bool IsDA40() =>
+            _currentAircraftTitle.IndexOf("DA40", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            _currentAircraftTitle.IndexOf("DA 40", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        bool IsBaronG58() =>
+            _currentAircraftTitle.IndexOf("Baron", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            _currentAircraftTitle.IndexOf("G58", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        // Estat de 3 posicions (0=HIGH, 1=LOW, 2=OFF) per bombes que ho necessiten (Baron G58)
+        int _fuelPump1State3 = 0;
+        int _fuelPump2State3 = 0;
         bool pbrakeActive;
         bool masterBatteryOff;
         bool avionics1Off;
@@ -538,6 +553,7 @@ namespace SimConnect3
             PropLeverWrite,
             PropDeiceWrite,
             LtsTestWrite,
+            AircraftTitle,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -567,9 +583,17 @@ namespace SimConnect3
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct AileronTrimWriteStruct { public double value; }
 
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct AircraftInfoStruct
+        {
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+            public string title;
+        }
+
         enum REQUESTS
         {
             Request1,
+            RequestAircraftTitle,
         }
         enum SIMCONNECT_EVENTS
         {
@@ -752,6 +776,14 @@ namespace SimConnect3
             SWITCH_PITOTHEAT,
             SWITCH_FUELPUMP1,
             SWITCH_FUELPUMP2,
+            FUELSYSTEM_PUMP_ON,
+            FUELSYSTEM_PUMP_OFF,
+            SFS_FUELPUMP1_HIGH,
+            SFS_FUELPUMP1_LOW,
+            SFS_FUELPUMP1_OFF,
+            SFS_FUELPUMP2_HIGH,
+            SFS_FUELPUMP2_LOW,
+            SFS_FUELPUMP2_OFF,
             SWITCH_PBRAKE,
             MASTER_BATTERY_ON,
             MASTER_BATTERY_OFF,
@@ -1276,6 +1308,11 @@ namespace SimConnect3
             public int read_antiice1;          // ENG ANTI ICE:1 (Bool)
             public double read_isDeiceAirframe; // L:XMLVAR_IsDeiceAirFrame (Number)
             public double read_isDeiceAirframe2; // L:XMLVAR_IsDeiceAirFrame2 (Number)
+            public int read_fuelpump1_2024; // FUELSYSTEM PUMP SWITCH:1 (Bool) — MSFS2024
+            public int read_fuelpump2_2024; // FUELSYSTEM PUMP SWITCH:2 (Bool) — MSFS2024
+            public int read_fuelpump_idx3_2024; // FUELSYSTEM PUMP SWITCH:3 (Bool) — MSFS2024, DA-40 (bomba real d'aquest avió)
+            public int read_fuelpump1_ex1; // GENERAL ENG FUEL PUMP SWITCH EX1:1 (Enum 0=HIGH,1=LOW,2=OFF) — Baron G58
+            public int read_fuelpump2_ex1; // GENERAL ENG FUEL PUMP SWITCH EX1:2 (Enum 0=HIGH,1=LOW,2=OFF) — Baron G58
 
 
 
@@ -1481,7 +1518,7 @@ namespace SimConnect3
             _fsConnPanel = new Panel
             {
                 Location = new Point(1870, 30),
-                Size = new Size(363, 126),
+                Size = new Size(363, 186),
                 BackColor = Color.FromArgb(40, 40, 40)
             };
             _fsConnPanel.Paint += (s, e) =>
@@ -1502,8 +1539,20 @@ namespace SimConnect3
             textBox21.Font = new Font("Segoe UI Emoji", 26f, FontStyle.Bold, GraphicsUnit.Pixel);
             textBox21.Size = new Size(353, 55);
             textBox21.Location = new Point(5, 63);
+            _aircraftTitleLbl = new Label
+            {
+                Text = "—",
+                Location = new Point(5, 121),
+                Size = new Size(353, 55),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI Emoji", 18f, FontStyle.Bold, GraphicsUnit.Pixel),
+                ForeColor = Color.White,
+                BackColor = Color.FromArgb(40, 40, 40),
+                AutoEllipsis = true
+            };
             _fsConnPanel.Controls.Add(_fsConnTitle);
             _fsConnPanel.Controls.Add(textBox21);
+            _fsConnPanel.Controls.Add(_aircraftTitleLbl);
 
             _fsConnPanel.MouseDown += (s, e) => { if (!calibrationMode) return; _tb21Dragging = true; _tb21DragOffset = e.Location; };
             _fsConnPanel.MouseMove += (s, e) =>
@@ -2296,6 +2345,7 @@ namespace SimConnect3
             var swWhiteImg = LoadOverlayImage("SW DN white.png");
             var swGreenImg = LoadOverlayImage("SW DN green.png");
             var swBlueImg  = LoadOverlayImage("SW DN blue.png");
+            var swCenterBlueImg = LoadOverlayImage("SW CENTER  blue.png");
             var ledGreenImg = LoadOverlayImage("led green.png");
             var ledRedImg   = LoadOverlayImage("led red.png");
             var swLgearImg  = LoadOverlayImage("SW landing gear.png");
@@ -2355,11 +2405,51 @@ namespace SimConnect3
                         OnClick  = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PITOTHEAT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
                 // Blau — pumps sota de strobe i recognition (Y+100)
                 new() { Name="SW_DN_FUELPUMP1", TypeKey="SW DN blue",  BasePos=new Point(1804, 1653), ZoomWidth=75, Img=swBlueImg,
-                        ShowWhen = () => !fuelpump1Active,
-                        OnClick  = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_FUELPUMP1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+                        ShowWhen = () => IsBaronG58() ? _fuelPump1State3 == 2 : !fuelpump1Active,
+                        OnClick  = () => {
+                            if (_isMsfs2024 && IsBaronG58())
+                            {
+                                // Baron: la interacció es fa amb les 2 àrees dedicades SW_FUELPUMP1_UP/DN, no amb aquest switch.
+                            }
+                            else if (_isMsfs2024)
+                            {
+                                uint pumpIdx = IsDA40() ? 3u : 1u;
+                                simconnect?.TransmitClientEvent(0, fuelpump1Active ? SIMCONNECT_EVENTS.FUELSYSTEM_PUMP_OFF : SIMCONNECT_EVENTS.FUELSYSTEM_PUMP_ON, pumpIdx, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            }
+                            else
+                                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_FUELPUMP1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        } },
                 new() { Name="SW_DN_FUELPUMP2", TypeKey="SW DN blue",  BasePos=new Point(1864, 1653), ZoomWidth=75, Img=swBlueImg,
-                        ShowWhen = () => !fuelpump2Active,
-                        OnClick  = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_FUELPUMP2, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+                        ShowWhen = () => IsBaronG58() ? _fuelPump2State3 == 2 : !fuelpump2Active,
+                        OnClick  = () => {
+                            if (_isMsfs2024 && IsBaronG58())
+                            {
+                                // Baron: la interacció es fa amb les 2 àrees dedicades SW_FUELPUMP2_UP/DN, no amb aquest switch.
+                            }
+                            else if (_isMsfs2024)
+                                simconnect?.TransmitClientEvent(0, fuelpump2Active ? SIMCONNECT_EVENTS.FUELSYSTEM_PUMP_OFF : SIMCONNECT_EVENTS.FUELSYSTEM_PUMP_ON, 2, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            else
+                                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_FUELPUMP2, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        } },
+                // Baron G58 — posició LOW (centre) de les bombes de 3 posicions
+                new() { Name="SW_CN_FUELPUMP1", TypeKey="SW CN blue", BasePos=new Point(1804, 1653), ZoomWidth=75, Img=swCenterBlueImg,
+                        ShowWhen = () => IsBaronG58() && _fuelPump1State3 == 1, OnClick=null },
+                new() { Name="SW_CN_FUELPUMP2", TypeKey="SW CN blue", BasePos=new Point(1864, 1653), ZoomWidth=75, Img=swCenterBlueImg,
+                        ShowWhen = () => IsBaronG58() && _fuelPump2State3 == 1, OnClick=null },
+                // Baron G58 — 2 àrees clicables per bomba (pujar cap a HIGH / baixar cap a OFF), redimensionables i
+                // movibles amb F12. No depenen de cap lectura: cada clic avança un pas l'estat que porta la pròpia app.
+                new() { Name="SW_FUELPUMP1_UP", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1804, 1720), ZoomWidth=75, ZoomHeight=40, Img=null,
+                        OnClick = () => { if (IsBaronG58()) StepFuelPumpBaron(1, -1); } },
+                new() { Name="SW_FUELPUMP1_DN", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1804, 1770), ZoomWidth=75, ZoomHeight=40, Img=null,
+                        OnClick = () => { if (IsBaronG58()) StepFuelPumpBaron(1, 1); } },
+                new() { Name="SW_FUELPUMP2_UP", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1864, 1720), ZoomWidth=75, ZoomHeight=40, Img=null,
+                        OnClick = () => { if (IsBaronG58()) StepFuelPumpBaron(2, -1); } },
+                new() { Name="SW_FUELPUMP2_DN", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1864, 1770), ZoomWidth=75, ZoomHeight=40, Img=null,
+                        OnClick = () => { if (IsBaronG58()) StepFuelPumpBaron(2, 1); } },
+                // DA-40 — l'interruptor 2 és el fuel transfer switch, no una bomba. Etiqueta movible amb F12.
+                new() { Name="SW_DA40_FUELTRANSF_LBL", TypeKey="DA40_LBL", BasePos=new Point(1804, 1598), ZoomWidth=160, ZoomHeight=60, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsDA40() },
                 // Flaps switch
                 new() { Name="SW_FLAPS", TypeKey="SW flaps", BasePos=new Point(3000, 1500), ZoomWidth=75,
                         Img=LoadOverlayImage("SW flaps.png"),
@@ -3217,6 +3307,46 @@ namespace SimConnect3
             simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.ELECT_FUEL_PUMP1_SET, kval, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
         }
 
+        // Baron G58 — bomba de 3 posicions (0=HIGH, 1=LOW, 2=OFF), controlada pel WASM propi (SFS.FuelPumpN_High/Low/Off).
+        // L'estat el porta la pròpia app segons els clics (direction: -1 = cap a HIGH, +1 = cap a OFF),
+        // NO depèn de cap lectura del simulador — pendent que es trobi la variable correcta de lectura.
+        private DateTime _lastPump1ClickUtc = DateTime.MinValue;
+        private DateTime _lastPump2ClickUtc = DateTime.MinValue;
+        private void StepFuelPumpBaron(int pumpNum, int direction)
+        {
+            if (simconnect == null) return;
+            // Debounce: un sol toc de dit pot generar 2 clics gairebé seguits (rebot tàctil),
+            // fent avançar l'estat 2 posicions en comptes d'1. Ignorem clics massa propers.
+            var now = DateTime.UtcNow;
+            ref DateTime lastClick = ref (pumpNum == 1 ? ref _lastPump1ClickUtc : ref _lastPump2ClickUtc);
+            if ((now - lastClick).TotalMilliseconds < 250) return;
+            lastClick = now;
+            int cur = pumpNum == 1 ? _fuelPump1State3 : _fuelPump2State3;
+            int next = Math.Clamp(cur + direction, 0, 2);
+            if (pumpNum == 1) _fuelPump1State3 = next; else _fuelPump2State3 = next;
+            var evt = next switch
+            {
+                0 => pumpNum == 1 ? SIMCONNECT_EVENTS.SFS_FUELPUMP1_HIGH : SIMCONNECT_EVENTS.SFS_FUELPUMP2_HIGH,
+                1 => pumpNum == 1 ? SIMCONNECT_EVENTS.SFS_FUELPUMP1_LOW  : SIMCONNECT_EVENTS.SFS_FUELPUMP2_LOW,
+                _ => pumpNum == 1 ? SIMCONNECT_EVENTS.SFS_FUELPUMP1_OFF  : SIMCONNECT_EVENTS.SFS_FUELPUMP2_OFF,
+            };
+            simconnect.TransmitClientEvent(0, evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            pbMain.Invalidate();
+        }
+
+        // Cada vegada que es detecta la Baron G58 (a l'engegar l'app o en canviar-hi des d'un altre avió),
+        // forcem les 2 bombes a OFF a MSFS i sincronitzem l'estat/animació locals, per garantir que
+        // app i simulador comencen sempre alineats sense necessitat de llegir cap variable.
+        private void ForceBaronFuelPumpsOff()
+        {
+            if (simconnect == null) return;
+            simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_FUELPUMP1_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_FUELPUMP2_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            _fuelPump1State3 = 2;
+            _fuelPump2State3 = 2;
+            pbMain.Invalidate();
+        }
+
         private void SetElecGeneratorSwitch(double value)
         {
             if (simconnect == null) return;
@@ -3897,6 +4027,26 @@ namespace SimConnect3
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SWITCH_FUELPUMP2, "TOGGLE_ELECT_FUEL_PUMP2");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SWITCH_FUELPUMP2, false);
 
+                // MSFS2024 — mateix interruptor físic, sistema de combustible nou (index 1/2 passat com a dwData al clic)
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FUELSYSTEM_PUMP_ON, "FUELSYSTEM_PUMP_ON");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FUELSYSTEM_PUMP_ON, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FUELSYSTEM_PUMP_OFF, "FUELSYSTEM_PUMP_OFF");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FUELSYSTEM_PUMP_OFF, false);
+
+                // WASM propi (SFS) — per avions amb bomba de 3 posicions no controlables pels events genèrics (p. ex. Baron G58)
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELPUMP1_HIGH, "SFS.FuelPump1_High");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELPUMP1_HIGH, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELPUMP1_LOW, "SFS.FuelPump1_Low");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELPUMP1_LOW, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELPUMP1_OFF, "SFS.FuelPump1_Off");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELPUMP1_OFF, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELPUMP2_HIGH, "SFS.FuelPump2_High");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELPUMP2_HIGH, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELPUMP2_LOW, "SFS.FuelPump2_Low");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELPUMP2_LOW, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELPUMP2_OFF, "SFS.FuelPump2_Off");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELPUMP2_OFF, false);
+
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, "FLAPS_DECR");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, false);
 
@@ -4099,6 +4249,11 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "ENG ANTI ICE:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_IsDeiceAirFrame", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_IsDeiceAirFrame2", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUELSYSTEM PUMP SWITCH:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUELSYSTEM PUMP SWITCH:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUELSYSTEM PUMP SWITCH:3", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL PUMP SWITCH EX1:1", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL PUMP SWITCH EX1:2", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
 
@@ -4188,6 +4343,11 @@ namespace SimConnect3
 
                 simconnect.RegisterDataDefineStruct<Struct1>(DEFINITIONS.Struct1);
                 simconnect.RequestDataOnSimObject(REQUESTS.Request1, DEFINITIONS.Struct1, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.VISUAL_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // Avió carregat — mostrat a la pantalla AUX
+                simconnect.AddToDataDefinition(DEFINITIONS.AircraftTitle, "TITLE", null, SIMCONNECT_DATATYPE.STRING256, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<AircraftInfoStruct>(DEFINITIONS.AircraftTitle);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestAircraftTitle, DEFINITIONS.AircraftTitle, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SECOND, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
             }
             catch (COMException ex)
@@ -4363,7 +4523,8 @@ namespace SimConnect3
         {
             Console.WriteLine("SimConnect connection established");
 
-            textBox21.Text = data.dwApplicationVersionMajor >= 12 ? "MSFS 2024" : "MSFS 2020";
+            _isMsfs2024 = data.dwApplicationVersionMajor >= 12;
+            textBox21.Text = _isMsfs2024 ? "MSFS 2024" : "MSFS 2020";
             textBox21.ForeColor = Color.DodgerBlue;
             // Ens acabem de connectar: aturem reintents i forcem un "refresh" inicial.
             simReconnectPending = false;
@@ -4380,6 +4541,13 @@ namespace SimConnect3
                 SIMCONNECT_PERIOD.VISUAL_FRAME,
                 SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0
             );
+            simconnect.RequestDataOnSimObject(
+                REQUESTS.RequestAircraftTitle,
+                DEFINITIONS.AircraftTitle,
+                SimConnect.SIMCONNECT_OBJECT_ID_USER,
+                SIMCONNECT_PERIOD.SECOND,
+                SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0
+            );
 
             // Opcional: actualitza estat HID un cop per pantalla
             UpdateRotAIRStatus();
@@ -4391,6 +4559,8 @@ namespace SimConnect3
 
             textBox21.Text = "waiting";
             textBox21.ForeColor = Color.Orange;
+            if (_aircraftTitleLbl != null) _aircraftTitleLbl.Text = "—";
+            _currentAircraftTitle = ""; // força re-detecció (i re-sync fuel pumps Baron) a la propera connexió
 
             simReconnectPending = true;
             simReconnectTimer.Start();
@@ -4408,6 +4578,18 @@ namespace SimConnect3
         private void Simconnect_OnRecvSimobjectData(SimConnect sender, SIMCONNECT_RECV_SIMOBJECT_DATA data)
         {
             //Debug.WriteLine(">>> OnRecvSimobjectData CALLED");
+            if (data.dwRequestID == (uint)REQUESTS.RequestAircraftTitle)
+            {
+                var info = (AircraftInfoStruct)data.dwData[0];
+                string newTitle = info.title ?? "";
+                bool wasBaron = IsBaronG58();
+                _currentAircraftTitle = newTitle;
+                if (_aircraftTitleLbl != null && _aircraftTitleLbl.Text != newTitle)
+                    _aircraftTitleLbl.Text = newTitle;
+                if (IsBaronG58() && !wasBaron)
+                    ForceBaronFuelPumpsOff();
+                return;
+            }
             if (data.dwRequestID == (uint)REQUESTS.Request1)
             {
                 Struct1 s1 = (Struct1)data.dwData[0];
@@ -4429,8 +4611,25 @@ namespace SimConnect3
                 bool newRecogn = (s1.read_recogn & 1) != 0;
                 bool newPanelLight = (s1.read_panellight & 1) != 0;
                 bool newPitotheat = (s1.read_pitotheat & 1) != 0;
-                bool newFuelpump1 = (s1.read_fuelpump1 & 1) != 0;
-                bool newFuelpump2 = (s1.read_fuelpump2 & 1) != 0;
+                bool newFuelpump1;
+                bool newFuelpump2;
+                if (_isMsfs2024 && IsBaronG58())
+                {
+                    // Estat gestionat localment pels clics (StepFuelPumpBaron), no per lectura del simulador
+                    // (pendent que es trobi la variable correcta amb MobiFlight).
+                    newFuelpump1 = _fuelPump1State3 != 2; // != OFF
+                    newFuelpump2 = _fuelPump2State3 != 2;
+                }
+                else if (_isMsfs2024)
+                {
+                    newFuelpump1 = IsDA40() ? (s1.read_fuelpump_idx3_2024 & 1) != 0 : (s1.read_fuelpump1_2024 & 1) != 0;
+                    newFuelpump2 = (s1.read_fuelpump2_2024 & 1) != 0;
+                }
+                else
+                {
+                    newFuelpump1 = (s1.read_fuelpump1 & 1) != 0;
+                    newFuelpump2 = (s1.read_fuelpump2 & 1) != 0;
+                }
                 gearNosePercent = (int)s1.gear_center;
                 gearLeftPercent = (int)s1.gear_left;
                 gearRightPercent = (int)s1.gear_right;
@@ -5737,6 +5936,21 @@ namespace SimConnect3
                     e.Graphics.DrawImage(ov.Img, ov.AnimatedBounds);
             }
 
+            // DA-40 — l'interruptor 2 no és una bomba de combustible, és el fuel transfer switch.
+            // Sobreescrivim l'etiqueta impresa al fons ("FUEL PUMP R") amb el nom real.
+            // Movible amb F12 (element SW_DA40_FUELTRANSF_LBL a overlayImages, es guarda al txt igual que la resta.
+            {
+                var daLbl = overlayImages.FirstOrDefault(o => o.Name == "SW_DA40_FUELTRANSF_LBL");
+                if (daLbl != null && (calibrationMode || (daLbl.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var daBgBrush = new SolidBrush(Color.FromArgb(28, 28, 28));
+                    e.Graphics.FillRectangle(daBgBrush, daLbl.Bounds);
+                    using var daFont = new Font("Arial Narrow", 27f, FontStyle.Bold, GraphicsUnit.Pixel);
+                    using var daFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    e.Graphics.DrawString("FUEL TRANSF", daFont, Brushes.White, daLbl.Bounds, daFmt);
+                }
+            }
+
             // SW_PBRAKE — manual draw amb rotació i escala
             {
                 var swPbrake = overlayImages.FirstOrDefault(o => o.Name == "SW_PBRAKE");
@@ -6770,7 +6984,9 @@ namespace SimConnect3
             foreach (var tri in audioTriangles)
                 sb.AppendLine($"TRI:{tri.Name}:{tri.BasePos.X}:{tri.BasePos.Y}");
             foreach (var ov in overlayImages)
-                sb.AppendLine($"IMG:{ov.Name}:{ov.BasePos.X}:{ov.BasePos.Y}:{(int)ov.ZoomWidth}");
+                sb.AppendLine(ov.ZoomHeight > 0
+                    ? $"IMG:{ov.Name}:{ov.BasePos.X}:{ov.BasePos.Y}:{(int)ov.ZoomWidth}:{(int)ov.ZoomHeight}"
+                    : $"IMG:{ov.Name}:{ov.BasePos.X}:{ov.BasePos.Y}:{(int)ov.ZoomWidth}");
             foreach (var ov in g3000OverlayImages)
             {
                 int saveY = (ov.Name == "G3K_THR_HANDLE" && _thrHandleDefaultY >= 0) ? _thrHandleDefaultY : ov.BasePos.Y;
@@ -6838,15 +7054,19 @@ namespace SimConnect3
                     var tri = audioTriangles.FirstOrDefault(t => t.Name == name);
                     if (tri != null) tri.BasePos = new Point(x, y);
                 }
-                else if (type == "IMG" && parts.Length == 5 && int.TryParse(parts[4], out int w))
+                else if (type == "IMG" && parts.Length >= 5 && int.TryParse(parts[4], out int w))
                 {
                     var ov = overlayImages.FirstOrDefault(o => o.Name == name);
                     if (ov != null)
                     {
                         ov.BasePos = new Point(x, y);
                         string tk = ov.TypeKey;
+                        int imgH = (parts.Length >= 6 && int.TryParse(parts[5], out int h)) ? h : 0;
                         foreach (var same in overlayImages.Where(o => o.TypeKey == tk))
+                        {
                             same.ZoomWidth = w;
+                            if (imgH > 0) same.ZoomHeight = imgH;
+                        }
                     }
                 }
                 else if (type == "G3K" && parts.Length >= 5 && int.TryParse(parts[4], out int g3kw))

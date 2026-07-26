@@ -32,6 +32,7 @@
     <EmbeddedResource Include="Resources\SW DN red.png" />
     <EmbeddedResource Include="Resources\SW flaps.png" />
     <EmbeddedResource Include="Resources\SW CENTER white_b.png" />
+    <EmbeddedResource Include="Resources\SW CENTER  blue.png" />
     <EmbeddedResource Include="Resources\trim wheel.png" />
     <EmbeddedResource Include="Resources\led green.png" />
     <EmbeddedResource Include="Resources\led red.png" />

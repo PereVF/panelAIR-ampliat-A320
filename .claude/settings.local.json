@@ -11,7 +11,9 @@
       "PowerShell(Stop-Process -Id 28512 -Force)",
       "Read(//c/Users/usuario/AppData/Local/Packages/Microsoft.FlightSimulator_8wekyb3d8bbwe/LocalCache/**)",
       "Read(//c/Users/usuario/Desktop/panelAIR1000-j/%APPDATA%/Microsoft Flight Simulator/**)",
-      "Bash(dotnet clean *)"
+      "Bash(dotnet clean *)",
+      "Bash(taskkill /IM panelAIR1000.exe*)",
+      "Bash(taskkill /IM panelAIR1000.exe /F 2>&1 | true; cd \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\panelAIR1000\" && dotnet build panelAIR1000.sln -c Debug -p:Platform=x64*)"
     ],
     "additionalDirectories": [
       "c:\\Users\\usuario\\Desktop\\panelAIR1000-j"
