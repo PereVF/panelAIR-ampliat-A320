@@ -13,6 +13,7 @@ namespace SimConnect3
             Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
+            TouchDetector.Install();
 
             bool has4K = Screen.AllScreens.Any(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
             if (!has4K)
@@ -23,6 +24,15 @@ namespace SimConnect3
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Warning);
                 return;
+            }
+
+            if (!AppSettings.Instance.WelcomeCompleted)
+            {
+                using var welcome = new WelcomeForm();
+                if (welcome.ShowDialog() != DialogResult.OK)
+                    return;
+                AppSettings.Instance.WelcomeCompleted = true;
+                AppSettings.Instance.Save();
             }
 
             Application.Run(new frmMain());

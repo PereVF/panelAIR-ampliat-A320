@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>panelAIR Configuration</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div>
+        <h1>panelAIR</h1>
+        <p>Configuration</p>
+      </div>
+      <button id="gearButton" class="icon-button" type="button" aria-label="Open configuration">
+        ⚙
+      </button>
+    </header>
+
+    <section id="welcomeScreen" class="screen welcome-screen">
+      <div class="welcome-card">
+        <p class="eyebrow">FIRST-TIME SETUP</p>
+        <h2>Welcome to panelAIR</h2>
+        <p>
+          Before continuing, make sure your panelAIR 4K monitor is connected
+          to your MSFS computer as explained in the Quick Start Guide.
+        </p>
+        <p>
+          This welcome screen will appear only once. You can open the
+          Configuration screen again at any time from the gear icon.
+        </p>
+        <button id="continueButton" class="primary-button" type="button">
+          Continue
+        </button>
+      </div>
+    </section>
+
+    <section id="configurationScreen" class="screen hidden" aria-labelledby="configurationTitle">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">SETUP</p>
+          <h2 id="configurationTitle">Configuration</h2>
+          <p>Configure panelAIR and the required Microsoft Flight Simulator components.</p>
+        </div>
+      </div>
+
+      <div class="configuration-grid">
+        <article class="config-card">
+          <div class="card-number">1</div>
+          <div class="card-content">
+            <h3>Touch Screen Setup</h3>
+            <p>Set this monitor as the touch screen used by panelAIR.</p>
+            <button id="touchButton" class="primary-button" type="button">
+              Make This Screen Touch
+            </button>
+            <p id="touchStatus" class="status-text" aria-live="polite"></p>
+          </div>
+        </article>
+
+        <article class="config-card">
+          <div class="card-number">2</div>
+          <div class="card-content">
+            <h3>SFSmonitor</h3>
+            <p>
+              Optional: panelAIR can open SFSmonitor automatically when the app starts.
+            </p>
+
+            <label for="sfsPath">SFSmonitor location</label>
+            <div class="path-row">
+              <input
+                id="sfsPath"
+                type="text"
+                value="C:\Program Files\SFSmonitor\SFSmonitor.exe"
+                aria-describedby="pathHelp"
+              />
+              <button id="browseButton" class="secondary-button" type="button">
+                Browse…
+              </button>
+            </div>
+            <p id="pathHelp" class="helper-text">
+              Select the SFSmonitor.exe file.
+            </p>
+
+            <div class="switch-row">
+              <label class="switch-copy" for="autoLaunch">
+                <strong>Open SFSmonitor automatically</strong>
+                <small>Turn this on only if you want panelAIR to launch SFSmonitor.</small>
+              </label>
+
+              <label class="toggle-switch" for="autoLaunch">
+                <input id="autoLaunch" type="checkbox" checked />
+                <span class="toggle-track" aria-hidden="true">
+                  <span class="toggle-thumb"></span>
+                </span>
+                <span id="autoLaunchState" class="toggle-state">On</span>
+              </label>
+            </div>
+          </div>
+        </article>
+
+        <article class="config-card">
+          <div class="card-number">3</div>
+          <div class="card-content">
+            <h3>SFS Link</h3>
+            <p>
+              panelAIR will install the latest version of SFS Link in your
+              Microsoft Flight Simulator Community folders.
+            </p>
+            <button id="installButton" class="primary-button" type="button">
+              Install SFS Link
+            </button>
+            <p id="installStatus" class="status-text" aria-live="polite"></p>
+          </div>
+        </article>
+
+        <article class="config-card">
+          <div class="card-number">4</div>
+          <div class="card-content">
+            <h3>TBM 930 Setup</h3>
+            <p>
+              To use all panelAIR functions with the TBM 930, install these two add-ons:
+            </p>
+
+            <div class="resource-item">
+              <div>
+                <strong>TBM 930 LVARs</strong>
+                <p>Adds the required variables for aircraft systems.</p>
+              </div>
+              <a href="#" class="text-link">Open download page</a>
+            </div>
+
+            <div class="resource-item">
+              <div>
+                <strong>MobiFlight WASM Module</strong>
+                <p>Adds the required MSFS background events.</p>
+              </div>
+              <a href="#" class="text-link">Open installation guide</a>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

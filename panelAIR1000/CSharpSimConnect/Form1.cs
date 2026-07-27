@@ -1072,6 +1072,10 @@ namespace SimConnect3
         private bool calibrationMode = false;
         private bool  _tactilebtnDragging = false;
         private Point _tactilebtnDragOffset;
+        private System.Windows.Forms.Button? _configBtn;
+        private bool  _configBtnDragging = false;
+        private Point _configBtnDragOffset;
+        private ConfigurationForm? _configForm;
         private bool  _closeBtnDragging = false;
         private Point _closeBtnDragOffset;
         private bool  _showAreasBtnDragging = false;
@@ -1499,12 +1503,7 @@ namespace SimConnect3
             _tactileBtn.Click += (s, e) =>
             {
                 if (calibrationMode) return;
-                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "explorer.exe",
-                    Arguments = "shell:::{80F3F1D5-FECA-45F3-BC32-752C152E456E}",
-                    UseShellExecute = true
-                });
+                TouchDetector.LaunchWindowsTouchSettingsAndExit(this);
             };
             _tactileBtn.MouseDown += (s, e) =>
             {
@@ -1522,6 +1521,40 @@ namespace SimConnect3
             _tactileBtn.MouseUp += (s, e) => { _tactilebtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             _tactileBtn.Location = new Point(900, 100);
             _overlayPanel.Controls.Add(_tactileBtn);
+
+            _configBtn = new System.Windows.Forms.Button
+            {
+                Text = "⚙  CONFIGURATION",
+                Location = new Point(900, 180),
+                Size = new Size(363, 63),
+                BackColor = Color.FromArgb(40, 40, 40),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat,
+                Font = new Font("Segoe UI Emoji", 26f, FontStyle.Bold, GraphicsUnit.Pixel),
+                Cursor = Cursors.Hand
+            };
+            _configBtn.FlatAppearance.BorderSize = 2;
+            _configBtn.FlatAppearance.BorderColor = Color.White;
+            _configBtn.Click += (s, e) =>
+            {
+                if (calibrationMode) return;
+                OpenConfigurationScreen();
+            };
+            _configBtn.MouseDown += (s, e) =>
+            {
+                if (!calibrationMode) return;
+                _configBtnDragging = true;
+                _configBtnDragOffset = e.Location;
+            };
+            _configBtn.MouseMove += (s, e) =>
+            {
+                if (!_configBtnDragging) return;
+                var screenPt = _configBtn.PointToScreen(e.Location);
+                var formPt = _overlayPanel!.PointToClient(screenPt);
+                _configBtn.Location = new Point(formPt.X - _configBtnDragOffset.X, formPt.Y - _configBtnDragOffset.Y);
+            };
+            _configBtn.MouseUp += (s, e) => { _configBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            _overlayPanel.Controls.Add(_configBtn);
 
             _fsConnPanel = new Panel
             {
@@ -2090,6 +2123,13 @@ namespace SimConnect3
 
             //this.TopMost = true;
             this.Load += frmMain_Load;
+            this.Shown += (s, e) =>
+            {
+                if (AppSettings.Instance.FirstConfigShown) return;
+                AppSettings.Instance.FirstConfigShown = true;
+                AppSettings.Instance.Save();
+                OpenConfigurationScreen();
+            };
             //EnableFormDragging(this);
             // EnableFormDragging: pendent afegir icona de moviment sobre pbMain
 
@@ -2894,6 +2934,17 @@ namespace SimConnect3
             this.Close(); // Això dispara Form1_FormClosing i para els threads
         }
 
+        private void OpenConfigurationScreen()
+        {
+            if (_configForm != null && !_configForm.IsDisposed)
+            {
+                _configForm.Activate();
+                return;
+            }
+            _configForm = new ConfigurationForm();
+            _configForm.Show(this);
+        }
+
         private void ApplyPfdRegion()
         {
             // Regió completa del Form
@@ -3048,6 +3099,17 @@ namespace SimConnect3
 
             // SFSmonitor detection
             sfsMonitorRunning = Process.GetProcesses().Any(p => p.ProcessName.StartsWith("SFSmonitor"));
+            if (!sfsMonitorRunning && AppSettings.Instance.SfsMonitorAutoLaunch
+                && !string.IsNullOrWhiteSpace(AppSettings.Instance.SfsMonitorPath)
+                && System.IO.File.Exists(AppSettings.Instance.SfsMonitorPath))
+            {
+                try
+                {
+                    var sfsProc = Process.Start(new ProcessStartInfo { FileName = AppSettings.Instance.SfsMonitorPath, UseShellExecute = true });
+                    if (sfsProc != null) ProcessWindowMover.MoveToPrimaryScreenWhenReady(sfsProc);
+                }
+                catch { }
+            }
             if (!sfsMonitorRunning) ShowSfsWarning();
             _sfsCheckTimer = new System.Threading.Timer(_ =>
             {
@@ -3100,6 +3162,15 @@ namespace SimConnect3
             stopHidThread3 = true;
             stopHidThread4 = true;
             stopHidThread5 = true;
+
+            try
+            {
+                foreach (var p in Process.GetProcesses().Where(p => p.ProcessName.StartsWith("SFSmonitor")))
+                {
+                    try { p.CloseMainWindow(); } catch { }
+                }
+            }
+            catch { }
         }
         private void SetElecSourceSwitch(double value)
         {
@@ -7042,6 +7113,7 @@ namespace SimConnect3
             sb.AppendLine($"RRI:rri:{rudderTrimIndXOffset}:{rudderTrimIndY}");
             sb.AppendLine($"RRZ:rrz:{rudderTrimZoneBaseX}:{rudderTrimZoneBaseY}");
             sb.AppendLine($"TACBTN:tactile:{_tactileBtn.Location.X}:{_tactileBtn.Location.Y}");
+            if (_configBtn != null) sb.AppendLine($"CONFBTN:conf:{_configBtn.Location.X}:{_configBtn.Location.Y}");
             sb.AppendLine($"CLOSEBTN:close:{closeButton.Location.X}:{closeButton.Location.Y}");
             sb.AppendLine($"SHOWBTN:show:{_showAreasBtn.Location.X}:{_showAreasBtn.Location.Y}");
             sb.AppendLine($"GEARBTN:gear:{_gearBtn.Location.X}:{_gearBtn.Location.Y}");
@@ -7201,6 +7273,10 @@ namespace SimConnect3
                 else if (type == "TACBTN")
                 {
                     _tactileBtn.Location = new Point(x, y);
+                }
+                else if (type == "CONFBTN")
+                {
+                    if (_configBtn != null) _configBtn.Location = new Point(x, y);
                 }
                 else if (type == "CLOSEBTN")
                 {
