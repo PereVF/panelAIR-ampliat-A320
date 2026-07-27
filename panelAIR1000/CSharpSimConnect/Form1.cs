@@ -203,6 +203,10 @@ namespace SimConnect3
             _currentAircraftTitle.IndexOf("Baron", StringComparison.OrdinalIgnoreCase) >= 0 ||
             _currentAircraftTitle.IndexOf("G58", StringComparison.OrdinalIgnoreCase) >= 0;
 
+        bool IsCaravan() =>
+            _currentAircraftTitle.IndexOf("Caravan", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            _currentAircraftTitle.IndexOf("208", StringComparison.OrdinalIgnoreCase) >= 0;
+
         // Estat de 3 posicions (0=HIGH, 1=LOW, 2=OFF) per bombes que ho necessiten (Baron G58)
         int _fuelPump1State3 = 0;
         int _fuelPump2State3 = 0;
@@ -784,6 +788,7 @@ namespace SimConnect3
             SFS_FUELPUMP2_HIGH,
             SFS_FUELPUMP2_LOW,
             SFS_FUELPUMP2_OFF,
+            SFS_CARAVAN_FUELPUMP1_SET,
             SWITCH_PBRAKE,
             MASTER_BATTERY_ON,
             MASTER_BATTERY_OFF,
@@ -1018,6 +1023,9 @@ namespace SimConnect3
                 BasePos.X, BasePos.Y + AnimOffsetY, (int)ZoomWidth, CalcH);
             public Func<bool>? ShowWhen;
             public Action?     OnClick;
+            // Si no és null i torna false, el dispatch de clics salta aquest overlay (no "roba" el clic)
+            // encara que Bounds el contingui, deixant-lo passar cap a overlays de sota amb la mateixa zona.
+            public Func<bool>? OnClickEnabled;
             public DateTime    PressedUntilUtc = DateTime.MinValue;
             public int         PressVisualMs   = 120;
             public bool        IsRound         = false;
@@ -2405,11 +2413,12 @@ namespace SimConnect3
                         OnClick  = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PITOTHEAT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
                 // Blau — pumps sota de strobe i recognition (Y+100)
                 new() { Name="SW_DN_FUELPUMP1", TypeKey="SW DN blue",  BasePos=new Point(1804, 1653), ZoomWidth=75, Img=swBlueImg,
-                        ShowWhen = () => IsBaronG58() ? _fuelPump1State3 == 2 : !fuelpump1Active,
+                        ShowWhen = () => (IsBaronG58() || IsCaravan()) ? _fuelPump1State3 == 2 : !fuelpump1Active,
+                        OnClickEnabled = () => !(IsBaronG58() || IsCaravan()),
                         OnClick  = () => {
-                            if (_isMsfs2024 && IsBaronG58())
+                            if (_isMsfs2024 && (IsBaronG58() || IsCaravan()))
                             {
-                                // Baron: la interacció es fa amb les 2 àrees dedicades SW_FUELPUMP1_UP/DN, no amb aquest switch.
+                                // Baron/Caravan: la interacció es fa amb les 2 àrees dedicades SW_FUELPUMP1_UP/DN, no amb aquest switch.
                             }
                             else if (_isMsfs2024)
                             {
@@ -2420,7 +2429,8 @@ namespace SimConnect3
                                 simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_FUELPUMP1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         } },
                 new() { Name="SW_DN_FUELPUMP2", TypeKey="SW DN blue",  BasePos=new Point(1864, 1653), ZoomWidth=75, Img=swBlueImg,
-                        ShowWhen = () => IsBaronG58() ? _fuelPump2State3 == 2 : !fuelpump2Active,
+                        ShowWhen = () => IsBaronG58() ? _fuelPump2State3 == 2 : IsCaravan() ? true : !fuelpump2Active,
+                        OnClickEnabled = () => !(IsBaronG58() || IsCaravan()),
                         OnClick  = () => {
                             if (_isMsfs2024 && IsBaronG58())
                             {
@@ -2431,17 +2441,17 @@ namespace SimConnect3
                             else
                                 simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_FUELPUMP2, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         } },
-                // Baron G58 — posició LOW (centre) de les bombes de 3 posicions
+                // Baron G58 / Cessna Caravan — posició LOW/AUTO (centre) de les bombes de 3 posicions
                 new() { Name="SW_CN_FUELPUMP1", TypeKey="SW CN blue", BasePos=new Point(1804, 1653), ZoomWidth=75, Img=swCenterBlueImg,
-                        ShowWhen = () => IsBaronG58() && _fuelPump1State3 == 1, OnClick=null },
+                        ShowWhen = () => (IsBaronG58() || IsCaravan()) && _fuelPump1State3 == 1, OnClick=null },
                 new() { Name="SW_CN_FUELPUMP2", TypeKey="SW CN blue", BasePos=new Point(1864, 1653), ZoomWidth=75, Img=swCenterBlueImg,
                         ShowWhen = () => IsBaronG58() && _fuelPump2State3 == 1, OnClick=null },
-                // Baron G58 — 2 àrees clicables per bomba (pujar cap a HIGH / baixar cap a OFF), redimensionables i
-                // movibles amb F12. No depenen de cap lectura: cada clic avança un pas l'estat que porta la pròpia app.
+                // Baron G58 / Cessna Caravan — 2 àrees clicables per bomba (pujar cap a HIGH/ON / baixar cap a OFF),
+                // redimensionables i movibles amb F12. No depenen de cap lectura: cada clic avança un pas l'estat local.
                 new() { Name="SW_FUELPUMP1_UP", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1804, 1720), ZoomWidth=75, ZoomHeight=40, Img=null,
-                        OnClick = () => { if (IsBaronG58()) StepFuelPumpBaron(1, -1); } },
+                        OnClick = () => { if (IsBaronG58() || IsCaravan()) StepFuelPumpBaron(1, -1); } },
                 new() { Name="SW_FUELPUMP1_DN", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1804, 1770), ZoomWidth=75, ZoomHeight=40, Img=null,
-                        OnClick = () => { if (IsBaronG58()) StepFuelPumpBaron(1, 1); } },
+                        OnClick = () => { if (IsBaronG58() || IsCaravan()) StepFuelPumpBaron(1, 1); } },
                 new() { Name="SW_FUELPUMP2_UP", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1864, 1720), ZoomWidth=75, ZoomHeight=40, Img=null,
                         OnClick = () => { if (IsBaronG58()) StepFuelPumpBaron(2, -1); } },
                 new() { Name="SW_FUELPUMP2_DN", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1864, 1770), ZoomWidth=75, ZoomHeight=40, Img=null,
@@ -3307,9 +3317,11 @@ namespace SimConnect3
             simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.ELECT_FUEL_PUMP1_SET, kval, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
         }
 
-        // Baron G58 — bomba de 3 posicions (0=HIGH, 1=LOW, 2=OFF), controlada pel WASM propi (SFS.FuelPumpN_High/Low/Off).
-        // L'estat el porta la pròpia app segons els clics (direction: -1 = cap a HIGH, +1 = cap a OFF),
-        // NO depèn de cap lectura del simulador — pendent que es trobi la variable correcta de lectura.
+        // Bomba de 3 posicions (0=HIGH/ON, 1=LOW/AUTO, 2=OFF) per avions sense esquema estàndard universal:
+        // Baron G58 (pump 1 i 2, via WASM propi SFS.FuelPumpN_High/Low/Off) i Cessna Caravan (només pump 1,
+        // via events natius de l'avió FUEL_PUMP_1_ON/AUTO/OFF, confirmats a Behaviors — sense WASM).
+        // L'estat el porta la pròpia app segons els clics (direction: -1 = cap a HIGH/ON, +1 = cap a OFF),
+        // NO depèn de cap lectura del simulador.
         private DateTime _lastPump1ClickUtc = DateTime.MinValue;
         private DateTime _lastPump2ClickUtc = DateTime.MinValue;
         private void StepFuelPumpBaron(int pumpNum, int direction)
@@ -3324,6 +3336,13 @@ namespace SimConnect3
             int cur = pumpNum == 1 ? _fuelPump1State3 : _fuelPump2State3;
             int next = Math.Clamp(cur + direction, 0, 2);
             if (pumpNum == 1) _fuelPump1State3 = next; else _fuelPump2State3 = next;
+            if (IsCaravan() && pumpNum == 1)
+            {
+                // WASM propi: SFS.FuelPump1 escriu directament el paràmetre a (B:FUEL_Pump_1) — 0=ON,1=AUTO,2=OFF.
+                simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_SET, (uint)next, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                pbMain.Invalidate();
+                return;
+            }
             var evt = next switch
             {
                 0 => pumpNum == 1 ? SIMCONNECT_EVENTS.SFS_FUELPUMP1_HIGH : SIMCONNECT_EVENTS.SFS_FUELPUMP2_HIGH,
@@ -3344,6 +3363,15 @@ namespace SimConnect3
             simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_FUELPUMP2_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             _fuelPump1State3 = 2;
             _fuelPump2State3 = 2;
+            pbMain.Invalidate();
+        }
+
+        // Cada vegada que es detecta la Cessna Caravan (monomotor, només pump 1), mateix mecanisme que la Baron.
+        private void ForceCaravanFuelPumpOff()
+        {
+            if (simconnect == null) return;
+            simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_SET, 2, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            _fuelPump1State3 = 2;
             pbMain.Invalidate();
         }
 
@@ -4047,6 +4075,10 @@ namespace SimConnect3
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELPUMP2_OFF, "SFS.FuelPump2_Off");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELPUMP2_OFF, false);
 
+                // Cessna Grand Caravan (208B) — bomba de 3 posicions amb events natius de l'avió (confirmats via Behaviors), sense WASM
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_SET, "SFS.FuelPump1");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_SET, false);
+
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, "FLAPS_DECR");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, false);
 
@@ -4583,11 +4615,14 @@ namespace SimConnect3
                 var info = (AircraftInfoStruct)data.dwData[0];
                 string newTitle = info.title ?? "";
                 bool wasBaron = IsBaronG58();
+                bool wasCaravan = IsCaravan();
                 _currentAircraftTitle = newTitle;
                 if (_aircraftTitleLbl != null && _aircraftTitleLbl.Text != newTitle)
                     _aircraftTitleLbl.Text = newTitle;
                 if (IsBaronG58() && !wasBaron)
                     ForceBaronFuelPumpsOff();
+                else if (IsCaravan() && !wasCaravan)
+                    ForceCaravanFuelPumpOff();
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.Request1)
@@ -4613,10 +4648,9 @@ namespace SimConnect3
                 bool newPitotheat = (s1.read_pitotheat & 1) != 0;
                 bool newFuelpump1;
                 bool newFuelpump2;
-                if (_isMsfs2024 && IsBaronG58())
+                if (_isMsfs2024 && (IsBaronG58() || IsCaravan()))
                 {
-                    // Estat gestionat localment pels clics (StepFuelPumpBaron), no per lectura del simulador
-                    // (pendent que es trobi la variable correcta amb MobiFlight).
+                    // Estat gestionat localment pels clics (StepFuelPumpBaron), no per lectura del simulador.
                     newFuelpump1 = _fuelPump1State3 != 2; // != OFF
                     newFuelpump2 = _fuelPump2State3 != 2;
                 }
@@ -6434,7 +6468,7 @@ namespace SimConnect3
                     { ov.PressedUntilUtc = DateTime.UtcNow.AddMilliseconds(ov.PressVisualMs); ov.OnClick.Invoke(); pbMain.Invalidate(); return; }
 
             foreach (var ov in overlayImages)
-                if (ov.OnClick != null && ov.Bounds.Contains(e.Location))
+                if (ov.OnClick != null && (ov.OnClickEnabled?.Invoke() ?? true) && ov.Bounds.Contains(e.Location))
                 { ov.OnClick.Invoke(); return; }
 
             if (trimZone.Contains(e.Location))
