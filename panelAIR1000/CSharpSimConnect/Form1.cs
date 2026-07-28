@@ -788,7 +788,9 @@ namespace SimConnect3
             SFS_FUELPUMP2_HIGH,
             SFS_FUELPUMP2_LOW,
             SFS_FUELPUMP2_OFF,
-            SFS_CARAVAN_FUELPUMP1_SET,
+            SFS_CARAVAN_FUELPUMP1_ON,
+            SFS_CARAVAN_FUELPUMP1_AUTO,
+            SFS_CARAVAN_FUELPUMP1_OFF,
             SWITCH_PBRAKE,
             MASTER_BATTERY_ON,
             MASTER_BATTERY_OFF,
@@ -3409,8 +3411,14 @@ namespace SimConnect3
             if (pumpNum == 1) _fuelPump1State3 = next; else _fuelPump2State3 = next;
             if (IsCaravan() && pumpNum == 1)
             {
-                // WASM propi: SFS.FuelPump1 escriu directament el paràmetre a (B:FUEL_Pump_1) — 0=ON,1=AUTO,2=OFF.
-                simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_SET, (uint)next, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                // WASM propi: SFS.FuelPump1_On/Auto/Off (B:FUEL_PUMP_1_ON/_AUTO/_OFF) — confirmats via MobiFlight.
+                var caravanEvt = next switch
+                {
+                    0 => SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_ON,
+                    1 => SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_AUTO,
+                    _ => SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_OFF,
+                };
+                simconnect.TransmitClientEvent(0, caravanEvt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                 pbMain.Invalidate();
                 return;
             }
@@ -3441,7 +3449,7 @@ namespace SimConnect3
         private void ForceCaravanFuelPumpOff()
         {
             if (simconnect == null) return;
-            simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_SET, 2, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             _fuelPump1State3 = 2;
             pbMain.Invalidate();
         }
@@ -4146,9 +4154,13 @@ namespace SimConnect3
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELPUMP2_OFF, "SFS.FuelPump2_Off");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELPUMP2_OFF, false);
 
-                // Cessna Grand Caravan (208B) — bomba de 3 posicions amb events natius de l'avió (confirmats via Behaviors), sense WASM
-                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_SET, "SFS.FuelPump1");
-                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_SET, false);
+                // Cessna Grand Caravan (208B) — bomba de 3 posicions via WASM propi (B:FUEL_PUMP_1_ON/_AUTO/_OFF, confirmats amb MobiFlight)
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_ON, "SFS.FuelPump1_On");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_ON, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_AUTO, "SFS.FuelPump1_Auto");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_AUTO, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_OFF, "SFS.FuelPump1_Off");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_OFF, false);
 
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, "FLAPS_DECR");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, false);
