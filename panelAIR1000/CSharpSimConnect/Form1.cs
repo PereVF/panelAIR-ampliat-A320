@@ -207,6 +207,19 @@ namespace SimConnect3
             _currentAircraftTitle.IndexOf("Caravan", StringComparison.OrdinalIgnoreCase) >= 0 ||
             _currentAircraftTitle.IndexOf("208", StringComparison.OrdinalIgnoreCase) >= 0;
 
+        bool IsCirrusSR22() =>
+            _currentAircraftTitle.IndexOf("SR22", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            _currentAircraftTitle.IndexOf("Cirrus", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        // Caravan i Cirrus SR22 comparteixen el mateix esquema de bomba (mateixes B: vars al WASM) — pendent de confirmar en vol.
+        bool UsesCaravanPumpScheme() => IsCaravan() || IsCirrusSR22();
+
+        // Monomotor — bomba única (pump 1), mateix esquema HIGH/LOW/OFF que la Baron (B:FUEL_Pump_1_High/_Low/_Off,
+        // confirmat a Behaviors, idèntic al de la Baron — reutilitza els mateixos events WASM, no en calen de nous).
+        bool IsBonanzaG36() =>
+            _currentAircraftTitle.IndexOf("Bonanza", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            _currentAircraftTitle.IndexOf("G36", StringComparison.OrdinalIgnoreCase) >= 0;
+
         // Estat de 3 posicions (0=HIGH, 1=LOW, 2=OFF) per bombes que ho necessiten (Baron G58)
         int _fuelPump1State3 = 0;
         int _fuelPump2State3 = 0;
@@ -558,6 +571,7 @@ namespace SimConnect3
             PropDeiceWrite,
             LtsTestWrite,
             AircraftTitle,
+            ParkingBrakeRead,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -594,10 +608,14 @@ namespace SimConnect3
             public string title;
         }
 
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct ParkingBrakeStruct { public int value; } // BRAKE PARKING POSITION (Bool)
+
         enum REQUESTS
         {
             Request1,
             RequestAircraftTitle,
+            RequestParkingBrake,
         }
         enum SIMCONNECT_EVENTS
         {
@@ -1254,7 +1272,6 @@ namespace SimConnect3
             public int read_fuelpump2;
             public int flaps_num_handle_positions;
             public int flaps_real_handle_position;
-            public int read_parking_brake;
             public int gear_handle; // GEAR HANDLE POSITION (Bool: 0=UP, 1=DN)
             public int ign1_left;    // RECIP ENG LEFT MAGNETO:1
             public int ign1_right;   // RECIP ENG RIGHT MAGNETO:1
@@ -2455,12 +2472,12 @@ namespace SimConnect3
                         OnClick  = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PITOTHEAT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
                 // Blau — pumps sota de strobe i recognition (Y+100)
                 new() { Name="SW_DN_FUELPUMP1", TypeKey="SW DN blue",  BasePos=new Point(1804, 1653), ZoomWidth=75, Img=swBlueImg,
-                        ShowWhen = () => (IsBaronG58() || IsCaravan()) ? _fuelPump1State3 == 2 : !fuelpump1Active,
-                        OnClickEnabled = () => !(IsBaronG58() || IsCaravan()),
+                        ShowWhen = () => (IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()) ? _fuelPump1State3 == 2 : !fuelpump1Active,
+                        OnClickEnabled = () => !(IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()),
                         OnClick  = () => {
-                            if (_isMsfs2024 && (IsBaronG58() || IsCaravan()))
+                            if (_isMsfs2024 && (IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()))
                             {
-                                // Baron/Caravan: la interacció es fa amb les 2 àrees dedicades SW_FUELPUMP1_UP/DN, no amb aquest switch.
+                                // Baron/Caravan/Cirrus/Bonanza: la interacció es fa amb les 2 àrees dedicades SW_FUELPUMP1_UP/DN, no amb aquest switch.
                             }
                             else if (_isMsfs2024)
                             {
@@ -2471,8 +2488,8 @@ namespace SimConnect3
                                 simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_FUELPUMP1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         } },
                 new() { Name="SW_DN_FUELPUMP2", TypeKey="SW DN blue",  BasePos=new Point(1864, 1653), ZoomWidth=75, Img=swBlueImg,
-                        ShowWhen = () => IsBaronG58() ? _fuelPump2State3 == 2 : IsCaravan() ? true : !fuelpump2Active,
-                        OnClickEnabled = () => !(IsBaronG58() || IsCaravan()),
+                        ShowWhen = () => IsBaronG58() ? _fuelPump2State3 == 2 : (UsesCaravanPumpScheme() || IsBonanzaG36()) ? true : !fuelpump2Active,
+                        OnClickEnabled = () => !(IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()),
                         OnClick  = () => {
                             if (_isMsfs2024 && IsBaronG58())
                             {
@@ -2483,17 +2500,17 @@ namespace SimConnect3
                             else
                                 simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_FUELPUMP2, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         } },
-                // Baron G58 / Cessna Caravan — posició LOW/AUTO (centre) de les bombes de 3 posicions
+                // Baron G58 / Cessna Caravan / Cirrus SR22 / Bonanza G36 — posició LOW/AUTO (centre) de les bombes de 3 posicions
                 new() { Name="SW_CN_FUELPUMP1", TypeKey="SW CN blue", BasePos=new Point(1804, 1653), ZoomWidth=75, Img=swCenterBlueImg,
-                        ShowWhen = () => (IsBaronG58() || IsCaravan()) && _fuelPump1State3 == 1, OnClick=null },
+                        ShowWhen = () => (IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()) && _fuelPump1State3 == 1, OnClick=null },
                 new() { Name="SW_CN_FUELPUMP2", TypeKey="SW CN blue", BasePos=new Point(1864, 1653), ZoomWidth=75, Img=swCenterBlueImg,
                         ShowWhen = () => IsBaronG58() && _fuelPump2State3 == 1, OnClick=null },
-                // Baron G58 / Cessna Caravan — 2 àrees clicables per bomba (pujar cap a HIGH/ON / baixar cap a OFF),
+                // Baron G58 / Cessna Caravan / Cirrus SR22 / Bonanza G36 — 2 àrees clicables per bomba (pujar cap a HIGH/ON / baixar cap a OFF),
                 // redimensionables i movibles amb F12. No depenen de cap lectura: cada clic avança un pas l'estat local.
                 new() { Name="SW_FUELPUMP1_UP", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1804, 1720), ZoomWidth=75, ZoomHeight=40, Img=null,
-                        OnClick = () => { if (IsBaronG58() || IsCaravan()) StepFuelPumpBaron(1, -1); } },
+                        OnClick = () => { if (IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()) StepFuelPumpBaron(1, -1); } },
                 new() { Name="SW_FUELPUMP1_DN", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1804, 1770), ZoomWidth=75, ZoomHeight=40, Img=null,
-                        OnClick = () => { if (IsBaronG58() || IsCaravan()) StepFuelPumpBaron(1, 1); } },
+                        OnClick = () => { if (IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()) StepFuelPumpBaron(1, 1); } },
                 new() { Name="SW_FUELPUMP2_UP", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1864, 1720), ZoomWidth=75, ZoomHeight=40, Img=null,
                         OnClick = () => { if (IsBaronG58()) StepFuelPumpBaron(2, -1); } },
                 new() { Name="SW_FUELPUMP2_DN", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1864, 1770), ZoomWidth=75, ZoomHeight=40, Img=null,
@@ -2532,16 +2549,16 @@ namespace SimConnect3
                 new() { Name="SW_ALT2", TypeKey="SW altgen2", BasePos=new Point(1620, 1280), ZoomWidth=100,
                         Img=swDnRedImg, ShowWhen = () => altGen2Off, OnClick=null },
                 new() { Name="LED_PBRAKE", TypeKey="LED_PBRAKE", BasePos=new Point(2918, 1755), ZoomWidth=32, Img=ledRedImg,
-                        ShowWhen = () => mainBusVolts >= 5.0 && pbrakeActive },
+                        ShowWhen = () => !masterBatteryOff && pbrakeActive },
                 // GEAR LEDs
                 new() { Name="LED_GEAR_LEFT",    TypeKey="LED_GEAR_LEFT",    BasePos=new Point(2749, 1740), ZoomWidth=43, Img=ledGreenImg,
-                        ShowWhen = () => mainBusVolts >= 5.0 && gearLeftPercent  >= 100 },
+                        ShowWhen = () => !masterBatteryOff && gearLeftPercent  >= 100 },
                 new() { Name="LED_GEAR_NOSE",    TypeKey="LED_GEAR_NOSE",    BasePos=new Point(2843, 1605), ZoomWidth=43, Img=ledGreenImg,
-                        ShowWhen = () => mainBusVolts >= 5.0 && gearNosePercent  >= 100 },
+                        ShowWhen = () => !masterBatteryOff && gearNosePercent  >= 100 },
                 new() { Name="LED_GEAR_RIGHT",   TypeKey="LED_GEAR_RIGHT",   BasePos=new Point(2918, 1740), ZoomWidth=43, Img=ledGreenImg,
-                        ShowWhen = () => mainBusVolts >= 5.0 && gearRightPercent >= 100 },
+                        ShowWhen = () => !masterBatteryOff && gearRightPercent >= 100 },
                 new() { Name="LED_GEAR_TRANSIT", TypeKey="LED_GEAR_TRANSIT", BasePos=new Point(2843, 1585), ZoomWidth=32, Img=ledRedImg,
-                        ShowWhen = () => mainBusVolts >= 5.0 &&
+                        ShowWhen = () => !masterBatteryOff &&
                                          ((gearLeftPercent  > 0 && gearLeftPercent  < 100) ||
                                           (gearNosePercent  > 0 && gearNosePercent  < 100) ||
                                           (gearRightPercent > 0 && gearRightPercent < 100)) },
@@ -2832,11 +2849,11 @@ namespace SimConnect3
             new() { Name="G3K_FLAPS_SW",  TypeKey="G3K Flaps SW",  BasePos=new Point(400, 400), ZoomWidth=217, Img=LoadOverlayImage("SW flaps.png") },
             // Gear LEDs — mateixa lògica que G1000, mides × 14/11.75
             new() { Name="G3K_LED_GEAR_LEFT",    TypeKey="G3K LED Gear Left",    BasePos=new Point(720,  1710), ZoomWidth=51, Img=ledGreenImg,
-                    ShowWhen = () => mainBusVolts >= 5.0 && gearLeftPercent  >= 100 },
+                    ShowWhen = () => !masterBatteryOff && gearLeftPercent  >= 100 },
             new() { Name="G3K_LED_GEAR_NOSE",    TypeKey="G3K LED Gear Nose",    BasePos=new Point(770,  1664), ZoomWidth=51, Img=ledGreenImg,
-                    ShowWhen = () => mainBusVolts >= 5.0 && gearNosePercent  >= 100 },
+                    ShowWhen = () => !masterBatteryOff && gearNosePercent  >= 100 },
             new() { Name="G3K_LED_GEAR_RIGHT",   TypeKey="G3K LED Gear Right",   BasePos=new Point(822,  1710), ZoomWidth=51, Img=ledGreenImg,
-                    ShowWhen = () => mainBusVolts >= 5.0 && gearRightPercent >= 100 },
+                    ShowWhen = () => !masterBatteryOff && gearRightPercent >= 100 },
             new() { Name="G3K_LED_DEICE_AIRFRAME", TypeKey="G3K LED Deice Airframe", BasePos=new Point(188, 1643), ZoomWidth=22, Img=ledGreenImg,
                     ShowWhen = () => _isDeiceAirframe >= 0.5 || _ltsTestActive },
             new() { Name="G3K_LED_DEICE_AIRFRAME2", TypeKey="G3K LED Deice Airframe2", BasePos=new Point(238, 1643), ZoomWidth=22, Img=ledGreenImg,
@@ -2852,13 +2869,13 @@ namespace SimConnect3
             new() { Name="G3K_PBRAKE_CK", TypeKey="G3K PBrake CK", BasePos=new Point(1010, 1640), ZoomWidth=260, ZoomHeight=130, PressVisualMs=0,
                     OnClick = () => { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PBRAKE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); pbMain.Invalidate(); } },
             new() { Name="G3K_LED_PBRAKE", TypeKey="G3K LED PBrake", BasePos=new Point(1280, 1620), ZoomWidth=50, Img=ledRedImg,
-                    ShowWhen = () => mainBusVolts >= 5.0 && pbrakeActive },
+                    ShowWhen = () => !masterBatteryOff && pbrakeActive },
             new() { Name="G3K_LGEAR_UP",  TypeKey="G3K LGear UP",  BasePos=new Point(890, 1590), ZoomWidth=118, ZoomHeight=70, PressVisualMs=0,
                     OnClick = () => { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_UP, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } },
             new() { Name="G3K_LGEAR_DN",  TypeKey="G3K LGear DN",  BasePos=new Point(890, 1750), ZoomWidth=118, ZoomHeight=70, PressVisualMs=0,
                     OnClick = () => { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_DN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } },
             new() { Name="G3K_LED_GEAR_TRANSIT", TypeKey="G3K LED Gear Transit", BasePos=new Point(770,  1601), ZoomWidth=47, Img=ledRedImg,
-                    ShowWhen = () => mainBusVolts >= 5.0 &&
+                    ShowWhen = () => !masterBatteryOff &&
                                      ((gearLeftPercent  > 0 && gearLeftPercent  < 100) ||
                                       (gearNosePercent  > 0 && gearNosePercent  < 100) ||
                                       (gearRightPercent > 0 && gearRightPercent < 100)) },
@@ -3391,8 +3408,9 @@ namespace SimConnect3
         }
 
         // Bomba de 3 posicions (0=HIGH/ON, 1=LOW/AUTO, 2=OFF) per avions sense esquema estàndard universal:
-        // Baron G58 (pump 1 i 2, via WASM propi SFS.FuelPumpN_High/Low/Off) i Cessna Caravan (només pump 1,
-        // via events natius de l'avió FUEL_PUMP_1_ON/AUTO/OFF, confirmats a Behaviors — sense WASM).
+        // Baron G58 (pump 1 i 2, via WASM propi SFS.FuelPumpN_High/Low/Off), Bonanza G36 (monomotor, només
+        // pump 1, mateixos events que la Baron — B:FUEL_Pump_1_High/_Low/_Off confirmat idèntic a Behaviors)
+        // i Cessna Caravan / Cirrus SR22 (només pump 1, via WASM SFS.FuelPump1_On/Auto/Off).
         // L'estat el porta la pròpia app segons els clics (direction: -1 = cap a HIGH/ON, +1 = cap a OFF),
         // NO depèn de cap lectura del simulador.
         private DateTime _lastPump1ClickUtc = DateTime.MinValue;
@@ -3409,15 +3427,25 @@ namespace SimConnect3
             int cur = pumpNum == 1 ? _fuelPump1State3 : _fuelPump2State3;
             int next = Math.Clamp(cur + direction, 0, 2);
             if (pumpNum == 1) _fuelPump1State3 = next; else _fuelPump2State3 = next;
-            if (IsCaravan() && pumpNum == 1)
+            if (UsesCaravanPumpScheme() && pumpNum == 1)
             {
                 // WASM propi: SFS.FuelPump1_On/Auto/Off (B:FUEL_PUMP_1_ON/_AUTO/_OFF) — confirmats via MobiFlight.
-                var caravanEvt = next switch
-                {
-                    0 => SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_ON,
-                    1 => SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_AUTO,
-                    _ => SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_OFF,
-                };
+                // A la Cirrus SR22 el mateix trio de events resulta en la posició física rotada 1 pas
+                // respecte a la Caravan (On->OFF visual, Auto->ON visual, Off->AUTO visual), així que
+                // per aquest avió es compensa enviant l'event contrari al que "tocaria" per l'estat local.
+                var caravanEvt = IsCirrusSR22()
+                    ? next switch
+                    {
+                        0 => SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_AUTO,
+                        1 => SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_OFF,
+                        _ => SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_ON,
+                    }
+                    : next switch
+                    {
+                        0 => SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_ON,
+                        1 => SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_AUTO,
+                        _ => SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_OFF,
+                    };
                 simconnect.TransmitClientEvent(0, caravanEvt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                 pbMain.Invalidate();
                 return;
@@ -3429,6 +3457,22 @@ namespace SimConnect3
                 _ => pumpNum == 1 ? SIMCONNECT_EVENTS.SFS_FUELPUMP1_OFF  : SIMCONNECT_EVENTS.SFS_FUELPUMP2_OFF,
             };
             simconnect.TransmitClientEvent(0, evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            if (IsBonanzaG36() && pumpNum == 1 && cur == 2 && next == 1)
+            {
+                // Bonanza G36: enviant "Low" des d'OFF, l'avió primer "salta" a HIGH (comportament propi del
+                // seu sistema de combustible, confirmat manualment des de Behaviors sense passar per l'app ni
+                // pel WASM). Enviant un segon "Low" DESPRÉS d'un petit marge real de temps (100ms, perquè
+                // l'avió assenti aquest primer canvi) sí que acaba baixant correctament a LOW — enviar-los
+                // exactament alhora no funciona. L'animació local de l'app només fa 1 pas (no es toca l'estat).
+                var bonanzaLowRetryTimer = new System.Windows.Forms.Timer { Interval = 100 };
+                bonanzaLowRetryTimer.Tick += (s, e2) =>
+                {
+                    bonanzaLowRetryTimer.Stop();
+                    bonanzaLowRetryTimer.Dispose();
+                    simconnect?.TransmitClientEvent(0, evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                };
+                bonanzaLowRetryTimer.Start();
+            }
             pbMain.Invalidate();
         }
 
@@ -3445,11 +3489,23 @@ namespace SimConnect3
             pbMain.Invalidate();
         }
 
-        // Cada vegada que es detecta la Cessna Caravan (monomotor, només pump 1), mateix mecanisme que la Baron.
+        // Cada vegada que es detecta la Cessna Caravan / Cirrus SR22 (monomotor, només pump 1), mateix mecanisme que la Baron.
         private void ForceCaravanFuelPumpOff()
         {
             if (simconnect == null) return;
-            simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            // Cirrus: l'event "On" és el que resulta en OFF visual (veure comentari a StepFuelPumpBaron).
+            var evt = IsCirrusSR22() ? SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_ON : SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_OFF;
+            simconnect.TransmitClientEvent(0, evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            _fuelPump1State3 = 2;
+            pbMain.Invalidate();
+        }
+
+        // Cada vegada que es detecta la Bonanza G36 (monomotor, només pump 1, mateix esquema HIGH/LOW/OFF
+        // que la Baron — reutilitza els mateixos events WASM SFS.FuelPump1_High/Low/Off).
+        private void ForceBonanzaFuelPumpOff()
+        {
+            if (simconnect == null) return;
+            simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_FUELPUMP1_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             _fuelPump1State3 = 2;
             pbMain.Invalidate();
         }
@@ -3547,6 +3603,10 @@ namespace SimConnect3
                 simconnect.OnRecvOpen += new SimConnect.RecvOpenEventHandler(Simconnect_OnRecvOpen);
                 simconnect.OnRecvQuit += new SimConnect.RecvQuitEventHandler(Simconnect_OnRecvQuit);
                 simconnect.OnRecvSimobjectData += new SimConnect.RecvSimobjectDataEventHandler(Simconnect_OnRecvSimobjectData);
+                simconnect.OnRecvException += (s, d) =>
+                {
+                    try { System.IO.File.AppendAllText("panelAIR1000_crash.txt", $"\r\n[SIMCONNECT EXCEPTION] {d.dwException}  (SendID={d.dwSendID} Index={d.dwIndex})"); } catch { }
+                };
 
                 //rotAIR exclisive mode GC*****************************************************************************************************************
                 //NAV Push
@@ -4296,7 +4356,6 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL PUMP SWITCH:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FLAPS NUM HANDLE POSITIONS", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FLAPS HANDLE INDEX", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "BRAKE PARKING POSITION", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GEAR HANDLE POSITION", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG LEFT MAGNETO:1",  "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG RIGHT MAGNETO:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -4463,6 +4522,13 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.AircraftTitle, "TITLE", null, SIMCONNECT_DATATYPE.STRING256, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<AircraftInfoStruct>(DEFINITIONS.AircraftTitle);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestAircraftTitle, DEFINITIONS.AircraftTitle, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SECOND, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // Parking brake — definició pròpia i petita (no dins Struct1): amb ~119 camps compartits,
+                // SimConnect deixava de reflectir bé els camps afegits al final. Confirmat amb un mini-programa
+                // de prova aïllat que BRAKE PARKING POSITION es llegeix perfectament sol.
+                simconnect.AddToDataDefinition(DEFINITIONS.ParkingBrakeRead, "BRAKE PARKING POSITION", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<ParkingBrakeStruct>(DEFINITIONS.ParkingBrakeRead);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestParkingBrake, DEFINITIONS.ParkingBrakeRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
             }
             catch (COMException ex)
@@ -4698,14 +4764,28 @@ namespace SimConnect3
                 var info = (AircraftInfoStruct)data.dwData[0];
                 string newTitle = info.title ?? "";
                 bool wasBaron = IsBaronG58();
-                bool wasCaravan = IsCaravan();
+                bool wasCaravanScheme = UsesCaravanPumpScheme();
+                bool wasBonanza = IsBonanzaG36();
                 _currentAircraftTitle = newTitle;
                 if (_aircraftTitleLbl != null && _aircraftTitleLbl.Text != newTitle)
                     _aircraftTitleLbl.Text = newTitle;
                 if (IsBaronG58() && !wasBaron)
                     ForceBaronFuelPumpsOff();
-                else if (IsCaravan() && !wasCaravan)
+                else if (UsesCaravanPumpScheme() && !wasCaravanScheme)
                     ForceCaravanFuelPumpOff();
+                else if (IsBonanzaG36() && !wasBonanza)
+                    ForceBonanzaFuelPumpOff();
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestParkingBrake)
+            {
+                var pb = (ParkingBrakeStruct)data.dwData[0];
+                bool newParkingbrake = (pb.value & 1) != 0;
+                if (newParkingbrake != pbrakeActive)
+                {
+                    pbrakeActive = newParkingbrake;
+                    pbMain.Invalidate();
+                }
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.Request1)
@@ -4731,7 +4811,7 @@ namespace SimConnect3
                 bool newPitotheat = (s1.read_pitotheat & 1) != 0;
                 bool newFuelpump1;
                 bool newFuelpump2;
-                if (_isMsfs2024 && (IsBaronG58() || IsCaravan()))
+                if (_isMsfs2024 && (IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()))
                 {
                     // Estat gestionat localment pels clics (StepFuelPumpBaron), no per lectura del simulador.
                     newFuelpump1 = _fuelPump1State3 != 2; // != OFF
@@ -4757,7 +4837,11 @@ namespace SimConnect3
                     lgearHandleUp = newGearHandleUp;
                     needsRepaint = true;
                 }
-                bool newParkingbrake = (s1.read_parking_brake & 1) != 0;
+                // El p.brake es llegeix ara amb una petita definició dedicada (veure REQUESTS.RequestParkingBrake)
+                // en lloc de dins d'aquest Struct1 — amb ~119 camps compartits en una sola data definition,
+                // SimConnect deixava de reflectir correctament els camps afegits al final (confirmat provant-ho
+                // aïllat amb un mini-programa: BRAKE PARKING POSITION i BRAKE PARKING INDICATOR llegien bé
+                // sols, però no dins d'aquest struct tan gran).
 
 
                 //System.Diagnostics.Debug.WriteLine($"DME SOUND raw={s1.dme_read}");
@@ -4955,12 +5039,6 @@ namespace SimConnect3
                 if (newFuelpump2 != fuelpump2Active)
                 {
                     fuelpump2Active = newFuelpump2;
-
-                    needsRepaint = true;
-                }
-                if (newParkingbrake != pbrakeActive)
-                {
-                    pbrakeActive = newParkingbrake;
 
                     needsRepaint = true;
                 }
