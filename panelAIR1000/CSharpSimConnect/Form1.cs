@@ -220,10 +220,18 @@ namespace SimConnect3
             _currentAircraftTitle.IndexOf("Bonanza", StringComparison.OrdinalIgnoreCase) >= 0 ||
             _currentAircraftTitle.IndexOf("G36", StringComparison.OrdinalIgnoreCase) >= 0;
 
+        bool IsDA62() =>
+            _currentAircraftTitle.IndexOf("DA62", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            _currentAircraftTitle.IndexOf("DA 62", StringComparison.OrdinalIgnoreCase) >= 0;
+
         // Estat de 3 posicions (0=HIGH, 1=LOW, 2=OFF) per bombes que ho necessiten (Baron G58)
         int _fuelPump1State3 = 0;
         int _fuelPump2State3 = 0;
         bool pbrakeActive;
+        double _lastFuelSelLeftDebugValue = double.MinValue; // temporal, per diagnosticar la lectura del selector esquerre (veure Output/Debug de VS)
+        DateTime _fuelSel1IgnoreFollowUntil = DateTime.MinValue; // evita el "rebot" quan la lectura encara no ha seguit el clic
+        DateTime _fuelSel2IgnoreFollowUntil = DateTime.MinValue;
+        double _lastDA62TestDebugValue = double.MinValue; // temporal, per provar si B:FUEL_VALVE_LEFT es pot llegir directe (veure Output/Debug de VS)
         bool masterBatteryOff;
         bool avionics1Off;
         bool avionics2Off;
@@ -572,6 +580,10 @@ namespace SimConnect3
             LtsTestWrite,
             AircraftTitle,
             ParkingBrakeRead,
+            BatteryVoltageRead,
+            FuelSelLeftRead,
+            FuelSelRightRead,
+            DA62FuelValveLeftTest,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -611,11 +623,27 @@ namespace SimConnect3
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct ParkingBrakeStruct { public int value; } // BRAKE PARKING POSITION (Bool)
 
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct BatteryVoltageStruct { public double value; } // ELECTRICAL BATTERY VOLTAGE (Volts) — "ELECTRICAL MAIN BUS VOLTAGE" no funciona en aquest avió (sempre 0)
+
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct FuelSelLeftStruct { public double value; } // L:FUEL_Switch_Cutoff_Crossfeed_1 (0=Off, 1=On, 2=Xfeed) — Baron G58. El x100 és només l'animació, no el valor cru.
+
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct FuelSelRightStruct { public double value; } // L:FUEL_Switch_Cutoff_Crossfeed_2 (0=Off, 1=On, 2=Xfeed) — Baron G58
+
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct DA62FuelValveTestStruct { public double value; } // TEMPORAL: prova de lectura directa de B:FUEL_VALVE_LEFT (DA-62)
+
         enum REQUESTS
         {
             Request1,
             RequestAircraftTitle,
             RequestParkingBrake,
+            RequestBatteryVoltage,
+            RequestFuelSelLeft,
+            RequestFuelSelRight,
+            RequestDA62FuelValveLeftTest,
         }
         enum SIMCONNECT_EVENTS
         {
@@ -809,6 +837,16 @@ namespace SimConnect3
             SFS_CARAVAN_FUELPUMP1_ON,
             SFS_CARAVAN_FUELPUMP1_AUTO,
             SFS_CARAVAN_FUELPUMP1_OFF,
+            SFS_FUELSEL_LEFT_OFF,
+            SFS_FUELSEL_LEFT_ON,
+            SFS_FUELSEL_LEFT_XFEED,
+            SFS_FUELSEL_RIGHT_OFF,
+            SFS_FUELSEL_RIGHT_ON,
+            SFS_FUELSEL_RIGHT_XFEED,
+            DA62_FUELVALVE_LEFT_SET,
+            SFS_DA62_FUELVALVE_LEFT_ON,
+            SFS_DA62_FUELVALVE_LEFT_CROSS,
+            SFS_DA62_FUELVALVE_LEFT_OFF,
             SWITCH_PBRAKE,
             MASTER_BATTERY_ON,
             MASTER_BATTERY_OFF,
@@ -1242,7 +1280,6 @@ namespace SimConnect3
             public double gear_center;
             public double gear_left;
             public double gear_right;
-            public double main_bus_volts;
 
             // INT (INT32)
             public int xpdr_code;
@@ -2329,7 +2366,19 @@ namespace SimConnect3
                 OnClick = () => {
                     if (fuel1Pos <= 0) return;
                     int newPos = fuel1Pos - 1;
-                    if (numEngines >= 2) {
+                    if (_isMsfs2024 && IsDA62()) {
+                        // DA-62: WASM propi (B:FUEL_VALVE_LEFT) — l'event clàssic no fa res des de fora.
+                        // Local 0=Off,1=On,2=Xfeed → B:FUEL_VALVE_LEFT 0=On,1=Cross,2=Off (ordre diferent).
+                        var da62Evt = newPos switch { 0 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_CROSS };
+                        simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        fuel1Pos = newPos;
+                        _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (_isMsfs2024 && numEngines >= 2) {
+                        var evt = newPos switch { 0 => SIMCONNECT_EVENTS.SFS_FUELSEL_LEFT_OFF, 1 => SIMCONNECT_EVENTS.SFS_FUELSEL_LEFT_ON, _ => SIMCONNECT_EVENTS.SFS_FUELSEL_LEFT_XFEED };
+                        simconnect?.TransmitClientEvent(0, evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        fuel1Pos = newPos;
+                        _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (numEngines >= 2) {
                         uint[] fuel1Enum = { 0, 2, 3 };
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, fuel1Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     } else {
@@ -2342,7 +2391,19 @@ namespace SimConnect3
                 OnClick = () => {
                     if (fuel1Pos >= 2) return;
                     int newPos = fuel1Pos + 1;
-                    if (numEngines >= 2) {
+                    if (_isMsfs2024 && IsDA62()) {
+                        // DA-62: WASM propi (B:FUEL_VALVE_LEFT) — l'event clàssic no fa res des de fora.
+                        // Local 0=Off,1=On,2=Xfeed → B:FUEL_VALVE_LEFT 0=On,1=Cross,2=Off (ordre diferent).
+                        var da62Evt = newPos switch { 0 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_CROSS };
+                        simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        fuel1Pos = newPos;
+                        _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (_isMsfs2024 && numEngines >= 2) {
+                        var evt = newPos switch { 0 => SIMCONNECT_EVENTS.SFS_FUELSEL_LEFT_OFF, 1 => SIMCONNECT_EVENTS.SFS_FUELSEL_LEFT_ON, _ => SIMCONNECT_EVENTS.SFS_FUELSEL_LEFT_XFEED };
+                        simconnect?.TransmitClientEvent(0, evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        fuel1Pos = newPos;
+                        _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (numEngines >= 2) {
                         uint[] fuel1Enum = { 0, 2, 3 };
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, fuel1Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     } else {
@@ -2356,7 +2417,13 @@ namespace SimConnect3
                 OnClick = () => {
                     if (fuel2Pos <= 0) return;
                     int newPos = fuel2Pos - 1;
-                    if (numEngines >= 2) {
+                    if (_isMsfs2024 && numEngines >= 2) {
+                        // pos: 0=Xfeed, 1=On, 2=Off (ordre invertit respecte al selector esquerre)
+                        var evt = newPos switch { 2 => SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_OFF, 1 => SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_ON, _ => SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_XFEED };
+                        simconnect?.TransmitClientEvent(0, evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        fuel2Pos = newPos;
+                        _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (numEngines >= 2) {
                         uint[] fuel2Enum = { 13, 3, 0 };
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_2_SET, fuel2Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     } else {
@@ -2369,7 +2436,12 @@ namespace SimConnect3
                 OnClick = () => {
                     if (fuel2Pos >= 2) return;
                     int newPos = fuel2Pos + 1;
-                    if (numEngines >= 2) {
+                    if (_isMsfs2024 && IsBaronG58()) {
+                        var evt = newPos switch { 2 => SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_OFF, 1 => SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_ON, _ => SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_XFEED };
+                        simconnect?.TransmitClientEvent(0, evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        fuel2Pos = newPos;
+                        _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (numEngines >= 2) {
                         uint[] fuel2Enum = { 13, 3, 0 };
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_2_SET, fuel2Enum[newPos], SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     } else {
@@ -2549,16 +2621,16 @@ namespace SimConnect3
                 new() { Name="SW_ALT2", TypeKey="SW altgen2", BasePos=new Point(1620, 1280), ZoomWidth=100,
                         Img=swDnRedImg, ShowWhen = () => altGen2Off, OnClick=null },
                 new() { Name="LED_PBRAKE", TypeKey="LED_PBRAKE", BasePos=new Point(2918, 1755), ZoomWidth=32, Img=ledRedImg,
-                        ShowWhen = () => !masterBatteryOff && pbrakeActive },
+                        ShowWhen = () => mainBusVolts >= 5.0 && pbrakeActive },
                 // GEAR LEDs
                 new() { Name="LED_GEAR_LEFT",    TypeKey="LED_GEAR_LEFT",    BasePos=new Point(2749, 1740), ZoomWidth=43, Img=ledGreenImg,
-                        ShowWhen = () => !masterBatteryOff && gearLeftPercent  >= 100 },
+                        ShowWhen = () => mainBusVolts >= 5.0 && gearLeftPercent  >= 100 },
                 new() { Name="LED_GEAR_NOSE",    TypeKey="LED_GEAR_NOSE",    BasePos=new Point(2843, 1605), ZoomWidth=43, Img=ledGreenImg,
-                        ShowWhen = () => !masterBatteryOff && gearNosePercent  >= 100 },
+                        ShowWhen = () => mainBusVolts >= 5.0 && gearNosePercent  >= 100 },
                 new() { Name="LED_GEAR_RIGHT",   TypeKey="LED_GEAR_RIGHT",   BasePos=new Point(2918, 1740), ZoomWidth=43, Img=ledGreenImg,
-                        ShowWhen = () => !masterBatteryOff && gearRightPercent >= 100 },
+                        ShowWhen = () => mainBusVolts >= 5.0 && gearRightPercent >= 100 },
                 new() { Name="LED_GEAR_TRANSIT", TypeKey="LED_GEAR_TRANSIT", BasePos=new Point(2843, 1585), ZoomWidth=32, Img=ledRedImg,
-                        ShowWhen = () => !masterBatteryOff &&
+                        ShowWhen = () => mainBusVolts >= 5.0 &&
                                          ((gearLeftPercent  > 0 && gearLeftPercent  < 100) ||
                                           (gearNosePercent  > 0 && gearNosePercent  < 100) ||
                                           (gearRightPercent > 0 && gearRightPercent < 100)) },
@@ -2849,11 +2921,11 @@ namespace SimConnect3
             new() { Name="G3K_FLAPS_SW",  TypeKey="G3K Flaps SW",  BasePos=new Point(400, 400), ZoomWidth=217, Img=LoadOverlayImage("SW flaps.png") },
             // Gear LEDs — mateixa lògica que G1000, mides × 14/11.75
             new() { Name="G3K_LED_GEAR_LEFT",    TypeKey="G3K LED Gear Left",    BasePos=new Point(720,  1710), ZoomWidth=51, Img=ledGreenImg,
-                    ShowWhen = () => !masterBatteryOff && gearLeftPercent  >= 100 },
+                    ShowWhen = () => mainBusVolts >= 5.0 && gearLeftPercent  >= 100 },
             new() { Name="G3K_LED_GEAR_NOSE",    TypeKey="G3K LED Gear Nose",    BasePos=new Point(770,  1664), ZoomWidth=51, Img=ledGreenImg,
-                    ShowWhen = () => !masterBatteryOff && gearNosePercent  >= 100 },
+                    ShowWhen = () => mainBusVolts >= 5.0 && gearNosePercent  >= 100 },
             new() { Name="G3K_LED_GEAR_RIGHT",   TypeKey="G3K LED Gear Right",   BasePos=new Point(822,  1710), ZoomWidth=51, Img=ledGreenImg,
-                    ShowWhen = () => !masterBatteryOff && gearRightPercent >= 100 },
+                    ShowWhen = () => mainBusVolts >= 5.0 && gearRightPercent >= 100 },
             new() { Name="G3K_LED_DEICE_AIRFRAME", TypeKey="G3K LED Deice Airframe", BasePos=new Point(188, 1643), ZoomWidth=22, Img=ledGreenImg,
                     ShowWhen = () => _isDeiceAirframe >= 0.5 || _ltsTestActive },
             new() { Name="G3K_LED_DEICE_AIRFRAME2", TypeKey="G3K LED Deice Airframe2", BasePos=new Point(238, 1643), ZoomWidth=22, Img=ledGreenImg,
@@ -2869,13 +2941,13 @@ namespace SimConnect3
             new() { Name="G3K_PBRAKE_CK", TypeKey="G3K PBrake CK", BasePos=new Point(1010, 1640), ZoomWidth=260, ZoomHeight=130, PressVisualMs=0,
                     OnClick = () => { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PBRAKE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); pbMain.Invalidate(); } },
             new() { Name="G3K_LED_PBRAKE", TypeKey="G3K LED PBrake", BasePos=new Point(1280, 1620), ZoomWidth=50, Img=ledRedImg,
-                    ShowWhen = () => !masterBatteryOff && pbrakeActive },
+                    ShowWhen = () => mainBusVolts >= 5.0 && pbrakeActive },
             new() { Name="G3K_LGEAR_UP",  TypeKey="G3K LGear UP",  BasePos=new Point(890, 1590), ZoomWidth=118, ZoomHeight=70, PressVisualMs=0,
                     OnClick = () => { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_UP, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } },
             new() { Name="G3K_LGEAR_DN",  TypeKey="G3K LGear DN",  BasePos=new Point(890, 1750), ZoomWidth=118, ZoomHeight=70, PressVisualMs=0,
                     OnClick = () => { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_DN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } },
             new() { Name="G3K_LED_GEAR_TRANSIT", TypeKey="G3K LED Gear Transit", BasePos=new Point(770,  1601), ZoomWidth=47, Img=ledRedImg,
-                    ShowWhen = () => !masterBatteryOff &&
+                    ShowWhen = () => mainBusVolts >= 5.0 &&
                                      ((gearLeftPercent  > 0 && gearLeftPercent  < 100) ||
                                       (gearNosePercent  > 0 && gearNosePercent  < 100) ||
                                       (gearRightPercent > 0 && gearRightPercent < 100)) },
@@ -4222,6 +4294,34 @@ namespace SimConnect3
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_OFF, "SFS.FuelPump1_Off");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_CARAVAN_FUELPUMP1_OFF, false);
 
+                // Baron G58 (MSFS2024) — selectors de combustible esquerre/dret via WASM propi, RPN confirmat
+                // amb MobiFlight: "{estat} {costat} (>K:2:FUELSYSTEM_JUNCTION_SET)" — 1=Off, 2=On, 3=Xfeed;
+                // costat 1=esquerre, 2=dret. La SimVar clàssica "FUEL TANK SELECTOR" no reflecteix aquest sistema.
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELSEL_LEFT_OFF, "SFS.FuelSelLeft_Off");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELSEL_LEFT_OFF, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELSEL_LEFT_ON, "SFS.FuelSelLeft_On");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELSEL_LEFT_ON, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELSEL_LEFT_XFEED, "SFS.FuelSelLeft_Xfeed");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELSEL_LEFT_XFEED, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_OFF, "SFS.FuelSelRight_Off");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_OFF, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_ON, "SFS.FuelSelRight_On");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_ON, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_XFEED, "SFS.FuelSelRight_Xfeed");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_XFEED, false);
+
+                // DA-62 — l'event clàssic "FUEL_VALVE_LEFT_SET" (Input Event alias) NO fa res des de fora,
+                // confirmat en vol — mateix problema que ja vam trobar amb el Caravan. Es manté mapejat
+                // per si mai cal, però l'app fa servir el WASM (B:FUEL_VALVE_LEFT) de sota.
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.DA62_FUELVALVE_LEFT_SET, "FUEL_VALVE_LEFT_SET");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.DA62_FUELVALVE_LEFT_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_ON, "SFS.FuelValveLeft_On");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_ON, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_CROSS, "SFS.FuelValveLeft_Cross");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_CROSS, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, "SFS.FuelValveLeft_Off");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, false);
+
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, "FLAPS_DECR");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, false);
 
@@ -4325,7 +4425,6 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GEAR CENTER POSITION", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GEAR LEFT POSITION", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GEAR right POSITION", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "ELECTRICAL MAIN BUS VOLTAGE", "Volts", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
 
                 // INT (INT32)
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "TRANSPONDER CODE:1", "Enum", SIMCONNECT_DATATYPE.INT32, 0.0f, SimConnect.SIMCONNECT_UNUSED);
@@ -4529,6 +4628,31 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.ParkingBrakeRead, "BRAKE PARKING POSITION", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<ParkingBrakeStruct>(DEFINITIONS.ParkingBrakeRead);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestParkingBrake, DEFINITIONS.ParkingBrakeRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // Voltatge de bateria — "ELECTRICAL MAIN BUS VOLTAGE" sempre torna 0 en aquest avió, tot i
+                // tenir bateria; "ELECTRICAL BATTERY VOLTAGE" sí que reflecteix el valor real (confirmat amb
+                // el mateix mini-programa de prova: ~24V amb bateria bé, cau a 0 en apagar-la).
+                simconnect.AddToDataDefinition(DEFINITIONS.BatteryVoltageRead, "ELECTRICAL BATTERY VOLTAGE", "Volts", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<BatteryVoltageStruct>(DEFINITIONS.BatteryVoltageRead);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestBatteryVoltage, DEFINITIONS.BatteryVoltageRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // Selector combustible esquerre (Baron G58, 2024) — L:FUEL_Switch_Cutoff_Crossfeed_1 és la
+                // variable real que mou l'animació del switch (confirmat a Behaviors i en viu: valor cru
+                // 0=Off, 1=On, 2=Xfeed). Lectura real, a diferència de les bombes.
+                simconnect.AddToDataDefinition(DEFINITIONS.FuelSelLeftRead, "L:FUEL_Switch_Cutoff_Crossfeed_1", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<FuelSelLeftStruct>(DEFINITIONS.FuelSelLeftRead);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestFuelSelLeft, DEFINITIONS.FuelSelLeftRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // Selector combustible dret — mateix esquema, L:FUEL_Switch_Cutoff_Crossfeed_2.
+                simconnect.AddToDataDefinition(DEFINITIONS.FuelSelRightRead, "L:FUEL_Switch_Cutoff_Crossfeed_2", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<FuelSelRightStruct>(DEFINITIONS.FuelSelRightRead);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestFuelSelRight, DEFINITIONS.FuelSelRightRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // TEMPORAL: prova si es pot llegir un B:Var directament per SimConnect (sense WASM), com ja
+                // fem amb els L:Vars. Només log al Debug Output, no toca cap estat de l'app.
+                simconnect.AddToDataDefinition(DEFINITIONS.DA62FuelValveLeftTest, "B:FUEL_VALVE_LEFT", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<DA62FuelValveTestStruct>(DEFINITIONS.DA62FuelValveLeftTest);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestDA62FuelValveLeftTest, DEFINITIONS.DA62FuelValveLeftTest, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
             }
             catch (COMException ex)
@@ -4788,6 +4912,54 @@ namespace SimConnect3
                 }
                 return;
             }
+            if (data.dwRequestID == (uint)REQUESTS.RequestBatteryVoltage)
+            {
+                var bv = (BatteryVoltageStruct)data.dwData[0];
+                if (Math.Abs(bv.value - mainBusVolts) > 0.05)
+                {
+                    mainBusVolts = bv.value;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestFuelSelLeft)
+            {
+                var fsl = (FuelSelLeftStruct)data.dwData[0];
+                if (Math.Abs(fsl.value - _lastFuelSelLeftDebugValue) > 0.5)
+                {
+                    _lastFuelSelLeftDebugValue = fsl.value;
+                    System.Diagnostics.Debug.WriteLine($"[FUELSEL DEBUG] L:FUEL_Switch_Cutoff_Crossfeed_1 = {fsl.value}");
+                }
+                int newFuel1PosFromRead = fsl.value < 0.5 ? 0 : (fsl.value < 1.5 ? 1 : 2);
+                if (newFuel1PosFromRead != fuel1Pos && DateTime.UtcNow >= _fuelSel1IgnoreFollowUntil)
+                {
+                    fuel1Pos = newFuel1PosFromRead;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestFuelSelRight)
+            {
+                var fsr = (FuelSelRightStruct)data.dwData[0];
+                // Aquesta variable ja ve en l'ordre físic del nostre selector (0=Xfeed, 1=On, 2=Off) — sense invertir.
+                int newFuel2PosFromRead = fsr.value < 0.5 ? 0 : (fsr.value < 1.5 ? 1 : 2);
+                if (newFuel2PosFromRead != fuel2Pos && DateTime.UtcNow >= _fuelSel2IgnoreFollowUntil)
+                {
+                    fuel2Pos = newFuel2PosFromRead;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestDA62FuelValveLeftTest)
+            {
+                var dv = (DA62FuelValveTestStruct)data.dwData[0];
+                if (Math.Abs(dv.value - _lastDA62TestDebugValue) > 0.5)
+                {
+                    _lastDA62TestDebugValue = dv.value;
+                    System.Diagnostics.Debug.WriteLine($"[DA62 TEST DEBUG] B:FUEL_VALVE_LEFT = {dv.value}");
+                }
+                return;
+            }
             if (data.dwRequestID == (uint)REQUESTS.Request1)
             {
                 Struct1 s1 = (Struct1)data.dwData[0];
@@ -4830,7 +5002,6 @@ namespace SimConnect3
                 gearNosePercent = (int)s1.gear_center;
                 gearLeftPercent = (int)s1.gear_left;
                 gearRightPercent = (int)s1.gear_right;
-                mainBusVolts = s1.main_bus_volts;
                 bool newGearHandleUp = (s1.gear_handle & 1) == 0; // 0=UP, 1=DN
                 if (newGearHandleUp != lgearHandleUp)
                 {
@@ -5097,7 +5268,17 @@ namespace SimConnect3
 
                 int newFuel1Pos, newFuel2Pos;
 
-                if (numEngines >= 2)
+                if (_isMsfs2024 && numEngines >= 2)
+                {
+                    // Bimotors MSFS2024: estat actualitzat pels handlers dedicats RequestFuelSelLeft/Right
+                    // (L:FUEL_Switch_Cutoff_Crossfeed_1/_2) — la SimVar "FUEL TANK SELECTOR" no reflecteix
+                    // el sistema de junctions (FUELSYSTEM_JUNCTION_SET). Confirmat al Baron G58; si un altre
+                    // bimotor 2024 no es sincronitza bé, probablement necessita el seu propi nom de L:Var
+                    // i/o número de junction — no assumir que són els mateixos sense verificar-ho.
+                    newFuel1Pos = fuel1Pos;
+                    newFuel2Pos = fuel2Pos;
+                }
+                else if (numEngines >= 2)
                 {
                     // TWIN ENGINE — selectors independents
                     if      (s1.fuel_selector_1 == 0 || s1.fuel_selector_1 == 20) newFuel1Pos = 0; // OFF
