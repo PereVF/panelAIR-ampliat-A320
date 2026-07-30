@@ -224,14 +224,23 @@ namespace SimConnect3
             _currentAircraftTitle.IndexOf("DA62", StringComparison.OrdinalIgnoreCase) >= 0 ||
             _currentAircraftTitle.IndexOf("DA 62", StringComparison.OrdinalIgnoreCase) >= 0;
 
+        // C408 SkyCourier: un sol selector FUEL_TRANSFER (Left/Off/Right), no selectors independents.
+        // PROVA: FUELSYSTEM_PUMP_ON/OFF són events SimConnect estàndard d'1 sol paràmetre (l'índex de
+        // bomba), a diferència de FUELSYSTEM_VALVE_SET/JUNCTION_SET/TRIGGER_SET (2 paràmetres, per això
+        // calia WASM). Si això funciona, NO cal WASM per aquest avió.
+        bool IsC408() =>
+            _currentAircraftTitle.IndexOf("C408", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            _currentAircraftTitle.IndexOf("SkyCourier", StringComparison.OrdinalIgnoreCase) >= 0;
+
         // Estat de 3 posicions (0=HIGH, 1=LOW, 2=OFF) per bombes que ho necessiten (Baron G58)
         int _fuelPump1State3 = 0;
         int _fuelPump2State3 = 0;
         bool pbrakeActive;
         double _lastFuelSelLeftDebugValue = double.MinValue; // temporal, per diagnosticar la lectura del selector esquerre (veure Output/Debug de VS)
+        double _propRpm1 = 0; // PROP RPM:1 — usat per sincronitzar el selector de combustible de la DA-62
+        double _propRpm2 = 0; // PROP RPM:2 — idem, motor dret
         DateTime _fuelSel1IgnoreFollowUntil = DateTime.MinValue; // evita el "rebot" quan la lectura encara no ha seguit el clic
         DateTime _fuelSel2IgnoreFollowUntil = DateTime.MinValue;
-        double _lastDA62TestDebugValue = double.MinValue; // temporal, per provar si B:FUEL_VALVE_LEFT es pot llegir directe (veure Output/Debug de VS)
         bool masterBatteryOff;
         bool avionics1Off;
         bool avionics2Off;
@@ -583,7 +592,8 @@ namespace SimConnect3
             BatteryVoltageRead,
             FuelSelLeftRead,
             FuelSelRightRead,
-            DA62FuelValveLeftTest,
+            PropRpm1Read,
+            PropRpm2Read,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -633,7 +643,9 @@ namespace SimConnect3
         struct FuelSelRightStruct { public double value; } // L:FUEL_Switch_Cutoff_Crossfeed_2 (0=Off, 1=On, 2=Xfeed) — Baron G58
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
-        struct DA62FuelValveTestStruct { public double value; } // TEMPORAL: prova de lectura directa de B:FUEL_VALVE_LEFT (DA-62)
+        struct PropRpm1Struct { public double value; } // A:PROP RPM:1,Rpm — sincronització DA-62 (RPM>50 => ON)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct PropRpm2Struct { public double value; } // A:PROP RPM:2,Rpm — sincronització DA-62, motor dret
 
         enum REQUESTS
         {
@@ -643,7 +655,8 @@ namespace SimConnect3
             RequestBatteryVoltage,
             RequestFuelSelLeft,
             RequestFuelSelRight,
-            RequestDA62FuelValveLeftTest,
+            RequestPropRpm1,
+            RequestPropRpm2,
         }
         enum SIMCONNECT_EVENTS
         {
@@ -847,6 +860,9 @@ namespace SimConnect3
             SFS_DA62_FUELVALVE_LEFT_ON,
             SFS_DA62_FUELVALVE_LEFT_CROSS,
             SFS_DA62_FUELVALVE_LEFT_OFF,
+            SFS_DA62_FUELVALVE_RIGHT_ON,
+            SFS_DA62_FUELVALVE_RIGHT_CROSS,
+            SFS_DA62_FUELVALVE_RIGHT_OFF,
             SWITCH_PBRAKE,
             MASTER_BATTERY_ON,
             MASTER_BATTERY_OFF,
@@ -2364,6 +2380,17 @@ namespace SimConnect3
             // SW_FUEL1 — left and right areas
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-LEFT", BasePos=new Point(1620, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
+                    if (_isMsfs2024 && IsC408()) {
+                        // C408: un sol interruptor FUEL_TRANSFER físic, representat per 2 selectors a l'app.
+                        // Aquest (esquerre) només es mou entre ON(1) i CROSSFEED(2) — mai OFF(0).
+                        if (fuel1Pos == 2) {
+                            fuel1Pos = 1;
+                            fuel2Pos = 1;
+                            TransmitC408FuelTransfer(1); // neutre (cap transferència)
+                            pbMain.Invalidate();
+                        }
+                        return;
+                    }
                     if (fuel1Pos <= 0) return;
                     int newPos = fuel1Pos - 1;
                     if (_isMsfs2024 && IsDA62()) {
@@ -2389,6 +2416,15 @@ namespace SimConnect3
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-RIGHT", BasePos=new Point(1720, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
+                    if (_isMsfs2024 && IsC408()) {
+                        if (fuel1Pos == 1) {
+                            fuel1Pos = 2;
+                            fuel2Pos = 1; // l'altre selector torna/es queda a ON
+                            TransmitC408FuelTransfer(0); // comanda física LEFT
+                            pbMain.Invalidate();
+                        }
+                        return;
+                    }
                     if (fuel1Pos >= 2) return;
                     int newPos = fuel1Pos + 1;
                     if (_isMsfs2024 && IsDA62()) {
@@ -2413,9 +2449,25 @@ namespace SimConnect3
             // SW_FUEL2 — left and right areas
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-LEFT", BasePos=new Point(2120, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
+                    if (_isMsfs2024 && IsC408()) {
+                        // Selector dret: només es mou entre CROSSFEED(0) i ON(1) — mai OFF(2).
+                        if (fuel2Pos == 1) {
+                            fuel2Pos = 0;
+                            fuel1Pos = 1; // l'altre selector torna/es queda a ON
+                            TransmitC408FuelTransfer(2); // comanda física RIGHT
+                            pbMain.Invalidate();
+                        }
+                        return;
+                    }
                     if (fuel2Pos <= 0) return;
                     int newPos = fuel2Pos - 1;
-                    if (_isMsfs2024 && numEngines >= 2) {
+                    if (_isMsfs2024 && IsDA62()) {
+                        // DA-62: mateix mecanisme que l'esquerra, índex 2 (K:2:FUELSYSTEM_TRIGGER_SET/VALVE_SET). Confirmat.
+                        var da62Evt = newPos switch { 2 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_CROSS };
+                        simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        fuel2Pos = newPos;
+                        _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (_isMsfs2024 && numEngines >= 2) {
                         // pos: 0=Xfeed, 1=On, 2=Off (ordre invertit respecte al selector esquerre)
                         var evt = newPos switch { 2 => SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_OFF, 1 => SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_ON, _ => SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_XFEED };
                         simconnect?.TransmitClientEvent(0, evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
@@ -2432,9 +2484,23 @@ namespace SimConnect3
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-RIGHT", BasePos=new Point(2220, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
+                    if (_isMsfs2024 && IsC408()) {
+                        if (fuel2Pos == 0) {
+                            fuel2Pos = 1;
+                            fuel1Pos = 1;
+                            TransmitC408FuelTransfer(1); // neutre (cap transferència)
+                            pbMain.Invalidate();
+                        }
+                        return;
+                    }
                     if (fuel2Pos >= 2) return;
                     int newPos = fuel2Pos + 1;
-                    if (_isMsfs2024 && IsBaronG58()) {
+                    if (_isMsfs2024 && IsDA62()) {
+                        var da62Evt = newPos switch { 2 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_CROSS };
+                        simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        fuel2Pos = newPos;
+                        _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (_isMsfs2024 && IsBaronG58()) {
                         var evt = newPos switch { 2 => SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_OFF, 1 => SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_ON, _ => SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_XFEED };
                         simconnect?.TransmitClientEvent(0, evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         fuel2Pos = newPos;
@@ -3549,6 +3615,54 @@ namespace SimConnect3
         // Cada vegada que es detecta la Baron G58 (a l'engegar l'app o en canviar-hi des d'un altre avió),
         // forcem les 2 bombes a OFF a MSFS i sincronitzem l'estat/animació locals, per garantir que
         // app i simulador comencen sempre alineats sense necessitat de llegir cap variable.
+        // Cada vegada que es detecta la DA-62 (a l'engegar l'app o en canviar-hi des d'un altre avió),
+        // com que no podem llegir la posició real del selector (ni B: ni O: es poden llegir per aquesta
+        // vàlvula), l'estimem per les RPM del motor corresponent: >50 = ON, <=50 = OFF. Forcem l'estat
+        // real a MSFS (com ForceBaronFuelPumpsOff) i sincronitzem la posició/animació local.
+        private void SyncDA62FuelValvesFromRpm()
+        {
+            if (simconnect == null) return;
+            fuel1Pos = _propRpm1 > 50 ? 1 : 0;
+            fuel2Pos = _propRpm2 > 50 ? 1 : 2; // fuel2Pos: 0=Xfeed, 1=On, 2=Off (invertit respecte fuel1Pos)
+            simconnect.TransmitClientEvent(0, fuel1Pos == 1 ? SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_ON : SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            simconnect.TransmitClientEvent(0, fuel2Pos == 1 ? SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_ON : SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            pbMain.Invalidate();
+        }
+
+        // Cada vegada que es detecta la C408 (a l'engegar l'app o en canviar-hi des d'un altre avió):
+        // l'estat normal real del FUEL_TRANSFER és la posició central OFF (sense transferència, cada
+        // motor amb la seva pròpia bomba) — forcem aquesta posició a MSFS i sincronitzem la local.
+        private void ForceC408FuelTransferOff()
+        {
+            fuel1Pos = 1;
+            fuel2Pos = 1;
+            TransmitC408FuelTransfer(1);
+            pbMain.Invalidate();
+        }
+
+        // C408 SkyCourier — FUEL_TRANSFER: pos 0=Left, 1=Off, 2=Right. Reprodueix la fórmula "Set" de
+        // Behaviors: idx3/idx4 són les 2 bombes de transferència. PROVA: events directes, sense WASM.
+        private void TransmitC408FuelTransfer(int pos)
+        {
+            System.Diagnostics.Debug.WriteLine($"[C408 DEBUG] TransmitC408FuelTransfer cridat, pos={pos}, simconnect null? {simconnect == null}");
+            if (simconnect == null) return;
+            switch (pos)
+            {
+                case 0: // LEFT
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUELSYSTEM_PUMP_OFF, 3, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUELSYSTEM_PUMP_ON, 4, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    break;
+                case 2: // RIGHT
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUELSYSTEM_PUMP_ON, 3, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUELSYSTEM_PUMP_OFF, 4, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    break;
+                default: // OFF (1)
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUELSYSTEM_PUMP_OFF, 3, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUELSYSTEM_PUMP_OFF, 4, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    break;
+            }
+        }
+
         private void ForceBaronFuelPumpsOff()
         {
             if (simconnect == null) return;
@@ -4319,6 +4433,12 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_CROSS, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, "SFS.FuelValveLeft_Off");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_ON, "SFS.FuelValveRight_On");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_ON, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_CROSS, "SFS.FuelValveRight_Cross");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_CROSS, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, "SFS.FuelValveRight_Off");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, false);
 
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, "FLAPS_DECR");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, false);
@@ -4646,11 +4766,14 @@ namespace SimConnect3
                 simconnect.RegisterDataDefineStruct<FuelSelRightStruct>(DEFINITIONS.FuelSelRightRead);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestFuelSelRight, DEFINITIONS.FuelSelRightRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
-                // TEMPORAL: prova si es pot llegir un B:Var directament per SimConnect (sense WASM), com ja
-                // fem amb els L:Vars. Només log al Debug Output, no toca cap estat de l'app.
-                simconnect.AddToDataDefinition(DEFINITIONS.DA62FuelValveLeftTest, "B:FUEL_VALVE_LEFT", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.RegisterDataDefineStruct<DA62FuelValveTestStruct>(DEFINITIONS.DA62FuelValveLeftTest);
-                simconnect.RequestDataOnSimObject(REQUESTS.RequestDA62FuelValveLeftTest, DEFINITIONS.DA62FuelValveLeftTest, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+                // PROP RPM:1/2 — per la sincronització del selector de combustible de la DA-62 (RPM>50 => ON).
+                simconnect.AddToDataDefinition(DEFINITIONS.PropRpm1Read, "PROP RPM:1", "Rpm", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<PropRpm1Struct>(DEFINITIONS.PropRpm1Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestPropRpm1, DEFINITIONS.PropRpm1Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                simconnect.AddToDataDefinition(DEFINITIONS.PropRpm2Read, "PROP RPM:2", "Rpm", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<PropRpm2Struct>(DEFINITIONS.PropRpm2Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestPropRpm2, DEFINITIONS.PropRpm2Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
             }
             catch (COMException ex)
@@ -4888,6 +5011,8 @@ namespace SimConnect3
                 bool wasBaron = IsBaronG58();
                 bool wasCaravanScheme = UsesCaravanPumpScheme();
                 bool wasBonanza = IsBonanzaG36();
+                bool wasDA62 = IsDA62();
+                bool wasC408 = IsC408();
                 _currentAircraftTitle = newTitle;
                 if (_aircraftTitleLbl != null && _aircraftTitleLbl.Text != newTitle)
                     _aircraftTitleLbl.Text = newTitle;
@@ -4897,6 +5022,10 @@ namespace SimConnect3
                     ForceCaravanFuelPumpOff();
                 else if (IsBonanzaG36() && !wasBonanza)
                     ForceBonanzaFuelPumpOff();
+                else if (IsDA62() && !wasDA62)
+                    SyncDA62FuelValvesFromRpm();
+                else if (IsC408() && !wasC408)
+                    ForceC408FuelTransferOff();
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestParkingBrake)
@@ -4930,7 +5059,8 @@ namespace SimConnect3
                 }
                 // Confirmat: la DA-62 NO fa servir L:FUEL_Switch_Cutoff_Crossfeed_1 (fa servir
                 // O:XMLVAR_FUEL_VALVE_LEFT_Value) — exclosa, es queda amb la posició local optimista.
-                if (!IsDA62())
+                // La C408 tampoc: és un altre selector (FUEL_TRANSFER), aquesta L:Var no li correspon.
+                if (!IsDA62() && !IsC408())
                 {
                     int newFuel1PosFromRead = fsl.value < 0.5 ? 0 : (fsl.value < 1.5 ? 1 : 2);
                     if (newFuel1PosFromRead != fuel1Pos && DateTime.UtcNow >= _fuelSel1IgnoreFollowUntil)
@@ -4944,7 +5074,7 @@ namespace SimConnect3
             if (data.dwRequestID == (uint)REQUESTS.RequestFuelSelRight)
             {
                 var fsr = (FuelSelRightStruct)data.dwData[0];
-                if (!IsDA62())
+                if (!IsDA62() && !IsC408())
                 {
                     // Aquesta variable ja ve en l'ordre físic del nostre selector (0=Xfeed, 1=On, 2=Off) — sense invertir.
                     int newFuel2PosFromRead = fsr.value < 0.5 ? 0 : (fsr.value < 1.5 ? 1 : 2);
@@ -4956,14 +5086,14 @@ namespace SimConnect3
                 }
                 return;
             }
-            if (data.dwRequestID == (uint)REQUESTS.RequestDA62FuelValveLeftTest)
+            if (data.dwRequestID == (uint)REQUESTS.RequestPropRpm1)
             {
-                var dv = (DA62FuelValveTestStruct)data.dwData[0];
-                if (Math.Abs(dv.value - _lastDA62TestDebugValue) > 0.5)
-                {
-                    _lastDA62TestDebugValue = dv.value;
-                    System.Diagnostics.Debug.WriteLine($"[DA62 TEST DEBUG] B:FUEL_VALVE_LEFT = {dv.value}");
-                }
+                _propRpm1 = ((PropRpm1Struct)data.dwData[0]).value;
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestPropRpm2)
+            {
+                _propRpm2 = ((PropRpm2Struct)data.dwData[0]).value;
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.Request1)
