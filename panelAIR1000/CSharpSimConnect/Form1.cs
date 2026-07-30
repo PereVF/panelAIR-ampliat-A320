@@ -2367,8 +2367,8 @@ namespace SimConnect3
                     if (fuel1Pos <= 0) return;
                     int newPos = fuel1Pos - 1;
                     if (_isMsfs2024 && IsDA62()) {
-                        // DA-62: WASM propi (B:FUEL_VALVE_LEFT) — l'event clàssic no fa res des de fora.
-                        // Local 0=Off,1=On,2=Xfeed → B:FUEL_VALVE_LEFT 0=On,1=Cross,2=Off (ordre diferent).
+                        // DA-62: confirmat amb "Execute" a Behaviors — K:2:FUELSYSTEM_VALVE_SET +
+                        // K:2:FUELSYSTEM_TRIGGER_SET (índex 1), NO junctions ni B:FUEL_VALVE_LEFT directe.
                         var da62Evt = newPos switch { 0 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_CROSS };
                         simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         fuel1Pos = newPos;
@@ -2392,8 +2392,6 @@ namespace SimConnect3
                     if (fuel1Pos >= 2) return;
                     int newPos = fuel1Pos + 1;
                     if (_isMsfs2024 && IsDA62()) {
-                        // DA-62: WASM propi (B:FUEL_VALVE_LEFT) — l'event clàssic no fa res des de fora.
-                        // Local 0=Off,1=On,2=Xfeed → B:FUEL_VALVE_LEFT 0=On,1=Cross,2=Off (ordre diferent).
                         var da62Evt = newPos switch { 0 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_CROSS };
                         simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         fuel1Pos = newPos;
@@ -4930,23 +4928,31 @@ namespace SimConnect3
                     _lastFuelSelLeftDebugValue = fsl.value;
                     System.Diagnostics.Debug.WriteLine($"[FUELSEL DEBUG] L:FUEL_Switch_Cutoff_Crossfeed_1 = {fsl.value}");
                 }
-                int newFuel1PosFromRead = fsl.value < 0.5 ? 0 : (fsl.value < 1.5 ? 1 : 2);
-                if (newFuel1PosFromRead != fuel1Pos && DateTime.UtcNow >= _fuelSel1IgnoreFollowUntil)
+                // Confirmat: la DA-62 NO fa servir L:FUEL_Switch_Cutoff_Crossfeed_1 (fa servir
+                // O:XMLVAR_FUEL_VALVE_LEFT_Value) — exclosa, es queda amb la posició local optimista.
+                if (!IsDA62())
                 {
-                    fuel1Pos = newFuel1PosFromRead;
-                    pbMain.Invalidate();
+                    int newFuel1PosFromRead = fsl.value < 0.5 ? 0 : (fsl.value < 1.5 ? 1 : 2);
+                    if (newFuel1PosFromRead != fuel1Pos && DateTime.UtcNow >= _fuelSel1IgnoreFollowUntil)
+                    {
+                        fuel1Pos = newFuel1PosFromRead;
+                        pbMain.Invalidate();
+                    }
                 }
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestFuelSelRight)
             {
                 var fsr = (FuelSelRightStruct)data.dwData[0];
-                // Aquesta variable ja ve en l'ordre físic del nostre selector (0=Xfeed, 1=On, 2=Off) — sense invertir.
-                int newFuel2PosFromRead = fsr.value < 0.5 ? 0 : (fsr.value < 1.5 ? 1 : 2);
-                if (newFuel2PosFromRead != fuel2Pos && DateTime.UtcNow >= _fuelSel2IgnoreFollowUntil)
+                if (!IsDA62())
                 {
-                    fuel2Pos = newFuel2PosFromRead;
-                    pbMain.Invalidate();
+                    // Aquesta variable ja ve en l'ordre físic del nostre selector (0=Xfeed, 1=On, 2=Off) — sense invertir.
+                    int newFuel2PosFromRead = fsr.value < 0.5 ? 0 : (fsr.value < 1.5 ? 1 : 2);
+                    if (newFuel2PosFromRead != fuel2Pos && DateTime.UtcNow >= _fuelSel2IgnoreFollowUntil)
+                    {
+                        fuel2Pos = newFuel2PosFromRead;
+                        pbMain.Invalidate();
+                    }
                 }
                 return;
             }
