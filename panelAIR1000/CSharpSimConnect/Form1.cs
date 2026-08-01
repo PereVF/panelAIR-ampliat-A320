@@ -199,6 +199,30 @@ namespace SimConnect3
             _currentAircraftTitle.IndexOf("DA40", StringComparison.OrdinalIgnoreCase) >= 0 ||
             _currentAircraftTitle.IndexOf("DA 40", StringComparison.OrdinalIgnoreCase) >= 0;
 
+        // Cessna 400 Corvalis (TTx) — selector únic Left/Right/Off, confirmat que respon a
+        // K:2:FUELSYSTEM_JUNCTION_SET amb junction=1 (opcions: 0=Off, 1=Left, 2=Right).
+        bool IsC400() =>
+            _currentAircraftTitle.IndexOf("C400", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            _currentAircraftTitle.IndexOf("Corvalis", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        // Cessna 172 — selector únic Left/Both/Right (sense Off), confirmat que respon a
+        // K:2:FUELSYSTEM_JUNCTION_SET amb junction=1 (opcions: 1=Left, 2=Both, 3=Right).
+        bool IsC172() =>
+            _currentAircraftTitle.IndexOf("C172", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            _currentAircraftTitle.IndexOf("172", StringComparison.OrdinalIgnoreCase) >= 0;
+
+        // Text de les 3 etiquetes del selector únic (SW_SE_LBL_1/2/3), segons l'avió monomotor actiu.
+        string SeSelectorLabelText(int slot)
+        {
+            if (IsC400())
+                return slot switch { 1 => "OFF", 2 => "LEFT", _ => "RIGHT" };
+            if (IsC172())
+                return slot switch { 1 => "LEFT", 2 => "BOTH", _ => "RIGHT" };
+            if (IsDA40())
+                return slot switch { 1 => "NORMAL", 2 => "EMERGENCY", _ => "OFF" };
+            return "";
+        }
+
         bool IsBaronG58() =>
             _currentAircraftTitle.IndexOf("Baron", StringComparison.OrdinalIgnoreCase) >= 0 ||
             _currentAircraftTitle.IndexOf("G58", StringComparison.OrdinalIgnoreCase) >= 0;
@@ -239,8 +263,13 @@ namespace SimConnect3
         double _lastFuelSelLeftDebugValue = double.MinValue; // temporal, per diagnosticar la lectura del selector esquerre (veure Output/Debug de VS)
         double _propRpm1 = 0; // PROP RPM:1 — usat per sincronitzar el selector de combustible de la DA-62
         double _propRpm2 = 0; // PROP RPM:2 — idem, motor dret
+        double _daFuelTankSelector = double.MinValue; // A:FUEL TANK SELECTOR:1 — verificació directa DA-40 (veure Output/Debug de VS)
+        double _daFuelTankSelector2 = double.MinValue; // A:FUEL TANK SELECTOR:2 — idem, per si l'índex real no és l'1
+        double _daFuelTankSelector3 = double.MinValue; // A:FUEL TANK SELECTOR:3 — idem (la bomba de la DA-40 fa servir índex 3)
+        double _c400JunctionSetting = double.MinValue; // A:FUELSYSTEM JUNCTION SETTING:1 — opció real seleccionada al C400
         DateTime _fuelSel1IgnoreFollowUntil = DateTime.MinValue; // evita el "rebot" quan la lectura encara no ha seguit el clic
         DateTime _fuelSel2IgnoreFollowUntil = DateTime.MinValue;
+        DateTime _seSelectorIgnoreFollowUntil = DateTime.MinValue; // idem, pel selector únic (C400)
         bool masterBatteryOff;
         bool avionics1Off;
         bool avionics2Off;
@@ -254,6 +283,11 @@ namespace SimConnect3
         private int ign2Pos = 2;
         private int fuel1Pos = 0; // 0=OFF(-30°), 1=ON(0°), 2=CROSSFEED(+30°)
         private int fuel2Pos = 0; // 0=CROSSFEED(-30°), 1=ON(0°), 2=OFF(+30°)
+        // Selector únic de 3 posicions per monomotors (DA-40 de moment; altres single engines reutilitzaran
+        // aquest mateix camp/element amb la convenció Left/Both/Right). DA-40: 0=Normal(-30°), 1=Emergency(0°), 2=OFF(+30°).
+        // Comença a 1 (mig) perquè les 2 direccions siguin operables des del primer clic (a 0, "esquerra" quedava
+        // bloquejat pel guard `if (seSelectorPos <= 0) return;`, cosa que podia semblar "no fa res").
+        private int seSelectorPos = 1;
         private int numEngines = 2; // detectat automàticament de MSFS
         private float _g3kFuelSelAngle = -1f;       // -1 = no inicialitzat
         private float _g3kFuelSelTargetAngle = 0f;
@@ -594,6 +628,10 @@ namespace SimConnect3
             FuelSelRightRead,
             PropRpm1Read,
             PropRpm2Read,
+            DA40FuelTankSelectorRead,
+            DA40FuelTankSelector2Read,
+            DA40FuelTankSelector3Read,
+            C400JunctionSettingRead,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -647,6 +685,15 @@ namespace SimConnect3
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct PropRpm2Struct { public double value; } // A:PROP RPM:2,Rpm — sincronització DA-62, motor dret
 
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct DA40FuelTankSelectorStruct { public double value; } // A:FUEL TANK SELECTOR:1,Enum — verificació directa del selector DA-40
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct DA40FuelTankSelector2Struct { public double value; } // A:FUEL TANK SELECTOR:2,Enum
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct DA40FuelTankSelector3Struct { public double value; } // A:FUEL TANK SELECTOR:3,Enum — la DA-40 fa servir índex 3 per la bomba, per si el selector també
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct C400JunctionSettingStruct { public double value; } // A:FUELSYSTEM JUNCTION SETTING:1,Enum — opció seleccionada del junction del C400 (1=Off,2=Left,3=Right)
+
         enum REQUESTS
         {
             Request1,
@@ -657,6 +704,10 @@ namespace SimConnect3
             RequestFuelSelRight,
             RequestPropRpm1,
             RequestPropRpm2,
+            RequestDA40FuelTankSelector,
+            RequestDA40FuelTankSelector2,
+            RequestDA40FuelTankSelector3,
+            RequestC400JunctionSetting,
         }
         enum SIMCONNECT_EVENTS
         {
@@ -863,6 +914,10 @@ namespace SimConnect3
             SFS_DA62_FUELVALVE_RIGHT_ON,
             SFS_DA62_FUELVALVE_RIGHT_CROSS,
             SFS_DA62_FUELVALVE_RIGHT_OFF,
+            SFS_DA40_FUELSEL_NORMAL,
+            SFS_DA40_FUELSEL_EMERGENCY,
+            SFS_DA40_FUELSEL_OFF,
+            SFS_DA40_FUELSEL_TEST,
             SWITCH_PBRAKE,
             MASTER_BATTERY_ON,
             MASTER_BATTERY_OFF,
@@ -1018,6 +1073,7 @@ namespace SimConnect3
 
                 foreach (var b in Buttons)
                 {
+                    if (!b.IsVisible()) continue;
                     if (b.ClickRect.Contains(e.Location))
                     {
                         b.PressedUntilUtc = DateTime.UtcNow.AddMilliseconds(b.PressVisualMs);
@@ -1190,6 +1246,20 @@ namespace SimConnect3
         private System.Windows.Forms.Button _engineStopBtn = null!;
         private bool  _engineStopBtnDragging;
         private Point _engineStopBtnDragOffset;
+
+        // Botons provisionals de prova — DA-40 FUEL_SELECTOR_SET, independents del selector de l'app,
+        // per comprovar si la comanda sola fa efecte a MSFS.
+        private System.Windows.Forms.Button _testFuelSelNormBtn = null!;
+        private bool  _testFuelSelNormBtnDragging;
+        private Point _testFuelSelNormBtnDragOffset;
+        private System.Windows.Forms.Button _testFuelSelEmergBtn = null!;
+        private bool  _testFuelSelEmergBtnDragging;
+        private Point _testFuelSelEmergBtnDragOffset;
+        private System.Windows.Forms.Button _testFuelSelOffBtn = null!;
+        private bool  _testFuelSelOffBtnDragging;
+        private Point _testFuelSelOffBtnDragOffset;
+        private TextBox _testJunctionInput = null!;
+        private System.Windows.Forms.Button _testJunctionSendBtn = null!;
 
         private System.Windows.Forms.Button _g3000Btn = null!;
         private bool  _g3000BtnDragging;
@@ -2193,6 +2263,59 @@ namespace SimConnect3
             _engineStopBtn.Location = new Point(2800, 100);
             _overlayPanel.Controls.Add(_engineStopBtn);
 
+            // ── Botons de prova provisionals: FUEL_SELECTOR_SET independent del selector DA-40 ──────
+            _testFuelSelNormBtn = MakeGroupBtn("FSEL NORM (2)", 220, 63);
+            _testFuelSelNormBtn.Click += (s, e) => { if (!calibrationMode) { Debug.WriteLine($">>> NORMAL premut, simconnect null? {simconnect == null}"); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_NORMAL, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } };
+            _testFuelSelNormBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testFuelSelNormBtnDragging = true; _testFuelSelNormBtnDragOffset = e.Location; };
+            _testFuelSelNormBtn.MouseMove += (s, e) => {
+                if (!_testFuelSelNormBtnDragging) return;
+                var sp = _testFuelSelNormBtn.PointToScreen(e.Location);
+                var fp = _overlayPanel!.PointToClient(sp);
+                _testFuelSelNormBtn.Location = new Point(fp.X - _testFuelSelNormBtnDragOffset.X, fp.Y - _testFuelSelNormBtnDragOffset.Y);
+            };
+            _testFuelSelNormBtn.MouseUp += (s, e) => { _testFuelSelNormBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            _testFuelSelNormBtn.Location = new Point(3100, 20);
+            _overlayPanel.Controls.Add(_testFuelSelNormBtn);
+
+            _testFuelSelEmergBtn = MakeGroupBtn("FSEL EMERG (3)", 220, 63);
+            _testFuelSelEmergBtn.Click += (s, e) => { if (!calibrationMode) { Debug.WriteLine($">>> EMERGENCY premut, simconnect null? {simconnect == null}"); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_EMERGENCY, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } };
+            _testFuelSelEmergBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testFuelSelEmergBtnDragging = true; _testFuelSelEmergBtnDragOffset = e.Location; };
+            _testFuelSelEmergBtn.MouseMove += (s, e) => {
+                if (!_testFuelSelEmergBtnDragging) return;
+                var sp = _testFuelSelEmergBtn.PointToScreen(e.Location);
+                var fp = _overlayPanel!.PointToClient(sp);
+                _testFuelSelEmergBtn.Location = new Point(fp.X - _testFuelSelEmergBtnDragOffset.X, fp.Y - _testFuelSelEmergBtnDragOffset.Y);
+            };
+            _testFuelSelEmergBtn.MouseUp += (s, e) => { _testFuelSelEmergBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            _testFuelSelEmergBtn.Location = new Point(3100, 95);
+            _overlayPanel.Controls.Add(_testFuelSelEmergBtn);
+
+            _testFuelSelOffBtn = MakeGroupBtn("FSEL OFF (0)", 220, 63);
+            _testFuelSelOffBtn.Click += (s, e) => { if (!calibrationMode) { Debug.WriteLine($">>> OFF premut, simconnect null? {simconnect == null}"); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } };
+            _testFuelSelOffBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testFuelSelOffBtnDragging = true; _testFuelSelOffBtnDragOffset = e.Location; };
+            _testFuelSelOffBtn.MouseMove += (s, e) => {
+                if (!_testFuelSelOffBtnDragging) return;
+                var sp = _testFuelSelOffBtn.PointToScreen(e.Location);
+                var fp = _overlayPanel!.PointToClient(sp);
+                _testFuelSelOffBtn.Location = new Point(fp.X - _testFuelSelOffBtnDragOffset.X, fp.Y - _testFuelSelOffBtnDragOffset.Y);
+            };
+            _testFuelSelOffBtn.MouseUp += (s, e) => { _testFuelSelOffBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            _testFuelSelOffBtn.Location = new Point(3100, 170);
+            _overlayPanel.Controls.Add(_testFuelSelOffBtn);
+
+            // ── Prova lliure de junction: escriu "IO" (index*10+opció, p.ex. 11 = junction 1, opció 1) i envia ──
+            _testJunctionInput = new TextBox { Location = new Point(3100, 235), Width = 100, Font = new Font("Arial", 14) };
+            _overlayPanel.Controls.Add(_testJunctionInput);
+            _testJunctionSendBtn = MakeGroupBtn("SEND", 100, 40);
+            _testJunctionSendBtn.Location = new Point(3210, 230);
+            _testJunctionSendBtn.Click += (s, e) => {
+                if (calibrationMode) return;
+                if (!uint.TryParse(_testJunctionInput.Text, out uint code)) return;
+                Debug.WriteLine($">>> JUNCTION TEST premut, codi={code} (junction={code / 10}, opcio={code % 10}), simconnect null? {simconnect == null}");
+                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_TEST, code, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            };
+            _overlayPanel.Controls.Add(_testJunctionSendBtn);
+
             //this.TopMost = true;
             this.Load += frmMain_Load;
             this.Shown += (s, e) =>
@@ -2379,6 +2502,7 @@ namespace SimConnect3
                 }});
             // SW_FUEL1 — left and right areas
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-LEFT", BasePos=new Point(1620, 1080), W=80, H=120, Resizable=true, NoShadow=true,
+                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172(),
                 OnClick = () => {
                     if (_isMsfs2024 && IsC408()) {
                         // C408: un sol interruptor FUEL_TRANSFER físic, representat per 2 selectors a l'app.
@@ -2415,6 +2539,7 @@ namespace SimConnect3
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-RIGHT", BasePos=new Point(1720, 1080), W=80, H=120, Resizable=true, NoShadow=true,
+                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172(),
                 OnClick = () => {
                     if (_isMsfs2024 && IsC408()) {
                         if (fuel1Pos == 1) {
@@ -2448,6 +2573,7 @@ namespace SimConnect3
                 }});
             // SW_FUEL2 — left and right areas
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-LEFT", BasePos=new Point(2120, 1080), W=80, H=120, Resizable=true, NoShadow=true,
+                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172(),
                 OnClick = () => {
                     if (_isMsfs2024 && IsC408()) {
                         // Selector dret: només es mou entre CROSSFEED(0) i ON(1) — mai OFF(2).
@@ -2483,6 +2609,7 @@ namespace SimConnect3
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-RIGHT", BasePos=new Point(2220, 1080), W=80, H=120, Resizable=true, NoShadow=true,
+                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172(),
                 OnClick = () => {
                     if (_isMsfs2024 && IsC408()) {
                         if (fuel2Pos == 0) {
@@ -2512,6 +2639,26 @@ namespace SimConnect3
                         uint msfsVal = SingleEngineFuelVal(fuel1Pos, newPos);
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, msfsVal, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     }
+                    pbMain.Invalidate();
+                }});
+
+            // SW_SE_SELECTOR — selector únic de 3 posicions per monomotors (DA-40 de moment).
+            // Comanda confirmada via Behaviors "Set" (FUEL_SWITCH_SELECTOR / FUEL_SELECTOR_1) — veure SeSelectorMsfsVal().
+            // Posicions per defecte = últim calibratge F12 de Pere (calibration_export.txt), es carreguen igualment via LoadCalibrationPositions.
+            cockpitRight.Buttons.Add(new UiButton { Name="SE_SELECTOR-LEFT", BasePos=new Point(1529, 1967), W=186, H=253, Resizable=true, NoShadow=true,
+                ShowWhen = () => IsDA40() || IsC400() || IsC172(),
+                OnClick = () => {
+                    if (seSelectorPos <= 0) return;
+                    seSelectorPos--;
+                    SendSeSelectorCommand(seSelectorPos);
+                    pbMain.Invalidate();
+                }});
+            cockpitRight.Buttons.Add(new UiButton { Name="SE_SELECTOR-RIGHT", BasePos=new Point(1738, 1967), W=177, H=255, Resizable=true, NoShadow=true,
+                ShowWhen = () => IsDA40() || IsC400() || IsC172(),
+                OnClick = () => {
+                    if (seSelectorPos >= 2) return;
+                    seSelectorPos++;
+                    SendSeSelectorCommand(seSelectorPos);
                     pbMain.Invalidate();
                 }});
 
@@ -2655,6 +2802,25 @@ namespace SimConnect3
                 new() { Name="SW_DA40_FUELTRANSF_LBL", TypeKey="DA40_LBL", BasePos=new Point(1804, 1598), ZoomWidth=160, ZoomHeight=60, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsDA40() },
+                // Monomotors — rectangle negre que tapa els 2 selectors físics de tank (LEFT/RIGHT) mentre
+                // preparem el selector únic de 3 posicions. Arrossegable/redimensionable amb F12.
+                // De moment només actiu a la DA-40; s'anirà activant per altres monomotors més endavant.
+                new() { Name="SW_SE_SELECTOR_COVER", TypeKey="SE_COVER", BasePos=new Point(1280, 1757), ZoomWidth=753, ZoomHeight=350, Img=null,
+                        ShowWhen = () => IsDA40() || IsC400() || IsC172() },
+                // Selector únic de 3 posicions, centrat sobre el rectangle de tapa. Reutilitza la mateixa
+                // gràfica que els selectors twin-engine (mateix estil de pom vermell). Posició provisional,
+                // a reposicionar/redimensionar amb F12 un cop calibrat el rectangle de sobre.
+                new() { Name="SW_SE_SELECTOR", TypeKey="SE_SELECTOR", BasePos=new Point(1606, 1877), ZoomWidth=100,
+                        Img=swFuelImg, ShowWhen = () => IsDA40() || IsC400() || IsC172() },
+                // Etiquetes de les 3 posicions — mateix estil/mida que SW_DA40_FUELTRANSF_LBL (fons fosc +
+                // "Arial Narrow" 27px bold). 3 elements independents perquè Pere els posicioni per separat amb F12.
+                // El text es tria a SeSelectorLabelText() segons l'avió (DA-40: Normal/Emergency/Off; C400: Left/Right/Off).
+                new() { Name="SW_SE_LBL_1", TypeKey="SE_LBL_1", BasePos=new Point(1450, 1877), ZoomWidth=160, ZoomHeight=60, Img=null,
+                        NoResize = true, ShowWhen = () => IsDA40() || IsC400() || IsC172() },
+                new() { Name="SW_SE_LBL_2", TypeKey="SE_LBL_2", BasePos=new Point(1620, 1780), ZoomWidth=160, ZoomHeight=60, Img=null,
+                        NoResize = true, ShowWhen = () => IsDA40() || IsC400() || IsC172() },
+                new() { Name="SW_SE_LBL_3", TypeKey="SE_LBL_3", BasePos=new Point(1790, 1877), ZoomWidth=160, ZoomHeight=60, Img=null,
+                        NoResize = true, ShowWhen = () => IsDA40() || IsC400() || IsC172() },
                 // Flaps switch
                 new() { Name="SW_FLAPS", TypeKey="SW flaps", BasePos=new Point(3000, 1500), ZoomWidth=75,
                         Img=LoadOverlayImage("SW flaps.png"),
@@ -2671,9 +2837,9 @@ namespace SimConnect3
                 new() { Name="SW_IGNITION2", TypeKey="SW ignition2", BasePos=new Point(2120, 1080), ZoomWidth=100,
                         Img=swIgnitionImg, ShowWhen=null, OnClick=null },
                 new() { Name="SW_FUEL1", TypeKey="SW fuel1", BasePos=new Point(1670, 1080), ZoomWidth=100,
-                        Img=swFuelImg, ShowWhen=null, OnClick=null },
+                        Img=swFuelImg, ShowWhen=() => !IsDA40() && !IsC400() && !IsC172(), OnClick=null },
                 new() { Name="SW_FUEL2", TypeKey="SW fuel2", BasePos=new Point(2170, 1080), ZoomWidth=100,
-                        Img=swFuelImg, ShowWhen=null, OnClick=null },
+                        Img=swFuelImg, ShowWhen=() => !IsDA40() && !IsC400() && !IsC172(), OnClick=null },
                 new() { Name="SW_BATTERY",    TypeKey="SW battery",    BasePos=new Point(1320, 1080), ZoomWidth=100,
                         Img=swBatteryImg,  ShowWhen = () => masterBatteryOff, OnClick=null },
                 new() { Name="SW_AVIONICS1",  TypeKey="SW avionics1",  BasePos=new Point(1770, 1280), ZoomWidth=100,
@@ -4439,6 +4605,17 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_CROSS, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, "SFS.FuelValveRight_Off");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, false);
+                // DA-40 — selector únic de 3 posicions. K:FUEL_SELECTOR_SET enviat directe (sense WASM) NO fa
+                // res (confirmat amb 3 botons de prova a la pantalla AUX): igual que DA-62, el fuel system nou
+                // de MSFS2024 no escolta l'event clàssic des d'un client extern. Cal WASM (execute_calculator_code).
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_NORMAL, "SFS.FuelSelDA40_Normal");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_NORMAL, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_EMERGENCY, "SFS.FuelSelDA40_Emergency");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_EMERGENCY, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_OFF, "SFS.FuelSelDA40_Off");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_OFF, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_TEST, "SFS.FuelSelDA40_Test");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_TEST, false);
 
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, "FLAPS_DECR");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, false);
@@ -4775,6 +4952,26 @@ namespace SimConnect3
                 simconnect.RegisterDataDefineStruct<PropRpm2Struct>(DEFINITIONS.PropRpm2Read);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestPropRpm2, DEFINITIONS.PropRpm2Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
+                // FUELSYSTEM VALVE SWITCH:1/2/3 — "FUEL TANK SELECTOR" confirmat que NO es mou ni des de l'app
+                // ni movent el selector físic al VC. Provem l'esquema nou (junctions/valves), el mateix que
+                // finalment va funcionar a la DA-62, per si la DA-40 el comparteix per sota.
+                simconnect.AddToDataDefinition(DEFINITIONS.DA40FuelTankSelectorRead, "FUELSYSTEM VALVE SWITCH:1", "Enum", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<DA40FuelTankSelectorStruct>(DEFINITIONS.DA40FuelTankSelectorRead);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestDA40FuelTankSelector, DEFINITIONS.DA40FuelTankSelectorRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                simconnect.AddToDataDefinition(DEFINITIONS.DA40FuelTankSelector2Read, "FUELSYSTEM VALVE SWITCH:2", "Enum", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<DA40FuelTankSelector2Struct>(DEFINITIONS.DA40FuelTankSelector2Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestDA40FuelTankSelector2, DEFINITIONS.DA40FuelTankSelector2Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                simconnect.AddToDataDefinition(DEFINITIONS.DA40FuelTankSelector3Read, "FUELSYSTEM VALVE SWITCH:3", "Enum", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<DA40FuelTankSelector3Struct>(DEFINITIONS.DA40FuelTankSelector3Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestDA40FuelTankSelector3, DEFINITIONS.DA40FuelTankSelector3Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // C400 Corvalis — lectura directa de l'opció seleccionada del junction (1=Off,2=Left,3=Right).
+                simconnect.AddToDataDefinition(DEFINITIONS.C400JunctionSettingRead, "FUELSYSTEM JUNCTION SETTING:1", "Enum", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<C400JunctionSettingStruct>(DEFINITIONS.C400JunctionSettingRead);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestC400JunctionSetting, DEFINITIONS.C400JunctionSettingRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
             }
             catch (COMException ex)
             {
@@ -5094,6 +5291,69 @@ namespace SimConnect3
             if (data.dwRequestID == (uint)REQUESTS.RequestPropRpm2)
             {
                 _propRpm2 = ((PropRpm2Struct)data.dwData[0]).value;
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestDA40FuelTankSelector)
+            {
+                double newVal = ((DA40FuelTankSelectorStruct)data.dwData[0]).value;
+                if (newVal != _daFuelTankSelector)
+                {
+                    Debug.WriteLine($"[DA40 FUELSYSTEM VALVE SWITCH:1] {_daFuelTankSelector} -> {newVal}");
+                    _daFuelTankSelector = newVal;
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestDA40FuelTankSelector2)
+            {
+                double newVal = ((DA40FuelTankSelector2Struct)data.dwData[0]).value;
+                if (newVal != _daFuelTankSelector2)
+                {
+                    Debug.WriteLine($"[DA40 FUELSYSTEM VALVE SWITCH:2] {_daFuelTankSelector2} -> {newVal}");
+                    _daFuelTankSelector2 = newVal;
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestDA40FuelTankSelector3)
+            {
+                double newVal = ((DA40FuelTankSelector3Struct)data.dwData[0]).value;
+                if (newVal != _daFuelTankSelector3)
+                {
+                    Debug.WriteLine($"[DA40 FUELSYSTEM VALVE SWITCH:3] {_daFuelTankSelector3} -> {newVal}");
+                    _daFuelTankSelector3 = newVal;
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestC400JunctionSetting)
+            {
+                double newVal = ((C400JunctionSettingStruct)data.dwData[0]).value;
+                if (newVal != _c400JunctionSetting)
+                {
+                    Debug.WriteLine($"[C400 FUELSYSTEM JUNCTION SETTING:1] {_c400JunctionSetting} -> {newVal}");
+                    _c400JunctionSetting = newVal;
+                }
+                // Sincronització real: 1=Off,2=Left,3=Right,4=Off (el selector físic té 2 Off,
+                // un a cada extrem del recorregut horari Off-Left-Right-Off) -> seSelectorPos 0/1/2.
+                if (IsC400())
+                {
+                    int rounded = (int)Math.Round(newVal);
+                    int newPosFromRead = rounded switch { 2 => 1, 3 => 2, _ => 0 }; // 1 i 4 (i qualsevol altre) = Off
+                    if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
+                    {
+                        seSelectorPos = newPosFromRead;
+                        pbMain.Invalidate();
+                    }
+                }
+                // C172 (mateix junction=1): 1=Left,2=Both,3=Right, sense Off -> seSelectorPos 0/1/2.
+                else if (IsC172())
+                {
+                    int rounded = (int)Math.Round(newVal);
+                    int newPosFromRead = rounded switch { 1 => 0, 3 => 2, _ => 1 }; // 2 (i qualsevol altre) = Both
+                    if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
+                    {
+                        seSelectorPos = newPosFromRead;
+                        pbMain.Invalidate();
+                    }
+                }
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.Request1)
@@ -6444,6 +6704,7 @@ namespace SimConnect3
                 if (ov.Name == "SW_IGNITION2") continue;
                 if (ov.Name == "SW_FUEL1") continue;
                 if (ov.Name == "SW_FUEL2") continue;
+                if (ov.Name == "SW_SE_SELECTOR") continue;
                 if (ov.Img != null && (calibrationMode || (ov.ShowWhen?.Invoke() ?? true)))
                     e.Graphics.DrawImage(ov.Img, ov.AnimatedBounds);
             }
@@ -6460,6 +6721,51 @@ namespace SimConnect3
                     using var daFont = new Font("Arial Narrow", 27f, FontStyle.Bold, GraphicsUnit.Pixel);
                     using var daFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
                     e.Graphics.DrawString("FUEL TRANSF", daFont, Brushes.White, daLbl.Bounds, daFmt);
+                }
+            }
+
+            // Monomotors — rectangle negre que tapa els selectors LEFT/RIGHT (referència de mides/posició
+            // pel futur selector únic de 3 posicions, centrat en aquest requadre).
+            {
+                var seCover = overlayImages.FirstOrDefault(o => o.Name == "SW_SE_SELECTOR_COVER");
+                if (seCover != null && (calibrationMode || (seCover.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var seCoverBrush = new SolidBrush(Color.FromArgb(23, 23, 23));
+                    e.Graphics.FillRectangle(seCoverBrush, seCover.Bounds);
+                }
+            }
+
+            // SW_SE_LBL_1/2/3 — etiquetes independents del selector únic, mateix estil que SW_DA40_FUELTRANSF_LBL.
+            {
+                for (int slot = 1; slot <= 3; slot++)
+                {
+                    var lbl = overlayImages.FirstOrDefault(o => o.Name == $"SW_SE_LBL_{slot}");
+                    if (lbl != null && (calibrationMode || (lbl.ShowWhen?.Invoke() ?? false)))
+                    {
+                        using var lblBgBrush = new SolidBrush(Color.FromArgb(23, 23, 23));
+                        e.Graphics.FillRectangle(lblBgBrush, lbl.Bounds);
+                        using var lblFont = new Font("Arial Narrow", 27f, FontStyle.Bold, GraphicsUnit.Pixel);
+                        using var lblFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                        e.Graphics.DrawString(SeSelectorLabelText(slot), lblFont, Brushes.White, lbl.Bounds, lblFmt);
+                    }
+                }
+            }
+
+            // SW_SE_SELECTOR: pos0=Normal(-30°), pos1=Emergency(0°), pos2=OFF(+30°) — DA-40 de moment.
+            {
+                var sw = overlayImages.FirstOrDefault(o => o.Name == "SW_SE_SELECTOR");
+                if (sw?.Img != null && (calibrationMode || (sw.ShowWhen?.Invoke() ?? false)))
+                {
+                    float angle = (seSelectorPos - 1) * 30f + 30f; // mateix conveni que SW_FUEL1/2 (l'asset porta un +30° de base)
+                    float baseW = sw.ZoomWidth;
+                    float baseH = baseW / sw.AspectRatio;
+                    float cx = sw.BasePos.X + baseW / 2f;
+                    float cy = sw.BasePos.Y + baseH / 2f;
+                    var state = e.Graphics.Save();
+                    e.Graphics.TranslateTransform(cx, cy);
+                    e.Graphics.RotateTransform(angle);
+                    e.Graphics.DrawImage(sw.Img, -baseW / 2f, -baseH / 2f, baseW, baseH);
+                    e.Graphics.Restore(state);
                 }
             }
 
@@ -6526,7 +6832,7 @@ namespace SimConnect3
             // SW_FUEL1: pos0=OFF(-30°), pos1=ON(0°), pos2=CROSSFEED(+30°)
             {
                 var sw = overlayImages.FirstOrDefault(o => o.Name == "SW_FUEL1");
-                if (sw?.Img != null)
+                if (sw?.Img != null && !IsDA40() && !IsC400() && !IsC172())
                 {
                     float angle = (fuel1Pos - 1) * 30f + 30f;
                     float baseW = sw.ZoomWidth;
@@ -6543,7 +6849,7 @@ namespace SimConnect3
             // SW_FUEL2: pos0=CROSSFEED(-30°), pos1=ON(0°), pos2=OFF(+30°)
             {
                 var sw = overlayImages.FirstOrDefault(o => o.Name == "SW_FUEL2");
-                if (sw?.Img != null)
+                if (sw?.Img != null && !IsDA40() && !IsC400() && !IsC172())
                 {
                     float angle = (fuel2Pos - 1) * 30f + 30f;
                     float baseW = sw.ZoomWidth;
@@ -7531,6 +7837,9 @@ namespace SimConnect3
             sb.AppendLine($"FOCUSBTN:focus:{_focusBtn.Location.X}:{_focusBtn.Location.Y}");
             sb.AppendLine($"ENGSTARTBTN:engstart:{_engineStartBtn.Location.X}:{_engineStartBtn.Location.Y}");
             sb.AppendLine($"ENGSTOPBTN:engstop:{_engineStopBtn.Location.X}:{_engineStopBtn.Location.Y}");
+            sb.AppendLine($"TESTFSELNORM:testfselnorm:{_testFuelSelNormBtn.Location.X}:{_testFuelSelNormBtn.Location.Y}");
+            sb.AppendLine($"TESTFSELEMERG:testfselemerg:{_testFuelSelEmergBtn.Location.X}:{_testFuelSelEmergBtn.Location.Y}");
+            sb.AppendLine($"TESTFSELOFF:testfseloff:{_testFuelSelOffBtn.Location.X}:{_testFuelSelOffBtn.Location.Y}");
             sb.AppendLine($"G3KBTN:g3k:{_g3000Btn.Location.X}:{_g3000Btn.Location.Y}");
             sb.AppendLine($"THRQBTN:tq:{_thrQuadrantBtn.Location.X}:{_thrQuadrantBtn.Location.Y}:0:0");
             if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
@@ -7727,6 +8036,18 @@ namespace SimConnect3
                 {
                     _engineStopBtn.Location = new Point(x, y);
                 }
+                else if (type == "TESTFSELNORM")
+                {
+                    _testFuelSelNormBtn.Location = new Point(x, y);
+                }
+                else if (type == "TESTFSELEMERG")
+                {
+                    _testFuelSelEmergBtn.Location = new Point(x, y);
+                }
+                else if (type == "TESTFSELOFF")
+                {
+                    _testFuelSelOffBtn.Location = new Point(x, y);
+                }
                 else if (type == "G3KBTN")
                 {
                     _g3000Btn.Location = new Point(x, y);
@@ -7792,6 +8113,34 @@ namespace SimConnect3
             else         // ←
                 pts = new[] { new Point(x - height, y), new Point(x + height, y - halfWidth), new Point(x + height, y + halfWidth) };
             g.FillPolygon(Brushes.Gray, pts);
+        }
+
+        private void SendSeSelectorCommand(int pos)
+        {
+            // DA-40/Cirrus SR22T: cap combinació de junction (0-8) ni cap mecanisme (event legacy, vàlvula
+            // directa, Input Events API) mou res — el sistema de combustible d'aquests 2 avions no respon
+            // NI TAN SOLS movent el selector a mà al VC (comprovat: el motor no s'atura mai a OFF). Abandonat.
+            //
+            // C400 Corvalis (TTx): CONFIRMAT que junction=1 sí funciona (moviment real verificat al VC).
+            // Options REALS del junction (confirmades una a una, NO coincideixen amb els valors dels
+            // bindings de Behaviors): 1=Off, 2=Left, 3=Right (l'opció 0 no fa res). Com que necessitem
+            // l'opció 3 (fora del rang 0-2 que cobreixen els 3 events DA-40 fixos), ho enviem tot via
+            // l'event de prova flexible SFS_DA40_FUELSEL_TEST (codi = junction*10+opció) — ja compilat,
+            // no cal tocar el WASM més. Ordre físic real en sentit horari: Off-Left-Right(-Off, redundant,
+            // no la fem servir). pos0=OFF(opt1), pos1=LEFT(opt2), pos2=RIGHT(opt3).
+            //
+            // C172: mateix junction=1, confirmat opcions 1=Left,2=Both,3=Right (sense Off) — mateixos
+            // codis numèrics que el C400 (11/12/13), només canvia el significat/etiquetes.
+            // Ordre físic real en sentit horari: Left-Both-Right. pos0=LEFT(opt1), pos1=BOTH(opt2), pos2=RIGHT(opt3).
+            if (IsC400() || IsC172())
+            {
+                uint code = pos switch { 0 => 11u, 1 => 12u, _ => 13u };
+                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_TEST, code, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                _seSelectorIgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                return;
+            }
+            var evt = pos switch { 0 => SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_NORMAL, 1 => SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_EMERGENCY, _ => SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_OFF };
+            simconnect?.TransmitClientEvent(0, evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
         }
 
         private uint SingleEngineFuelVal(int f1, int f2)
