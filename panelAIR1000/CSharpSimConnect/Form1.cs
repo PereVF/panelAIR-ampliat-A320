@@ -218,6 +218,8 @@ namespace SimConnect3
                 return slot switch { 1 => "OFF", 2 => "LEFT", _ => "RIGHT" };
             if (IsC172())
                 return slot switch { 1 => "LEFT", 2 => "BOTH", _ => "RIGHT" };
+            if (IsBonanzaG36())
+                return slot switch { 1 => "OFF", 2 => "LEFT", _ => "RIGHT" };
             if (IsDA40())
                 return slot switch { 1 => "NORMAL", 2 => "EMERGENCY", _ => "OFF" };
             return "";
@@ -266,6 +268,7 @@ namespace SimConnect3
         double _daFuelTankSelector = double.MinValue; // A:FUEL TANK SELECTOR:1 — verificació directa DA-40 (veure Output/Debug de VS)
         double _daFuelTankSelector2 = double.MinValue; // A:FUEL TANK SELECTOR:2 — idem, per si l'índex real no és l'1
         double _daFuelTankSelector3 = double.MinValue; // A:FUEL TANK SELECTOR:3 — idem (la bomba de la DA-40 fa servir índex 3)
+        int _bonanzaFuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la Bonanza (veure Output/Debug de VS)
         double _c400JunctionSetting = double.MinValue; // A:FUELSYSTEM JUNCTION SETTING:1 — opció real seleccionada al C400
         DateTime _fuelSel1IgnoreFollowUntil = DateTime.MinValue; // evita el "rebot" quan la lectura encara no ha seguit el clic
         DateTime _fuelSel2IgnoreFollowUntil = DateTime.MinValue;
@@ -918,6 +921,7 @@ namespace SimConnect3
             SFS_DA40_FUELSEL_EMERGENCY,
             SFS_DA40_FUELSEL_OFF,
             SFS_DA40_FUELSEL_TEST,
+            SFS_FUELTRIGGER_TEST,
             SWITCH_PBRAKE,
             MASTER_BATTERY_ON,
             MASTER_BATTERY_OFF,
@@ -1004,6 +1008,8 @@ namespace SimConnect3
             FUEL_SELECTOR_2_SET,
             ENGINE_AUTO_START,
             ENGINE_AUTO_SHUTDOWN,
+            FUELSYSTEM_TRIGGER_ON,
+            FUELSYSTEM_TRIGGER_OFF,
 
         }
         enum SIMCONNECT_GROUPS
@@ -1259,7 +1265,12 @@ namespace SimConnect3
         private bool  _testFuelSelOffBtnDragging;
         private Point _testFuelSelOffBtnDragOffset;
         private TextBox _testJunctionInput = null!;
+        private bool  _testJunctionInputDragging;
+        private Point _testJunctionInputDragOffset;
         private System.Windows.Forms.Button _testJunctionSendBtn = null!;
+        private bool  _testJunctionSendBtnDragging;
+        private Point _testJunctionSendBtnDragOffset;
+        private System.Windows.Forms.Button _testTriggerSendBtn = null!;
 
         private System.Windows.Forms.Button _g3000Btn = null!;
         private bool  _g3000BtnDragging;
@@ -2305,6 +2316,14 @@ namespace SimConnect3
 
             // ── Prova lliure de junction: escriu "IO" (index*10+opció, p.ex. 11 = junction 1, opció 1) i envia ──
             _testJunctionInput = new TextBox { Location = new Point(3100, 235), Width = 100, Font = new Font("Arial", 14) };
+            _testJunctionInput.MouseDown += (s, e) => { if (!calibrationMode) return; _testJunctionInputDragging = true; _testJunctionInputDragOffset = e.Location; };
+            _testJunctionInput.MouseMove += (s, e) => {
+                if (!_testJunctionInputDragging) return;
+                var sp = _testJunctionInput.PointToScreen(e.Location);
+                var fp = _overlayPanel!.PointToClient(sp);
+                _testJunctionInput.Location = new Point(fp.X - _testJunctionInputDragOffset.X, fp.Y - _testJunctionInputDragOffset.Y);
+            };
+            _testJunctionInput.MouseUp += (s, e) => { _testJunctionInputDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             _overlayPanel.Controls.Add(_testJunctionInput);
             _testJunctionSendBtn = MakeGroupBtn("SEND", 100, 40);
             _testJunctionSendBtn.Location = new Point(3210, 230);
@@ -2314,7 +2333,26 @@ namespace SimConnect3
                 Debug.WriteLine($">>> JUNCTION TEST premut, codi={code} (junction={code / 10}, opcio={code % 10}), simconnect null? {simconnect == null}");
                 simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_TEST, code, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             };
+            _testJunctionSendBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testJunctionSendBtnDragging = true; _testJunctionSendBtnDragOffset = e.Location; };
+            _testJunctionSendBtn.MouseMove += (s, e) => {
+                if (!_testJunctionSendBtnDragging) return;
+                var sp = _testJunctionSendBtn.PointToScreen(e.Location);
+                var fp = _overlayPanel!.PointToClient(sp);
+                _testJunctionSendBtn.Location = new Point(fp.X - _testJunctionSendBtnDragOffset.X, fp.Y - _testJunctionSendBtnDragOffset.Y);
+            };
+            _testJunctionSendBtn.MouseUp += (s, e) => { _testJunctionSendBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             _overlayPanel.Controls.Add(_testJunctionSendBtn);
+
+            // ── Mateix codi (index*10+valor), però cap a FUELSYSTEM_TRIGGER_SET (booleà 0/1) — Caravan etc. ──
+            _testTriggerSendBtn = MakeGroupBtn("TRIG", 100, 40);
+            _testTriggerSendBtn.Location = new Point(3320, 230);
+            _testTriggerSendBtn.Click += (s, e) => {
+                if (calibrationMode) return;
+                if (!uint.TryParse(_testJunctionInput.Text, out uint code)) return;
+                Debug.WriteLine($">>> TRIGGER TEST premut, codi={code} (index={code / 10}, valor={code % 10}), simconnect null? {simconnect == null}");
+                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_FUELTRIGGER_TEST, code, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            };
+            _overlayPanel.Controls.Add(_testTriggerSendBtn);
 
             //this.TopMost = true;
             this.Load += frmMain_Load;
@@ -2502,7 +2540,7 @@ namespace SimConnect3
                 }});
             // SW_FUEL1 — left and right areas
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-LEFT", BasePos=new Point(1620, 1080), W=80, H=120, Resizable=true, NoShadow=true,
-                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172(),
+                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36(),
                 OnClick = () => {
                     if (_isMsfs2024 && IsC408()) {
                         // C408: un sol interruptor FUEL_TRANSFER físic, representat per 2 selectors a l'app.
@@ -2517,7 +2555,16 @@ namespace SimConnect3
                     }
                     if (fuel1Pos <= 0) return;
                     int newPos = fuel1Pos - 1;
-                    if (_isMsfs2024 && IsDA62()) {
+                    if (IsCaravan()) {
+                        // Caravan (C208B): trigger booleà independent, índex 3=Left. Sense crossfeed (2 estats
+                        // Off/On), per això aquest selector va de 0 a 1 (vegeu bound del botó RIGHT). Confirmat
+                        // via docs oficials: FUELSYSTEM_TRIGGER_ON/OFF són la variant d'1 paràmetre (només
+                        // índex) de K:2:FUELSYSTEM_TRIGGER_SET — enviable directe des de C#, sense WASM.
+                        var evt = newPos == 1 ? SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON : SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF;
+                        simconnect?.TransmitClientEvent(0, evt, 3, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        fuel1Pos = newPos;
+                        _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (_isMsfs2024 && IsDA62()) {
                         // DA-62: confirmat amb "Execute" a Behaviors — K:2:FUELSYSTEM_VALVE_SET +
                         // K:2:FUELSYSTEM_TRIGGER_SET (índex 1), NO junctions ni B:FUEL_VALVE_LEFT directe.
                         var da62Evt = newPos switch { 0 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_CROSS };
@@ -2539,7 +2586,7 @@ namespace SimConnect3
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-RIGHT", BasePos=new Point(1720, 1080), W=80, H=120, Resizable=true, NoShadow=true,
-                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172(),
+                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36(),
                 OnClick = () => {
                     if (_isMsfs2024 && IsC408()) {
                         if (fuel1Pos == 1) {
@@ -2550,9 +2597,14 @@ namespace SimConnect3
                         }
                         return;
                     }
-                    if (fuel1Pos >= 2) return;
+                    if (IsCaravan() ? fuel1Pos >= 1 : fuel1Pos >= 2) return;
                     int newPos = fuel1Pos + 1;
-                    if (_isMsfs2024 && IsDA62()) {
+                    if (IsCaravan()) {
+                        var evt = newPos == 1 ? SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON : SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF;
+                        simconnect?.TransmitClientEvent(0, evt, 3, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        fuel1Pos = newPos;
+                        _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (_isMsfs2024 && IsDA62()) {
                         var da62Evt = newPos switch { 0 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_CROSS };
                         simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         fuel1Pos = newPos;
@@ -2573,7 +2625,7 @@ namespace SimConnect3
                 }});
             // SW_FUEL2 — left and right areas
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-LEFT", BasePos=new Point(2120, 1080), W=80, H=120, Resizable=true, NoShadow=true,
-                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172(),
+                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36(),
                 OnClick = () => {
                     if (_isMsfs2024 && IsC408()) {
                         // Selector dret: només es mou entre CROSSFEED(0) i ON(1) — mai OFF(2).
@@ -2587,7 +2639,13 @@ namespace SimConnect3
                     }
                     if (fuel2Pos <= 0) return;
                     int newPos = fuel2Pos - 1;
-                    if (_isMsfs2024 && IsDA62()) {
+                    if (IsCaravan()) {
+                        // Caravan: mateix mecanisme que l'esquerra, índex 4=Right.
+                        var evt = newPos == 1 ? SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON : SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF;
+                        simconnect?.TransmitClientEvent(0, evt, 4, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        fuel2Pos = newPos;
+                        _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (_isMsfs2024 && IsDA62()) {
                         // DA-62: mateix mecanisme que l'esquerra, índex 2 (K:2:FUELSYSTEM_TRIGGER_SET/VALVE_SET). Confirmat.
                         var da62Evt = newPos switch { 2 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_CROSS };
                         simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
@@ -2609,7 +2667,7 @@ namespace SimConnect3
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-RIGHT", BasePos=new Point(2220, 1080), W=80, H=120, Resizable=true, NoShadow=true,
-                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172(),
+                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36(),
                 OnClick = () => {
                     if (_isMsfs2024 && IsC408()) {
                         if (fuel2Pos == 0) {
@@ -2620,9 +2678,14 @@ namespace SimConnect3
                         }
                         return;
                     }
-                    if (fuel2Pos >= 2) return;
+                    if (IsCaravan() ? fuel2Pos >= 1 : fuel2Pos >= 2) return;
                     int newPos = fuel2Pos + 1;
-                    if (_isMsfs2024 && IsDA62()) {
+                    if (IsCaravan()) {
+                        var evt = newPos == 1 ? SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON : SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF;
+                        simconnect?.TransmitClientEvent(0, evt, 4, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        fuel2Pos = newPos;
+                        _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (_isMsfs2024 && IsDA62()) {
                         var da62Evt = newPos switch { 2 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_CROSS };
                         simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         fuel2Pos = newPos;
@@ -2646,7 +2709,7 @@ namespace SimConnect3
             // Comanda confirmada via Behaviors "Set" (FUEL_SWITCH_SELECTOR / FUEL_SELECTOR_1) — veure SeSelectorMsfsVal().
             // Posicions per defecte = últim calibratge F12 de Pere (calibration_export.txt), es carreguen igualment via LoadCalibrationPositions.
             cockpitRight.Buttons.Add(new UiButton { Name="SE_SELECTOR-LEFT", BasePos=new Point(1529, 1967), W=186, H=253, Resizable=true, NoShadow=true,
-                ShowWhen = () => IsDA40() || IsC400() || IsC172(),
+                ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36(),
                 OnClick = () => {
                     if (seSelectorPos <= 0) return;
                     seSelectorPos--;
@@ -2654,7 +2717,7 @@ namespace SimConnect3
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="SE_SELECTOR-RIGHT", BasePos=new Point(1738, 1967), W=177, H=255, Resizable=true, NoShadow=true,
-                ShowWhen = () => IsDA40() || IsC400() || IsC172(),
+                ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36(),
                 OnClick = () => {
                     if (seSelectorPos >= 2) return;
                     seSelectorPos++;
@@ -2806,21 +2869,21 @@ namespace SimConnect3
                 // preparem el selector únic de 3 posicions. Arrossegable/redimensionable amb F12.
                 // De moment només actiu a la DA-40; s'anirà activant per altres monomotors més endavant.
                 new() { Name="SW_SE_SELECTOR_COVER", TypeKey="SE_COVER", BasePos=new Point(1280, 1757), ZoomWidth=753, ZoomHeight=350, Img=null,
-                        ShowWhen = () => IsDA40() || IsC400() || IsC172() },
+                        ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() },
                 // Selector únic de 3 posicions, centrat sobre el rectangle de tapa. Reutilitza la mateixa
                 // gràfica que els selectors twin-engine (mateix estil de pom vermell). Posició provisional,
                 // a reposicionar/redimensionar amb F12 un cop calibrat el rectangle de sobre.
                 new() { Name="SW_SE_SELECTOR", TypeKey="SE_SELECTOR", BasePos=new Point(1606, 1877), ZoomWidth=100,
-                        Img=swFuelImg, ShowWhen = () => IsDA40() || IsC400() || IsC172() },
+                        Img=swFuelImg, ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() },
                 // Etiquetes de les 3 posicions — mateix estil/mida que SW_DA40_FUELTRANSF_LBL (fons fosc +
                 // "Arial Narrow" 27px bold). 3 elements independents perquè Pere els posicioni per separat amb F12.
                 // El text es tria a SeSelectorLabelText() segons l'avió (DA-40: Normal/Emergency/Off; C400: Left/Right/Off).
                 new() { Name="SW_SE_LBL_1", TypeKey="SE_LBL_1", BasePos=new Point(1450, 1877), ZoomWidth=160, ZoomHeight=60, Img=null,
-                        NoResize = true, ShowWhen = () => IsDA40() || IsC400() || IsC172() },
+                        NoResize = true, ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() },
                 new() { Name="SW_SE_LBL_2", TypeKey="SE_LBL_2", BasePos=new Point(1620, 1780), ZoomWidth=160, ZoomHeight=60, Img=null,
-                        NoResize = true, ShowWhen = () => IsDA40() || IsC400() || IsC172() },
+                        NoResize = true, ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() },
                 new() { Name="SW_SE_LBL_3", TypeKey="SE_LBL_3", BasePos=new Point(1790, 1877), ZoomWidth=160, ZoomHeight=60, Img=null,
-                        NoResize = true, ShowWhen = () => IsDA40() || IsC400() || IsC172() },
+                        NoResize = true, ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() },
                 // Flaps switch
                 new() { Name="SW_FLAPS", TypeKey="SW flaps", BasePos=new Point(3000, 1500), ZoomWidth=75,
                         Img=LoadOverlayImage("SW flaps.png"),
@@ -2837,9 +2900,9 @@ namespace SimConnect3
                 new() { Name="SW_IGNITION2", TypeKey="SW ignition2", BasePos=new Point(2120, 1080), ZoomWidth=100,
                         Img=swIgnitionImg, ShowWhen=null, OnClick=null },
                 new() { Name="SW_FUEL1", TypeKey="SW fuel1", BasePos=new Point(1670, 1080), ZoomWidth=100,
-                        Img=swFuelImg, ShowWhen=() => !IsDA40() && !IsC400() && !IsC172(), OnClick=null },
+                        Img=swFuelImg, ShowWhen=() => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36(), OnClick=null },
                 new() { Name="SW_FUEL2", TypeKey="SW fuel2", BasePos=new Point(2170, 1080), ZoomWidth=100,
-                        Img=swFuelImg, ShowWhen=() => !IsDA40() && !IsC400() && !IsC172(), OnClick=null },
+                        Img=swFuelImg, ShowWhen=() => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36(), OnClick=null },
                 new() { Name="SW_BATTERY",    TypeKey="SW battery",    BasePos=new Point(1320, 1080), ZoomWidth=100,
                         Img=swBatteryImg,  ShowWhen = () => masterBatteryOff, OnClick=null },
                 new() { Name="SW_AVIONICS1",  TypeKey="SW avionics1",  BasePos=new Point(1770, 1280), ZoomWidth=100,
@@ -4616,6 +4679,8 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_OFF, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_TEST, "SFS.FuelSelDA40_Test");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_TEST, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELTRIGGER_TEST, "SFS.FuelTrigger_Test");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELTRIGGER_TEST, false);
 
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, "FLAPS_DECR");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, false);
@@ -4700,6 +4765,13 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET,   false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FUEL_SELECTOR_2_SET, "FUEL_SELECTOR_2_SET");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FUEL_SELECTOR_2_SET, false);
+                // Caravan (C208B): 2 triggers de fuel shutoff independents (índex 3=Left, 4=Right), confirmats
+                // a Behaviors via K:2:FUELSYSTEM_TRIGGER_SET. FUELSYSTEM_TRIGGER_ON/OFF són la variant d'1 sol
+                // paràmetre (només índex) del mateix event — es poden enviar directes des de C#, sense WASM.
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON, "FUELSYSTEM_TRIGGER_ON");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF, "FUELSYSTEM_TRIGGER_OFF");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF, false);
                 simconnect.SetNotificationGroupPriority(SIMCONNECT_GROUPS.GROUP0, SimConnect.SIMCONNECT_GROUP_PRIORITY_HIGHEST);
 
 
@@ -5664,7 +5736,28 @@ namespace SimConnect3
 
                 int newFuel1Pos, newFuel2Pos;
 
-                if (_isMsfs2024 && numEngines >= 2)
+                if (IsBonanzaG36())
+                {
+                    // Selector únic (SW_SE_SELECTOR), no els 2 ganivets fuel1Pos/fuel2Pos. Reutilitza la
+                    // mateixa lectura "FUEL TANK SELECTOR:1" ja present a Struct1 (s1.fuel_selector_1).
+                    // ASIMETRIA confirmada: escriure (K:FUEL_SELECTOR_SET) i llegir (FUEL TANK SELECTOR:1)
+                    // fan servir codis DIFERENTS per Right — escriure 1 mou a Right, però llegit torna 3
+                    // (verificat movent el selector a mà al VC): lectura real 0=Off, 2=Left, 3=Right.
+                    if (s1.fuel_selector_1 != _bonanzaFuelSelectorRawLast)
+                    {
+                        Debug.WriteLine($"[BONANZA FUEL TANK SELECTOR:1] {_bonanzaFuelSelectorRawLast} -> {s1.fuel_selector_1}");
+                        _bonanzaFuelSelectorRawLast = s1.fuel_selector_1;
+                    }
+                    int newPosFromRead = s1.fuel_selector_1 switch { 0 => 0, 2 => 1, 3 => 2, _ => seSelectorPos };
+                    if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
+                    {
+                        seSelectorPos = newPosFromRead;
+                        needsRepaint = true;
+                    }
+                    newFuel1Pos = fuel1Pos;
+                    newFuel2Pos = fuel2Pos;
+                }
+                else if (_isMsfs2024 && numEngines >= 2)
                 {
                     // Bimotors MSFS2024: estat actualitzat pels handlers dedicats RequestFuelSelLeft/Right
                     // (L:FUEL_Switch_Cutoff_Crossfeed_1/_2) — la SimVar "FUEL TANK SELECTOR" no reflecteix
@@ -6832,7 +6925,7 @@ namespace SimConnect3
             // SW_FUEL1: pos0=OFF(-30°), pos1=ON(0°), pos2=CROSSFEED(+30°)
             {
                 var sw = overlayImages.FirstOrDefault(o => o.Name == "SW_FUEL1");
-                if (sw?.Img != null && !IsDA40() && !IsC400() && !IsC172())
+                if (sw?.Img != null && !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36())
                 {
                     float angle = (fuel1Pos - 1) * 30f + 30f;
                     float baseW = sw.ZoomWidth;
@@ -6849,7 +6942,7 @@ namespace SimConnect3
             // SW_FUEL2: pos0=CROSSFEED(-30°), pos1=ON(0°), pos2=OFF(+30°)
             {
                 var sw = overlayImages.FirstOrDefault(o => o.Name == "SW_FUEL2");
-                if (sw?.Img != null && !IsDA40() && !IsC400() && !IsC172())
+                if (sw?.Img != null && !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36())
                 {
                     float angle = (fuel2Pos - 1) * 30f + 30f;
                     float baseW = sw.ZoomWidth;
@@ -7840,6 +7933,8 @@ namespace SimConnect3
             sb.AppendLine($"TESTFSELNORM:testfselnorm:{_testFuelSelNormBtn.Location.X}:{_testFuelSelNormBtn.Location.Y}");
             sb.AppendLine($"TESTFSELEMERG:testfselemerg:{_testFuelSelEmergBtn.Location.X}:{_testFuelSelEmergBtn.Location.Y}");
             sb.AppendLine($"TESTFSELOFF:testfseloff:{_testFuelSelOffBtn.Location.X}:{_testFuelSelOffBtn.Location.Y}");
+            sb.AppendLine($"TESTJUNCTBOX:testjunctbox:{_testJunctionInput.Location.X}:{_testJunctionInput.Location.Y}");
+            sb.AppendLine($"TESTJUNCTSEND:testjunctsend:{_testJunctionSendBtn.Location.X}:{_testJunctionSendBtn.Location.Y}");
             sb.AppendLine($"G3KBTN:g3k:{_g3000Btn.Location.X}:{_g3000Btn.Location.Y}");
             sb.AppendLine($"THRQBTN:tq:{_thrQuadrantBtn.Location.X}:{_thrQuadrantBtn.Location.Y}:0:0");
             if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
@@ -8048,6 +8143,14 @@ namespace SimConnect3
                 {
                     _testFuelSelOffBtn.Location = new Point(x, y);
                 }
+                else if (type == "TESTJUNCTBOX")
+                {
+                    _testJunctionInput.Location = new Point(x, y);
+                }
+                else if (type == "TESTJUNCTSEND")
+                {
+                    _testJunctionSendBtn.Location = new Point(x, y);
+                }
                 else if (type == "G3KBTN")
                 {
                     _g3000Btn.Location = new Point(x, y);
@@ -8136,6 +8239,18 @@ namespace SimConnect3
             {
                 uint code = pos switch { 0 => 11u, 1 => 12u, _ => 13u };
                 simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_TEST, code, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                _seSelectorIgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                return;
+            }
+            // Bonanza G36: mecanisme legacy simple, K:FUEL_SELECTOR_SET (1 sol paràmetre, ja mapejat,
+            // sense WASM) — confirmat funcional (l'engine s'atura a OFF). ELS VALORS DELS BINDINGS DE
+            // BEHAVIORS NO COINCIDEIXEN AMB EL VC REAL (mateixa sorpresa que el C400/C172) — confirmat
+            // empíricament al VC: val=0→Off, val=1→Right, val=2→Left.
+            // Ordre físic triat per Pere (igual que el C400): pos0=OFF, pos1=LEFT, pos2=RIGHT.
+            if (IsBonanzaG36())
+            {
+                uint val = pos switch { 0 => 0u, 1 => 2u, _ => 1u };
+                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, val, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                 _seSelectorIgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                 return;
             }
