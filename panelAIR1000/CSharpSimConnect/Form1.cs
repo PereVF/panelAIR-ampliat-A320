@@ -269,6 +269,9 @@ namespace SimConnect3
         double _daFuelTankSelector2 = double.MinValue; // A:FUEL TANK SELECTOR:2 — idem, per si l'índex real no és l'1
         double _daFuelTankSelector3 = double.MinValue; // A:FUEL TANK SELECTOR:3 — idem (la bomba de la DA-40 fa servir índex 3)
         int _bonanzaFuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la Bonanza (veure Output/Debug de VS)
+        double _da62AvionicsLineConn = double.MinValue; // A:LINE CONNECTION ON:rh_main_bustoavionics_bus — estat real del bus d'avionics de la DA-62
+        double _c172Avionics1LineConn = double.MinValue; // A:LINE CONNECTION ON:BUS_1_To_AVIONICS_BUS_1
+        double _c172Avionics2LineConn = double.MinValue; // A:LINE CONNECTION ON:BUS_2_To_AVIONICS_BUS_2
         double _c400JunctionSetting = double.MinValue; // A:FUELSYSTEM JUNCTION SETTING:1 — opció real seleccionada al C400
         DateTime _fuelSel1IgnoreFollowUntil = DateTime.MinValue; // evita el "rebot" quan la lectura encara no ha seguit el clic
         DateTime _fuelSel2IgnoreFollowUntil = DateTime.MinValue;
@@ -635,6 +638,9 @@ namespace SimConnect3
             DA40FuelTankSelector2Read,
             DA40FuelTankSelector3Read,
             C400JunctionSettingRead,
+            DA62AvionicsLineConnRead,
+            C172Avionics1LineConnRead,
+            C172Avionics2LineConnRead,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -696,6 +702,12 @@ namespace SimConnect3
         struct DA40FuelTankSelector3Struct { public double value; } // A:FUEL TANK SELECTOR:3,Enum — la DA-40 fa servir índex 3 per la bomba, per si el selector també
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct C400JunctionSettingStruct { public double value; } // A:FUELSYSTEM JUNCTION SETTING:1,Enum — opció seleccionada del junction del C400 (1=Off,2=Left,3=Right)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct DA62AvionicsLineConnStruct { public double value; } // A:LINE CONNECTION ON:rh_main_bustoavionics_bus,Bool — estat real del bus d'avionics de la DA-62
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct C172Avionics1LineConnStruct { public double value; } // A:LINE CONNECTION ON:BUS_1_To_AVIONICS_BUS_1,Bool
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct C172Avionics2LineConnStruct { public double value; } // A:LINE CONNECTION ON:BUS_2_To_AVIONICS_BUS_2,Bool
 
         enum REQUESTS
         {
@@ -711,6 +723,9 @@ namespace SimConnect3
             RequestDA40FuelTankSelector2,
             RequestDA40FuelTankSelector3,
             RequestC400JunctionSetting,
+            RequestDA62AvionicsLineConn,
+            RequestC172Avionics1LineConn,
+            RequestC172Avionics2LineConn,
         }
         enum SIMCONNECT_EVENTS
         {
@@ -922,6 +937,9 @@ namespace SimConnect3
             SFS_DA40_FUELSEL_OFF,
             SFS_DA40_FUELSEL_TEST,
             SFS_FUELTRIGGER_TEST,
+            SFS_DA62_AVIONICS_TOGGLE,
+            SFS_C172_AVIONICS1_SET,
+            SFS_C172_AVIONICS2_SET,
             SWITCH_PBRAKE,
             MASTER_BATTERY_ON,
             MASTER_BATTERY_OFF,
@@ -1271,6 +1289,11 @@ namespace SimConnect3
         private bool  _testJunctionSendBtnDragging;
         private Point _testJunctionSendBtnDragOffset;
         private System.Windows.Forms.Button _testTriggerSendBtn = null!;
+        private bool  _testTriggerSendBtnDragging;
+        private Point _testTriggerSendBtnDragOffset;
+        private System.Windows.Forms.Button _testAvionicsToggleBtn = null!;
+        private bool  _testAvionicsToggleBtnDragging;
+        private Point _testAvionicsToggleBtnDragOffset;
 
         private System.Windows.Forms.Button _g3000Btn = null!;
         private bool  _g3000BtnDragging;
@@ -2352,7 +2375,35 @@ namespace SimConnect3
                 Debug.WriteLine($">>> TRIGGER TEST premut, codi={code} (index={code / 10}, valor={code % 10}), simconnect null? {simconnect == null}");
                 simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_FUELTRIGGER_TEST, code, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             };
+            _testTriggerSendBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testTriggerSendBtnDragging = true; _testTriggerSendBtnDragOffset = e.Location; };
+            _testTriggerSendBtn.MouseMove += (s, e) => {
+                if (!_testTriggerSendBtnDragging) return;
+                var sp = _testTriggerSendBtn.PointToScreen(e.Location);
+                var fp = _overlayPanel!.PointToClient(sp);
+                _testTriggerSendBtn.Location = new Point(fp.X - _testTriggerSendBtnDragOffset.X, fp.Y - _testTriggerSendBtnDragOffset.Y);
+            };
+            _testTriggerSendBtn.MouseUp += (s, e) => { _testTriggerSendBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             _overlayPanel.Controls.Add(_testTriggerSendBtn);
+
+            // ── Mateix camp, però envia el valor cru com a índex de bus a ELECTRICAL_LINE_CONNECTION_TOGGLE
+            // (DA-62 avionics — 'nom'_n de Behaviors probablement es resol a un número, com el junction del C400) ──
+            _testAvionicsToggleBtn = MakeGroupBtn("AVTGL", 100, 40);
+            _testAvionicsToggleBtn.Location = new Point(3430, 230);
+            _testAvionicsToggleBtn.Click += (s, e) => {
+                if (calibrationMode) return;
+                if (!uint.TryParse(_testJunctionInput.Text, out uint idx)) return;
+                Debug.WriteLine($">>> AVIONICS TOGGLE TEST premut, index={idx}, simconnect null? {simconnect == null}");
+                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA62_AVIONICS_TOGGLE, idx, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            };
+            _testAvionicsToggleBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testAvionicsToggleBtnDragging = true; _testAvionicsToggleBtnDragOffset = e.Location; };
+            _testAvionicsToggleBtn.MouseMove += (s, e) => {
+                if (!_testAvionicsToggleBtnDragging) return;
+                var sp = _testAvionicsToggleBtn.PointToScreen(e.Location);
+                var fp = _overlayPanel!.PointToClient(sp);
+                _testAvionicsToggleBtn.Location = new Point(fp.X - _testAvionicsToggleBtnDragOffset.X, fp.Y - _testAvionicsToggleBtnDragOffset.Y);
+            };
+            _testAvionicsToggleBtn.MouseUp += (s, e) => { _testAvionicsToggleBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            _overlayPanel.Controls.Add(_testAvionicsToggleBtn);
 
             //this.TopMost = true;
             this.Load += frmMain_Load;
@@ -2478,12 +2529,39 @@ namespace SimConnect3
             // Avionics switches — single toggle area each
             cockpitRight.Buttons.Add(new UiButton { Name="AVIONICS1-TOGGLE", BasePos=new Point(1770, 1220), W=100, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
+                    if (IsDA62())
+                    {
+                        // DA-62: sistema elèctric modular, K:ELECTRICAL_LINE_CONNECTION_TOGGLE (nom de bus,
+                        // no índex numèric) via WASM — és un TOGGLE real, no ON/OFF, per això no cal triar event.
+                        Debug.WriteLine($">>> DA62 AVIONICS TOGGLE premut, simconnect null? {simconnect == null}");
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA62_AVIONICS_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        pbMain.Invalidate();
+                        return;
+                    }
+                    if (IsC172())
+                    {
+                        // C172: sistema elèctric modular igual que la DA-62, però amb K:2:ELECTRICAL_LINE_CONNECTION_SET
+                        // (valor explícit 0/1 + nom de bus 'BUS_1_To_AVIONICS_BUS_1', via WASM).
+                        uint val = avionics1Off ? 1u : 0u;
+                        Debug.WriteLine($">>> C172 AVIONICS1 SET premut, val={val}, simconnect null? {simconnect == null}");
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_C172_AVIONICS1_SET, val, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        pbMain.Invalidate();
+                        return;
+                    }
                     var ev = avionics1Off ? SIMCONNECT_EVENTS.AVIONICS_MASTER_1_ON : SIMCONNECT_EVENTS.AVIONICS_MASTER_1_OFF;
                     simconnect?.TransmitClientEvent(0, ev, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="AVIONICS2-TOGGLE", BasePos=new Point(1970, 1220), W=100, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
+                    if (IsC172())
+                    {
+                        uint val = avionics2Off ? 1u : 0u;
+                        Debug.WriteLine($">>> C172 AVIONICS2 SET premut, val={val}, simconnect null? {simconnect == null}");
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_C172_AVIONICS2_SET, val, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        pbMain.Invalidate();
+                        return;
+                    }
                     var ev = avionics2Off ? SIMCONNECT_EVENTS.AVIONICS_MASTER_2_ON : SIMCONNECT_EVENTS.AVIONICS_MASTER_2_OFF;
                     simconnect?.TransmitClientEvent(0, ev, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
@@ -4681,6 +4759,12 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_TEST, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_FUELTRIGGER_TEST, "SFS.FuelTrigger_Test");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_FUELTRIGGER_TEST, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_DA62_AVIONICS_TOGGLE, "SFS.DA62_Avionics_Toggle");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_DA62_AVIONICS_TOGGLE, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_C172_AVIONICS1_SET, "SFS.C172_Avionics1_Set");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_C172_AVIONICS1_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_C172_AVIONICS2_SET, "SFS.C172_Avionics2_Set");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_C172_AVIONICS2_SET, false);
 
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, "FLAPS_DECR");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, false);
@@ -5043,6 +5127,20 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.C400JunctionSettingRead, "FUELSYSTEM JUNCTION SETTING:1", "Enum", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<C400JunctionSettingStruct>(DEFINITIONS.C400JunctionSettingRead);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestC400JunctionSetting, DEFINITIONS.C400JunctionSettingRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // DA-62 — estat real del bus d'avionics (sistema elèctric modular, "LINE CONNECTION"),
+                // NO l'"AVIONICS MASTER SWITCH:1" clàssic que ja llegim a Struct1 (no reflecteix aquest avió).
+                simconnect.AddToDataDefinition(DEFINITIONS.DA62AvionicsLineConnRead, "LINE CONNECTION ON:'rh_main_bustoavionics_bus'_n", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<DA62AvionicsLineConnStruct>(DEFINITIONS.DA62AvionicsLineConnRead);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestDA62AvionicsLineConn, DEFINITIONS.DA62AvionicsLineConnRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // C172 — mateix mecanisme, un bus per cada avionics (mateix nom que a la RPN de Behaviors).
+                simconnect.AddToDataDefinition(DEFINITIONS.C172Avionics1LineConnRead, "LINE CONNECTION ON:'BUS_1_To_AVIONICS_BUS_1'_n", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<C172Avionics1LineConnStruct>(DEFINITIONS.C172Avionics1LineConnRead);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestC172Avionics1LineConn, DEFINITIONS.C172Avionics1LineConnRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+                simconnect.AddToDataDefinition(DEFINITIONS.C172Avionics2LineConnRead, "LINE CONNECTION ON:'BUS_2_To_AVIONICS_BUS_2'_n", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<C172Avionics2LineConnStruct>(DEFINITIONS.C172Avionics2LineConnRead);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestC172Avionics2LineConn, DEFINITIONS.C172Avionics2LineConnRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
             }
             catch (COMException ex)
@@ -5428,6 +5526,63 @@ namespace SimConnect3
                 }
                 return;
             }
+            if (data.dwRequestID == (uint)REQUESTS.RequestDA62AvionicsLineConn)
+            {
+                double newVal = ((DA62AvionicsLineConnStruct)data.dwData[0]).value;
+                if (newVal != _da62AvionicsLineConn)
+                {
+                    Debug.WriteLine($"[DA62 LINE CONNECTION ON:rh_main_bustoavionics_bus] {_da62AvionicsLineConn} -> {newVal}");
+                    _da62AvionicsLineConn = newVal;
+                }
+                if (IsDA62())
+                {
+                    bool newAvionics1OffFromRead = newVal < 0.5;
+                    if (newAvionics1OffFromRead != avionics1Off)
+                    {
+                        avionics1Off = newAvionics1OffFromRead;
+                        pbMain.Invalidate();
+                    }
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestC172Avionics1LineConn)
+            {
+                double newVal = ((C172Avionics1LineConnStruct)data.dwData[0]).value;
+                if (newVal != _c172Avionics1LineConn)
+                {
+                    Debug.WriteLine($"[C172 LINE CONNECTION ON:BUS_1_To_AVIONICS_BUS_1] {_c172Avionics1LineConn} -> {newVal}");
+                    _c172Avionics1LineConn = newVal;
+                }
+                if (IsC172())
+                {
+                    bool newAvionics1OffFromRead = newVal < 0.5;
+                    if (newAvionics1OffFromRead != avionics1Off)
+                    {
+                        avionics1Off = newAvionics1OffFromRead;
+                        pbMain.Invalidate();
+                    }
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestC172Avionics2LineConn)
+            {
+                double newVal = ((C172Avionics2LineConnStruct)data.dwData[0]).value;
+                if (newVal != _c172Avionics2LineConn)
+                {
+                    Debug.WriteLine($"[C172 LINE CONNECTION ON:BUS_2_To_AVIONICS_BUS_2] {_c172Avionics2LineConn} -> {newVal}");
+                    _c172Avionics2LineConn = newVal;
+                }
+                if (IsC172())
+                {
+                    bool newAvionics2OffFromRead = newVal < 0.5;
+                    if (newAvionics2OffFromRead != avionics2Off)
+                    {
+                        avionics2Off = newAvionics2OffFromRead;
+                        pbMain.Invalidate();
+                    }
+                }
+                return;
+            }
             if (data.dwRequestID == (uint)REQUESTS.Request1)
             {
                 Struct1 s1 = (Struct1)data.dwData[0];
@@ -5687,17 +5842,28 @@ namespace SimConnect3
                     masterBatteryOff = newMasterBatteryOff;
                     needsRepaint = true;
                 }
-                bool newAvionics1Off = s1.avionics_master_1 == 0;
-                if (newAvionics1Off != avionics1Off)
+                // DA-62/C172: exclosos — "AVIONICS MASTER SWITCH:1/2" no reflecteix el seu sistema elèctric
+                // modular (LINE CONNECTION). DA-62 fa servir el RequestDA62AvionicsLineConn dedicat de dalt;
+                // C172 encara no té lectura pròpia (només comandaments per ara) — es queda amb l'estat local
+                // optimista del clic, sense que aquesta lectura genèrica el sobreescrigui i el desincronitzi
+                // (mateix bug recurrent que ja ha passat amb els selectors de combustible — veure memòria).
+                if (!IsDA62() && !IsC172())
                 {
-                    avionics1Off = newAvionics1Off;
-                    needsRepaint = true;
+                    bool newAvionics1Off = s1.avionics_master_1 == 0;
+                    if (newAvionics1Off != avionics1Off)
+                    {
+                        avionics1Off = newAvionics1Off;
+                        needsRepaint = true;
+                    }
                 }
-                bool newAvionics2Off = s1.avionics_master_2 == 0;
-                if (newAvionics2Off != avionics2Off)
+                if (!IsC172())
                 {
-                    avionics2Off = newAvionics2Off;
-                    needsRepaint = true;
+                    bool newAvionics2Off = s1.avionics_master_2 == 0;
+                    if (newAvionics2Off != avionics2Off)
+                    {
+                        avionics2Off = newAvionics2Off;
+                        needsRepaint = true;
+                    }
                 }
                 bool newAltGen1Off = s1.gen_master_alt_1 == 0;
                 bool newAltGen2Off = s1.gen_master_alt_2 == 0;
@@ -7935,6 +8101,8 @@ namespace SimConnect3
             sb.AppendLine($"TESTFSELOFF:testfseloff:{_testFuelSelOffBtn.Location.X}:{_testFuelSelOffBtn.Location.Y}");
             sb.AppendLine($"TESTJUNCTBOX:testjunctbox:{_testJunctionInput.Location.X}:{_testJunctionInput.Location.Y}");
             sb.AppendLine($"TESTJUNCTSEND:testjunctsend:{_testJunctionSendBtn.Location.X}:{_testJunctionSendBtn.Location.Y}");
+            sb.AppendLine($"TESTTRIGSEND:testtrigsend:{_testTriggerSendBtn.Location.X}:{_testTriggerSendBtn.Location.Y}");
+            sb.AppendLine($"TESTAVTGL:testavtgl:{_testAvionicsToggleBtn.Location.X}:{_testAvionicsToggleBtn.Location.Y}");
             sb.AppendLine($"G3KBTN:g3k:{_g3000Btn.Location.X}:{_g3000Btn.Location.Y}");
             sb.AppendLine($"THRQBTN:tq:{_thrQuadrantBtn.Location.X}:{_thrQuadrantBtn.Location.Y}:0:0");
             if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
@@ -8150,6 +8318,14 @@ namespace SimConnect3
                 else if (type == "TESTJUNCTSEND")
                 {
                     _testJunctionSendBtn.Location = new Point(x, y);
+                }
+                else if (type == "TESTTRIGSEND")
+                {
+                    _testTriggerSendBtn.Location = new Point(x, y);
+                }
+                else if (type == "TESTAVTGL")
+                {
+                    _testAvionicsToggleBtn.Location = new Point(x, y);
                 }
                 else if (type == "G3KBTN")
                 {
