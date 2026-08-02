@@ -19,6 +19,7 @@
       "PowerShell(Stop-Process*)",
       "PowerShell(taskkill*)",
       "Bash(taskkill*)",
+      "Bash(tasklist*)",
       "PowerShell(Start-Process*)",
       "PowerShell(Remove-Item*)",
       "PowerShell(Get-Content*)",

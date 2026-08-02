@@ -272,6 +272,9 @@ namespace SimConnect3
         double _da62AvionicsLineConn = double.MinValue; // A:LINE CONNECTION ON:rh_main_bustoavionics_bus — estat real del bus d'avionics de la DA-62
         double _c172Avionics1LineConn = double.MinValue; // A:LINE CONNECTION ON:BUS_1_To_AVIONICS_BUS_1
         double _c172Avionics2LineConn = double.MinValue; // A:LINE CONNECTION ON:BUS_2_To_AVIONICS_BUS_2
+        double _caravanAvionics1LineConn = double.MinValue; // A:LINE CONNECTION ON:AVIONICS_BUS_1_To_PWR_BUS_DISTRIB
+        double _caravanAvionics2LineConn = double.MinValue; // A:LINE CONNECTION ON:AVIONICS_BUS_2_To_PWR_BUS_DISTRIB
+        double _caravanAltGen2LineConn = double.MinValue; // A:LINE CONNECTION ON:BATT_BUS_To_ALT_BUS
         double _c400JunctionSetting = double.MinValue; // A:FUELSYSTEM JUNCTION SETTING:1 — opció real seleccionada al C400
         DateTime _fuelSel1IgnoreFollowUntil = DateTime.MinValue; // evita el "rebot" quan la lectura encara no ha seguit el clic
         DateTime _fuelSel2IgnoreFollowUntil = DateTime.MinValue;
@@ -641,6 +644,9 @@ namespace SimConnect3
             DA62AvionicsLineConnRead,
             C172Avionics1LineConnRead,
             C172Avionics2LineConnRead,
+            CaravanAvionics1LineConnRead,
+            CaravanAvionics2LineConnRead,
+            CaravanAltGen2LineConnRead,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -708,6 +714,11 @@ namespace SimConnect3
         struct C172Avionics1LineConnStruct { public double value; } // A:LINE CONNECTION ON:BUS_1_To_AVIONICS_BUS_1,Bool
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct C172Avionics2LineConnStruct { public double value; } // A:LINE CONNECTION ON:BUS_2_To_AVIONICS_BUS_2,Bool
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct CaravanAvionics1LineConnStruct { public double value; } // A:LINE CONNECTION ON:AVIONICS_BUS_1_To_PWR_BUS_DISTRIB,Bool
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct CaravanAvionics2LineConnStruct { public double value; } // A:LINE CONNECTION ON:AVIONICS_BUS_2_To_PWR_BUS_DISTRIB,Bool
+        struct CaravanAltGen2LineConnStruct { public double value; } // A:LINE CONNECTION ON:BATT_BUS_To_ALT_BUS,Bool — interruptor "R ALT GEN 2" (standby alternator)
 
         enum REQUESTS
         {
@@ -726,6 +737,9 @@ namespace SimConnect3
             RequestDA62AvionicsLineConn,
             RequestC172Avionics1LineConn,
             RequestC172Avionics2LineConn,
+            RequestCaravanAvionics1LineConn,
+            RequestCaravanAvionics2LineConn,
+            RequestCaravanAltGen2LineConn,
         }
         enum SIMCONNECT_EVENTS
         {
@@ -940,6 +954,10 @@ namespace SimConnect3
             SFS_DA62_AVIONICS_TOGGLE,
             SFS_C172_AVIONICS1_SET,
             SFS_C172_AVIONICS2_SET,
+            SFS_CARAVAN_AVIONICS1_SET,
+            SFS_CARAVAN_AVIONICS2_SET,
+            SFS_CARAVAN_ALTGEN1_SET,
+            SFS_CARAVAN_ALTGEN2_SET,
             SWITCH_PBRAKE,
             MASTER_BATTERY_ON,
             MASTER_BATTERY_OFF,
@@ -1567,7 +1585,7 @@ namespace SimConnect3
             }
 
             var asm = System.Reflection.Assembly.GetExecutingAssembly();
-            using (var s = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_1000 4K panel_f.png"))
+            using (var s = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_1000 4K panel_g.png"))
                 if (s != null) { using var src = Image.FromStream(s); _bgImage = new Bitmap(src); }
             using (var s = asm.GetManifestResourceStream("panelAIR1000.Resources.main GA_3000 4K panel_m.png"))
                 if (s != null) { using var src = Image.FromStream(s); _bgG3000Image = new Bitmap(src); }
@@ -2548,6 +2566,15 @@ namespace SimConnect3
                         pbMain.Invalidate();
                         return;
                     }
+                    if (IsCaravan())
+                    {
+                        // Caravan: mateix mecanisme que la C172, bus 'AVIONICS_BUS_1_To_PWR_BUS_DISTRIB'.
+                        uint val = avionics1Off ? 1u : 0u;
+                        Debug.WriteLine($">>> CARAVAN AVIONICS1 SET premut, val={val}, simconnect null? {simconnect == null}");
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_CARAVAN_AVIONICS1_SET, val, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        pbMain.Invalidate();
+                        return;
+                    }
                     var ev = avionics1Off ? SIMCONNECT_EVENTS.AVIONICS_MASTER_1_ON : SIMCONNECT_EVENTS.AVIONICS_MASTER_1_OFF;
                     simconnect?.TransmitClientEvent(0, ev, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
@@ -2562,19 +2589,60 @@ namespace SimConnect3
                         pbMain.Invalidate();
                         return;
                     }
+                    if (IsCaravan())
+                    {
+                        uint val = avionics2Off ? 1u : 0u;
+                        Debug.WriteLine($">>> CARAVAN AVIONICS2 SET premut, val={val}, simconnect null? {simconnect == null}");
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_CARAVAN_AVIONICS2_SET, val, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        pbMain.Invalidate();
+                        return;
+                    }
                     var ev = avionics2Off ? SIMCONNECT_EVENTS.AVIONICS_MASTER_2_ON : SIMCONNECT_EVENTS.AVIONICS_MASTER_2_OFF;
                     simconnect?.TransmitClientEvent(0, ev, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
                 }});
-            // ALT/GEN switch 1 — single toggle area
+            // ALT/GEN switch 1 — single toggle area (tots els avions excepte la Caravan, que té un
+            // interruptor momentani de 3 posicions: veure ALTGEN1-UP/DN just a sota).
             cockpitRight.Buttons.Add(new UiButton { Name="ALTGEN1-TOGGLE", BasePos=new Point(1420, 1220), W=100, H=120, Resizable=true, NoShadow=true,
+                ShowWhen = () => !IsCaravan(),
                 OnClick = () => {
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_ALTERNATOR1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
+            // Caravan — interruptor momentani de 3 posicions (RESET/centre/TRIP), repòs al centre.
+            // K:TOGGLE_ALTERNATOR1 directe (sense WASM) — confirmat funcional per l'efecte elèctric.
+            // La RPN completa (escrivint O:ELECTRICAL_Alternator_1_Position via WASM) es va provar i
+            // NO funciona (les O: vars d'aquest InputEvent no són accessibles des d'un WASM extern) —
+            // abandonat, ens quedem sense el moviment visual de l'agulla al VC.
+            cockpitRight.Buttons.Add(new UiButton { Name="ALTGEN1-UP", BasePos=new Point(1420, 1170), W=100, H=60, Resizable=true, NoShadow=true,
+                ShowWhen = () => IsCaravan(),
+                OnClick = () => {
+                    // UP -> RESET: engega només si estava apagat.
+                    if (altGen1Off)
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_ALTERNATOR1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    pbMain.Invalidate();
+                }});
+            cockpitRight.Buttons.Add(new UiButton { Name="ALTGEN1-DN", BasePos=new Point(1420, 1280), W=100, H=60, Resizable=true, NoShadow=true,
+                ShowWhen = () => IsCaravan(),
+                OnClick = () => {
+                    // DN -> TRIP: apaga només si estava engegat.
+                    if (!altGen1Off)
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_ALTERNATOR1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
                 }});
             // ALT/GEN switch 2 — single toggle area
             cockpitRight.Buttons.Add(new UiButton { Name="ALTGEN2-TOGGLE", BasePos=new Point(1620, 1220), W=100, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
+                    if (IsCaravan())
+                    {
+                        // Caravan: aquest interruptor no és el segon alternador (monomotor), és el
+                        // "R ALT GEN 2" / standby alternator (ELECTRICAL_SWITCH_ALTERNATOR_STBY_1),
+                        // ON/OFF real via LINE CONNECTION 'BATT_BUS_To_ALT_BUS'_n.
+                        uint val = altGen2Off ? 1u : 0u;
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_CARAVAN_ALTGEN2_SET, val, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        pbMain.Invalidate();
+                        return;
+                    }
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_ALTERNATOR2, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
                 }});
@@ -2846,6 +2914,7 @@ namespace SimConnect3
             var swBatteryImg  = LoadOverlayImage("SW battery.png");
             var swAvionicsImg = LoadOverlayImage("SW avionics.png");
             var swDnRedImg    = LoadOverlayImage("SW DN red.png");
+            var swCenterRedImg = LoadOverlayImage("SW CENTER red.png");
             var swCenterWhiteImg = LoadOverlayImage("SW CENTER white_b.png");
             overlayImages = new List<OverlayImage>
             {
@@ -2943,6 +3012,22 @@ namespace SimConnect3
                 new() { Name="SW_DA40_FUELTRANSF_LBL", TypeKey="DA40_LBL", BasePos=new Point(1804, 1598), ZoomWidth=160, ZoomHeight=60, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsDA40() },
+                // Caravan — etiqueta "STBY / ALT PWR" per l'interruptor ALTGEN2-TOGGLE (standby alternator).
+                // Mateix estil/mida que SW_DA40_FUELTRANSF_LBL. Arrossegable amb F12, mida fixa.
+                new() { Name="SW_CARAVAN_ALTGEN2_LBL", TypeKey="CARAVAN_ALTGEN2_LBL", BasePos=new Point(1620, 1350), ZoomWidth=160, ZoomHeight=60, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
+                // Caravan — etiquetes RESET/ON/TRIP per l'interruptor momentani ALTGEN1 (UP/centre/DN).
+                // Mateix estil que SW_CARAVAN_ALTGEN2_LBL. Arrossegables amb F12, mida fixa.
+                new() { Name="SW_CARAVAN_ALTGEN1_LBL_RESET", TypeKey="CARAVAN_ALTGEN1_LBL", BasePos=new Point(1550, 1170), ZoomWidth=112, ZoomHeight=60, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
+                new() { Name="SW_CARAVAN_ALTGEN1_LBL_ON", TypeKey="CARAVAN_ALTGEN1_LBL", BasePos=new Point(1550, 1220), ZoomWidth=112, ZoomHeight=60, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
+                new() { Name="SW_CARAVAN_ALTGEN1_LBL_TRIP", TypeKey="CARAVAN_ALTGEN1_LBL", BasePos=new Point(1550, 1280), ZoomWidth=112, ZoomHeight=60, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
                 // Monomotors — rectangle negre que tapa els 2 selectors físics de tank (LEFT/RIGHT) mentre
                 // preparem el selector únic de 3 posicions. Arrossegable/redimensionable amb F12.
                 // De moment només actiu a la DA-40; s'anirà activant per altres monomotors més endavant.
@@ -2991,6 +3076,10 @@ namespace SimConnect3
                         Img=swDnRedImg, ShowWhen = () => altGen1Off, OnClick=null },
                 new() { Name="SW_ALT2", TypeKey="SW altgen2", BasePos=new Point(1620, 1280), ZoomWidth=100,
                         Img=swDnRedImg, ShowWhen = () => altGen2Off, OnClick=null },
+                // Caravan — posició de repòs/ON (centre) del switch d'alternador, mateix patró que
+                // SW_CN_FUELPUMP1/SW_DN_FUELPUMP1: es va alternant amb SW_ALT1 segons altGen1Off.
+                new() { Name="SW_ALT1_CENTER", TypeKey="SW CN red", BasePos=new Point(1420, 1280), ZoomWidth=75,
+                        Img=swCenterRedImg, ShowWhen = () => IsCaravan() && !altGen1Off, OnClick=null },
                 new() { Name="LED_PBRAKE", TypeKey="LED_PBRAKE", BasePos=new Point(2918, 1755), ZoomWidth=32, Img=ledRedImg,
                         ShowWhen = () => mainBusVolts >= 5.0 && pbrakeActive },
                 // GEAR LEDs
@@ -4765,6 +4854,14 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_C172_AVIONICS1_SET, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_C172_AVIONICS2_SET, "SFS.C172_Avionics2_Set");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_C172_AVIONICS2_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_CARAVAN_AVIONICS1_SET, "SFS.Caravan_Avionics1_Set");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_CARAVAN_AVIONICS1_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_CARAVAN_AVIONICS2_SET, "SFS.Caravan_Avionics2_Set");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_CARAVAN_AVIONICS2_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_CARAVAN_ALTGEN1_SET, "SFS.Caravan_AltGen1_Set");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_CARAVAN_ALTGEN1_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.SFS_CARAVAN_ALTGEN2_SET, "SFS.Caravan_AltGen2_Set");
+                simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SFS_CARAVAN_ALTGEN2_SET, false);
 
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, "FLAPS_DECR");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, false);
@@ -5141,6 +5238,17 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.C172Avionics2LineConnRead, "LINE CONNECTION ON:'BUS_2_To_AVIONICS_BUS_2'_n", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<C172Avionics2LineConnStruct>(DEFINITIONS.C172Avionics2LineConnRead);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestC172Avionics2LineConn, DEFINITIONS.C172Avionics2LineConnRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // Caravan — mateix mecanisme, un bus per cada avionics.
+                simconnect.AddToDataDefinition(DEFINITIONS.CaravanAvionics1LineConnRead, "LINE CONNECTION ON:'AVIONICS_BUS_1_To_PWR_BUS_DISTRIB'_n", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<CaravanAvionics1LineConnStruct>(DEFINITIONS.CaravanAvionics1LineConnRead);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestCaravanAvionics1LineConn, DEFINITIONS.CaravanAvionics1LineConnRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+                simconnect.AddToDataDefinition(DEFINITIONS.CaravanAvionics2LineConnRead, "LINE CONNECTION ON:'AVIONICS_BUS_2_To_PWR_BUS_DISTRIB'_n", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<CaravanAvionics2LineConnStruct>(DEFINITIONS.CaravanAvionics2LineConnRead);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestCaravanAvionics2LineConn, DEFINITIONS.CaravanAvionics2LineConnRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+                simconnect.AddToDataDefinition(DEFINITIONS.CaravanAltGen2LineConnRead, "LINE CONNECTION ON:'BATT_BUS_To_ALT_BUS'_n", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<CaravanAltGen2LineConnStruct>(DEFINITIONS.CaravanAltGen2LineConnRead);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestCaravanAltGen2LineConn, DEFINITIONS.CaravanAltGen2LineConnRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
             }
             catch (COMException ex)
@@ -5583,6 +5691,63 @@ namespace SimConnect3
                 }
                 return;
             }
+            if (data.dwRequestID == (uint)REQUESTS.RequestCaravanAvionics1LineConn)
+            {
+                double newVal = ((CaravanAvionics1LineConnStruct)data.dwData[0]).value;
+                if (newVal != _caravanAvionics1LineConn)
+                {
+                    Debug.WriteLine($"[CARAVAN LINE CONNECTION ON:AVIONICS_BUS_1_To_PWR_BUS_DISTRIB] {_caravanAvionics1LineConn} -> {newVal}");
+                    _caravanAvionics1LineConn = newVal;
+                }
+                if (IsCaravan())
+                {
+                    bool newAvionics1OffFromRead = newVal < 0.5;
+                    if (newAvionics1OffFromRead != avionics1Off)
+                    {
+                        avionics1Off = newAvionics1OffFromRead;
+                        pbMain.Invalidate();
+                    }
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestCaravanAvionics2LineConn)
+            {
+                double newVal = ((CaravanAvionics2LineConnStruct)data.dwData[0]).value;
+                if (newVal != _caravanAvionics2LineConn)
+                {
+                    Debug.WriteLine($"[CARAVAN LINE CONNECTION ON:AVIONICS_BUS_2_To_PWR_BUS_DISTRIB] {_caravanAvionics2LineConn} -> {newVal}");
+                    _caravanAvionics2LineConn = newVal;
+                }
+                if (IsCaravan())
+                {
+                    bool newAvionics2OffFromRead = newVal < 0.5;
+                    if (newAvionics2OffFromRead != avionics2Off)
+                    {
+                        avionics2Off = newAvionics2OffFromRead;
+                        pbMain.Invalidate();
+                    }
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestCaravanAltGen2LineConn)
+            {
+                double newVal = ((CaravanAltGen2LineConnStruct)data.dwData[0]).value;
+                if (newVal != _caravanAltGen2LineConn)
+                {
+                    Debug.WriteLine($"[CARAVAN LINE CONNECTION ON:BATT_BUS_To_ALT_BUS] {_caravanAltGen2LineConn} -> {newVal}");
+                    _caravanAltGen2LineConn = newVal;
+                }
+                if (IsCaravan())
+                {
+                    bool newAltGen2OffFromRead = newVal < 0.5;
+                    if (newAltGen2OffFromRead != altGen2Off)
+                    {
+                        altGen2Off = newAltGen2OffFromRead;
+                        pbMain.Invalidate();
+                    }
+                }
+                return;
+            }
             if (data.dwRequestID == (uint)REQUESTS.Request1)
             {
                 Struct1 s1 = (Struct1)data.dwData[0];
@@ -5842,12 +6007,10 @@ namespace SimConnect3
                     masterBatteryOff = newMasterBatteryOff;
                     needsRepaint = true;
                 }
-                // DA-62/C172: exclosos — "AVIONICS MASTER SWITCH:1/2" no reflecteix el seu sistema elèctric
-                // modular (LINE CONNECTION). DA-62 fa servir el RequestDA62AvionicsLineConn dedicat de dalt;
-                // C172 encara no té lectura pròpia (només comandaments per ara) — es queda amb l'estat local
-                // optimista del clic, sense que aquesta lectura genèrica el sobreescrigui i el desincronitzi
+                // DA-62/C172/Caravan: exclosos — "AVIONICS MASTER SWITCH:1/2" no reflecteix el seu sistema
+                // elèctric modular (LINE CONNECTION); cadascun té la seva pròpia lectura dedicada de dalt
                 // (mateix bug recurrent que ja ha passat amb els selectors de combustible — veure memòria).
-                if (!IsDA62() && !IsC172())
+                if (!IsDA62() && !IsC172() && !IsCaravan())
                 {
                     bool newAvionics1Off = s1.avionics_master_1 == 0;
                     if (newAvionics1Off != avionics1Off)
@@ -5856,7 +6019,7 @@ namespace SimConnect3
                         needsRepaint = true;
                     }
                 }
-                if (!IsC172())
+                if (!IsC172() && !IsCaravan())
                 {
                     bool newAvionics2Off = s1.avionics_master_2 == 0;
                     if (newAvionics2Off != avionics2Off)
@@ -5869,10 +6032,11 @@ namespace SimConnect3
                 bool newAltGen2Off = s1.gen_master_alt_2 == 0;
                 if (newAltGen1Off != altGen1Off)
                 {
+                    Debug.WriteLine($"[ALTGEN1 GENERAL ENG MASTER ALTERNATOR:1] altGen1Off {altGen1Off} -> {newAltGen1Off}");
                     altGen1Off = newAltGen1Off;
                     needsRepaint = true;
                 }
-                if (newAltGen2Off != altGen2Off)
+                if (!IsCaravan() && newAltGen2Off != altGen2Off)
                 {
                     altGen2Off = newAltGen2Off;
                     needsRepaint = true;
@@ -6980,6 +7144,40 @@ namespace SimConnect3
                     using var daFont = new Font("Arial Narrow", 27f, FontStyle.Bold, GraphicsUnit.Pixel);
                     using var daFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
                     e.Graphics.DrawString("FUEL TRANSF", daFont, Brushes.White, daLbl.Bounds, daFmt);
+                }
+            }
+
+            // Caravan — etiqueta "STBY / ALT PWR" (2 files), mateix estil que SW_DA40_FUELTRANSF_LBL.
+            {
+                var altGen2Lbl = overlayImages.FirstOrDefault(o => o.Name == "SW_CARAVAN_ALTGEN2_LBL");
+                if (altGen2Lbl != null && (calibrationMode || (altGen2Lbl.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var lblBgBrush = new SolidBrush(Color.FromArgb(28, 28, 28));
+                    e.Graphics.FillRectangle(lblBgBrush, altGen2Lbl.Bounds);
+                    using var lblFont = new Font("Arial Narrow", 32f, FontStyle.Bold, GraphicsUnit.Pixel);
+                    using var lblFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    e.Graphics.DrawString("STBY\nALT PWR", lblFont, Brushes.White, altGen2Lbl.Bounds, lblFmt);
+                }
+            }
+
+            // Caravan — etiquetes RESET/ON/TRIP de l'interruptor ALTGEN1.
+            {
+                var altGen1Labels = new (string Name, string Text)[] {
+                    ("SW_CARAVAN_ALTGEN1_LBL_RESET", "RESET"),
+                    ("SW_CARAVAN_ALTGEN1_LBL_ON", "ON"),
+                    ("SW_CARAVAN_ALTGEN1_LBL_TRIP", "TRIP"),
+                };
+                foreach (var (name, text) in altGen1Labels)
+                {
+                    var lbl = overlayImages.FirstOrDefault(o => o.Name == name);
+                    if (lbl != null && (calibrationMode || (lbl.ShowWhen?.Invoke() ?? false)))
+                    {
+                        using var lblBgBrush = new SolidBrush(Color.FromArgb(28, 28, 28));
+                        e.Graphics.FillRectangle(lblBgBrush, lbl.Bounds);
+                        using var lblFont = new Font("Arial Narrow", 32f, FontStyle.Bold, GraphicsUnit.Pixel);
+                        using var lblFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                        e.Graphics.DrawString(text, lblFont, Brushes.White, lbl.Bounds, lblFmt);
+                    }
                 }
             }
 
