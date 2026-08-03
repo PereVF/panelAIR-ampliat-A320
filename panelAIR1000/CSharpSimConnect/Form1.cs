@@ -268,6 +268,7 @@ namespace SimConnect3
         double _daFuelTankSelector = double.MinValue; // A:FUEL TANK SELECTOR:1 — verificació directa DA-40 (veure Output/Debug de VS)
         double _daFuelTankSelector2 = double.MinValue; // A:FUEL TANK SELECTOR:2 — idem, per si l'índex real no és l'1
         double _daFuelTankSelector3 = double.MinValue; // A:FUEL TANK SELECTOR:3 — idem (la bomba de la DA-40 fa servir índex 3)
+        double _daFuelTankSelector4 = double.MinValue; // A:FUELSYSTEM VALVE SWITCH:4 — hipòtesi: vàlvula dreta de la Caravan
         int _bonanzaFuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la Bonanza (veure Output/Debug de VS)
         double _da62AvionicsLineConn = double.MinValue; // A:LINE CONNECTION ON:rh_main_bustoavionics_bus — estat real del bus d'avionics de la DA-62
         double _c172Avionics1LineConn = double.MinValue; // A:LINE CONNECTION ON:BUS_1_To_AVIONICS_BUS_1
@@ -640,6 +641,7 @@ namespace SimConnect3
             DA40FuelTankSelectorRead,
             DA40FuelTankSelector2Read,
             DA40FuelTankSelector3Read,
+            DA40FuelTankSelector4Read,
             C400JunctionSettingRead,
             DA62AvionicsLineConnRead,
             C172Avionics1LineConnRead,
@@ -707,6 +709,8 @@ namespace SimConnect3
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct DA40FuelTankSelector3Struct { public double value; } // A:FUEL TANK SELECTOR:3,Enum — la DA-40 fa servir índex 3 per la bomba, per si el selector també
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct DA40FuelTankSelector4Struct { public double value; } // A:FUELSYSTEM VALVE SWITCH:4,Enum — hipòtesi: vàlvula dreta de la Caravan (SWITCH:3 no hi correspon)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct C400JunctionSettingStruct { public double value; } // A:FUELSYSTEM JUNCTION SETTING:1,Enum — opció seleccionada del junction del C400 (1=Off,2=Left,3=Right)
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct DA62AvionicsLineConnStruct { public double value; } // A:LINE CONNECTION ON:rh_main_bustoavionics_bus,Bool — estat real del bus d'avionics de la DA-62
@@ -733,6 +737,7 @@ namespace SimConnect3
             RequestDA40FuelTankSelector,
             RequestDA40FuelTankSelector2,
             RequestDA40FuelTankSelector3,
+            RequestDA40FuelTankSelector4,
             RequestC400JunctionSetting,
             RequestDA62AvionicsLineConn,
             RequestC172Avionics1LineConn,
@@ -2706,10 +2711,10 @@ namespace SimConnect3
                         // Off/On), per això aquest selector va de 0 a 1 (vegeu bound del botó RIGHT). Confirmat
                         // via docs oficials: FUELSYSTEM_TRIGGER_ON/OFF són la variant d'1 paràmetre (només
                         // índex) de K:2:FUELSYSTEM_TRIGGER_SET — enviable directe des de C#, sense WASM.
+                        // Feedback real confirmat (FUELSYSTEM VALVE SWITCH:1) — no toquem fuel1Pos aquí,
+                        // el determina només la lectura (com AVIONICS/BATTERY).
                         var evt = newPos == 1 ? SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON : SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF;
                         simconnect?.TransmitClientEvent(0, evt, 3, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        fuel1Pos = newPos;
-                        _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                     } else if (_isMsfs2024 && IsDA62()) {
                         // DA-62: confirmat amb "Execute" a Behaviors — K:2:FUELSYSTEM_VALVE_SET +
                         // K:2:FUELSYSTEM_TRIGGER_SET (índex 1), NO junctions ni B:FUEL_VALVE_LEFT directe.
@@ -2746,10 +2751,9 @@ namespace SimConnect3
                     if (IsCaravan() ? fuel1Pos >= 1 : fuel1Pos >= 2) return;
                     int newPos = fuel1Pos + 1;
                     if (IsCaravan()) {
+                        // Feedback real confirmat — no toquem fuel1Pos aquí.
                         var evt = newPos == 1 ? SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON : SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF;
                         simconnect?.TransmitClientEvent(0, evt, 3, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        fuel1Pos = newPos;
-                        _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                     } else if (_isMsfs2024 && IsDA62()) {
                         var da62Evt = newPos switch { 0 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_CROSS };
                         simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
@@ -2783,15 +2787,16 @@ namespace SimConnect3
                         }
                         return;
                     }
+                    if (IsCaravan()) {
+                        // Caravan: zones invertides respecte la resta d'avions — l'esquerra ara ENCÉN.
+                        if (fuel2Pos >= 1) return;
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON, 4, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        pbMain.Invalidate();
+                        return;
+                    }
                     if (fuel2Pos <= 0) return;
                     int newPos = fuel2Pos - 1;
-                    if (IsCaravan()) {
-                        // Caravan: mateix mecanisme que l'esquerra, índex 4=Right.
-                        var evt = newPos == 1 ? SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON : SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF;
-                        simconnect?.TransmitClientEvent(0, evt, 4, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        fuel2Pos = newPos;
-                        _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
-                    } else if (_isMsfs2024 && IsDA62()) {
+                    if (_isMsfs2024 && IsDA62()) {
                         // DA-62: mateix mecanisme que l'esquerra, índex 2 (K:2:FUELSYSTEM_TRIGGER_SET/VALVE_SET). Confirmat.
                         var da62Evt = newPos switch { 2 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_CROSS };
                         simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
@@ -2824,14 +2829,16 @@ namespace SimConnect3
                         }
                         return;
                     }
-                    if (IsCaravan() ? fuel2Pos >= 1 : fuel2Pos >= 2) return;
-                    int newPos = fuel2Pos + 1;
                     if (IsCaravan()) {
-                        var evt = newPos == 1 ? SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON : SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF;
-                        simconnect?.TransmitClientEvent(0, evt, 4, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        fuel2Pos = newPos;
-                        _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
-                    } else if (_isMsfs2024 && IsDA62()) {
+                        // Caravan: zones invertides respecte la resta d'avions — la dreta ara APAGA.
+                        if (fuel2Pos <= 0) return;
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF, 4, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        pbMain.Invalidate();
+                        return;
+                    }
+                    if (fuel2Pos >= 2) return;
+                    int newPos = fuel2Pos + 1;
+                    if (_isMsfs2024 && IsDA62()) {
                         var da62Evt = newPos switch { 2 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_CROSS };
                         simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         fuel2Pos = newPos;
@@ -3019,13 +3026,58 @@ namespace SimConnect3
                         ShowWhen = () => IsCaravan() },
                 // Caravan — etiquetes RESET/ON/TRIP per l'interruptor momentani ALTGEN1 (UP/centre/DN).
                 // Mateix estil que SW_CARAVAN_ALTGEN2_LBL. Arrossegables amb F12, mida fixa.
-                new() { Name="SW_CARAVAN_ALTGEN1_LBL_RESET", TypeKey="CARAVAN_ALTGEN1_LBL", BasePos=new Point(1550, 1170), ZoomWidth=112, ZoomHeight=60, Img=null,
+                new() { Name="SW_CARAVAN_ALTGEN1_LBL_RESET", TypeKey="CARAVAN_ALTGEN1_LBL", BasePos=new Point(1550, 1170), ZoomWidth=77, ZoomHeight=41, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsCaravan() },
-                new() { Name="SW_CARAVAN_ALTGEN1_LBL_ON", TypeKey="CARAVAN_ALTGEN1_LBL", BasePos=new Point(1550, 1220), ZoomWidth=112, ZoomHeight=60, Img=null,
+                new() { Name="SW_CARAVAN_ALTGEN1_LBL_ON", TypeKey="CARAVAN_ALTGEN1_LBL", BasePos=new Point(1550, 1220), ZoomWidth=77, ZoomHeight=41, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsCaravan() },
-                new() { Name="SW_CARAVAN_ALTGEN1_LBL_TRIP", TypeKey="CARAVAN_ALTGEN1_LBL", BasePos=new Point(1550, 1280), ZoomWidth=112, ZoomHeight=60, Img=null,
+                new() { Name="SW_CARAVAN_ALTGEN1_LBL_TRIP", TypeKey="CARAVAN_ALTGEN1_LBL", BasePos=new Point(1550, 1280), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
+                // Caravan — fuel boost pump: capa opaca (sense text, tapa el fons) + etiqueta "FUEL BOOST".
+                // Mateixa mida que SW_CARAVAN_ALTGEN2_LBL (150x80). Arrossegables amb F12, mida fixa.
+                new() { Name="SW_CARAVAN_FUELBOOST_COVER", TypeKey="CARAVAN_FUELBOOST_COVER", BasePos=new Point(1780, 1170), ZoomWidth=150, ZoomHeight=80, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
+                new() { Name="SW_CARAVAN_FUELBOOST_LBL", TypeKey="CARAVAN_FUELBOOST_LBL", BasePos=new Point(1780, 1260), ZoomWidth=150, ZoomHeight=80, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
+                // Caravan — etiqueta "GENE / RATOR", mateix estil/mida que SW_CARAVAN_ALTGEN2_LBL (STBY/ALT PWR).
+                new() { Name="SW_CARAVAN_GENERATOR_LBL", TypeKey="CARAVAN_GENERATOR_LBL", BasePos=new Point(1780, 1350), ZoomWidth=150, ZoomHeight=80, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
+                // Caravan — 3 capes opaques sense text, mateix color de fons, arrossegables i redimensionables.
+                new() { Name="SW_CARAVAN_COVER_1", TypeKey="CARAVAN_COVER_1", BasePos=new Point(1980, 1350), ZoomWidth=150, ZoomHeight=80, Img=null,
+                        ShowWhen = () => IsCaravan() },
+                new() { Name="SW_CARAVAN_COVER_2", TypeKey="CARAVAN_COVER_2", BasePos=new Point(2180, 1350), ZoomWidth=150, ZoomHeight=80, Img=null,
+                        ShowWhen = () => IsCaravan() },
+                // Caravan — etiqueta "FUEL TANK / SELECTORS", mateix color que SW_CARAVAN_COVER_1/2, text 1.5x
+                // de FUEL BOOST (32f). Arrossegable I redimensionable amb F12 (a diferència de les altres etiquetes).
+                new() { Name="SW_CARAVAN_FUELTANK_SELECTORS_LBL", TypeKey="CARAVAN_FUELTANK_SELECTORS_LBL", BasePos=new Point(1780, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
+                        ShowWhen = () => IsCaravan() },
+                // Bonanza G36 — capa opaca sense text per tapar el selector físic de combustible R imprès
+                // al fons, mateix estil que SW_CARAVAN_COVER_1/2. Arrossegable i redimensionable amb F12.
+                new() { Name="SW_BONANZA_FUELSEL_R_COVER", TypeKey="BONANZA_FUELSEL_R_COVER", BasePos=new Point(1780, 1962), ZoomWidth=150, ZoomHeight=240, Img=null,
+                        ShowWhen = () => IsBonanzaG36() },
+                // Bonanza G36 — etiquetes OFF/LO/HI, mateix estil/mida que RESET/ON/TRIP de la Caravan.
+                new() { Name="SW_BONANZA_FUELPUMP_LBL_OFF", TypeKey="BONANZA_FUELPUMP_LBL", BasePos=new Point(1980, 1170), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsBonanzaG36() },
+                new() { Name="SW_BONANZA_FUELPUMP_LBL_LO", TypeKey="BONANZA_FUELPUMP_LBL", BasePos=new Point(1980, 1220), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsBonanzaG36() },
+                new() { Name="SW_BONANZA_FUELPUMP_LBL_HI", TypeKey="BONANZA_FUELPUMP_LBL", BasePos=new Point(1980, 1280), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsBonanzaG36() },
+                // Caravan — etiquetes ON/OFF/NORM pel fuel boost pump. Mateix estil/mida que les RESET/ON/TRIP.
+                new() { Name="SW_CARAVAN_FUELBOOST_LBL_ON", TypeKey="CARAVAN_FUELBOOST_POS_LBL", BasePos=new Point(1950, 1170), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
+                new() { Name="SW_CARAVAN_FUELBOOST_LBL_OFF", TypeKey="CARAVAN_FUELBOOST_POS_LBL", BasePos=new Point(1950, 1220), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
+                new() { Name="SW_CARAVAN_FUELBOOST_LBL_NORM", TypeKey="CARAVAN_FUELBOOST_POS_LBL", BasePos=new Point(1950, 1280), ZoomWidth=77, ZoomHeight=41, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsCaravan() },
                 // Monomotors — rectangle negre que tapa els 2 selectors físics de tank (LEFT/RIGHT) mentre
@@ -5220,6 +5272,10 @@ namespace SimConnect3
                 simconnect.RegisterDataDefineStruct<DA40FuelTankSelector3Struct>(DEFINITIONS.DA40FuelTankSelector3Read);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestDA40FuelTankSelector3, DEFINITIONS.DA40FuelTankSelector3Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
+                simconnect.AddToDataDefinition(DEFINITIONS.DA40FuelTankSelector4Read, "FUELSYSTEM VALVE SWITCH:4", "Enum", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<DA40FuelTankSelector4Struct>(DEFINITIONS.DA40FuelTankSelector4Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestDA40FuelTankSelector4, DEFINITIONS.DA40FuelTankSelector4Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
                 // C400 Corvalis — lectura directa de l'opció seleccionada del junction (1=Off,2=Left,3=Right).
                 simconnect.AddToDataDefinition(DEFINITIONS.C400JunctionSettingRead, "FUELSYSTEM JUNCTION SETTING:1", "Enum", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<C400JunctionSettingStruct>(DEFINITIONS.C400JunctionSettingRead);
@@ -5535,7 +5591,10 @@ namespace SimConnect3
                 // Confirmat: la DA-62 NO fa servir L:FUEL_Switch_Cutoff_Crossfeed_1 (fa servir
                 // O:XMLVAR_FUEL_VALVE_LEFT_Value) — exclosa, es queda amb la posició local optimista.
                 // La C408 tampoc: és un altre selector (FUEL_TRANSFER), aquesta L:Var no li correspon.
-                if (!IsDA62() && !IsC408())
+                // 2026-08-02: la Caravan tampoc — fa servir FUELSYSTEM VALVE SWITCH:1/4 (lectura dedicada
+                // més amunt); aquesta L:Var hi competia i causava l'oscil·lació infinita de fuel1Pos/fuel2Pos
+                // (el mateix bug recurrent d'excloure un avió nou d'una lectura genèrica — veure memòria).
+                if (!IsDA62() && !IsC408() && !IsCaravan())
                 {
                     int newFuel1PosFromRead = fsl.value < 0.5 ? 0 : (fsl.value < 1.5 ? 1 : 2);
                     if (newFuel1PosFromRead != fuel1Pos && DateTime.UtcNow >= _fuelSel1IgnoreFollowUntil)
@@ -5549,7 +5608,7 @@ namespace SimConnect3
             if (data.dwRequestID == (uint)REQUESTS.RequestFuelSelRight)
             {
                 var fsr = (FuelSelRightStruct)data.dwData[0];
-                if (!IsDA62() && !IsC408())
+                if (!IsDA62() && !IsC408() && !IsCaravan())
                 {
                     // Aquesta variable ja ve en l'ordre físic del nostre selector (0=Xfeed, 1=On, 2=Off) — sense invertir.
                     int newFuel2PosFromRead = fsr.value < 0.5 ? 0 : (fsr.value < 1.5 ? 1 : 2);
@@ -5574,17 +5633,29 @@ namespace SimConnect3
             if (data.dwRequestID == (uint)REQUESTS.RequestDA40FuelTankSelector)
             {
                 double newVal = ((DA40FuelTankSelectorStruct)data.dwData[0]).value;
-                if (newVal != _daFuelTankSelector)
+                if (Math.Abs(newVal - _daFuelTankSelector) > 0.5)
                 {
                     Debug.WriteLine($"[DA40 FUELSYSTEM VALVE SWITCH:1] {_daFuelTankSelector} -> {newVal}");
                     _daFuelTankSelector = newVal;
+                }
+                if (IsCaravan())
+                {
+                    // Feedback real (confirmat 2026-08-02): fuel1Pos (LEFT) el determina només aquesta
+                    // lectura, mai el click local. Caravan: booleà pur, 0=OFF, 1=ON (sense crossfeed).
+                    int newFuel1PosFromRead = newVal < 0.5 ? 0 : 1;
+                    if (newFuel1PosFromRead != fuel1Pos)
+                    {
+                        Debug.WriteLine($"[CARAVAN fuel1Pos] {fuel1Pos} -> {newFuel1PosFromRead}");
+                        fuel1Pos = newFuel1PosFromRead;
+                        pbMain.Invalidate();
+                    }
                 }
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestDA40FuelTankSelector2)
             {
                 double newVal = ((DA40FuelTankSelector2Struct)data.dwData[0]).value;
-                if (newVal != _daFuelTankSelector2)
+                if (Math.Abs(newVal - _daFuelTankSelector2) > 0.5)
                 {
                     Debug.WriteLine($"[DA40 FUELSYSTEM VALVE SWITCH:2] {_daFuelTankSelector2} -> {newVal}");
                     _daFuelTankSelector2 = newVal;
@@ -5594,10 +5665,34 @@ namespace SimConnect3
             if (data.dwRequestID == (uint)REQUESTS.RequestDA40FuelTankSelector3)
             {
                 double newVal = ((DA40FuelTankSelector3Struct)data.dwData[0]).value;
-                if (newVal != _daFuelTankSelector3)
+                if (Math.Abs(newVal - _daFuelTankSelector3) > 0.5)
                 {
                     Debug.WriteLine($"[DA40 FUELSYSTEM VALVE SWITCH:3] {_daFuelTankSelector3} -> {newVal}");
                     _daFuelTankSelector3 = newVal;
+                }
+                // 2026-08-02: confirmat que SWITCH:3 NO és la vàlvula dreta de la Caravan (movent-la a mà
+                // al VC, l'app no reacciona) — provem SWITCH:4 (handler de sota) en lloc d'aquest.
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestDA40FuelTankSelector4)
+            {
+                double newVal = ((DA40FuelTankSelector4Struct)data.dwData[0]).value;
+                if (Math.Abs(newVal - _daFuelTankSelector4) > 0.5)
+                {
+                    Debug.WriteLine($"[DA40 FUELSYSTEM VALVE SWITCH:4] {_daFuelTankSelector4} -> {newVal}");
+                    _daFuelTankSelector4 = newVal;
+                }
+                if (IsCaravan())
+                {
+                    // Hipòtesi 2026-08-02: fuel2Pos (RIGHT) ve de SWITCH:4, no SWITCH:3 (confirmar a VC:
+                    // mou el switch dret a mà i mira si l'app el segueix i si aquest log canvia).
+                    int newFuel2PosFromRead = newVal < 0.5 ? 0 : 1;
+                    if (newFuel2PosFromRead != fuel2Pos)
+                    {
+                        Debug.WriteLine($"[CARAVAN fuel2Pos] {fuel2Pos} -> {newFuel2PosFromRead}");
+                        fuel2Pos = newFuel2PosFromRead;
+                        pbMain.Invalidate();
+                    }
                 }
                 return;
             }
@@ -6084,6 +6179,16 @@ namespace SimConnect3
                         seSelectorPos = newPosFromRead;
                         needsRepaint = true;
                     }
+                    newFuel1Pos = fuel1Pos;
+                    newFuel2Pos = fuel2Pos;
+                }
+                else if (IsCaravan())
+                {
+                    // Caravan: monomotor (numEngines==1), per això cauria al bloc "SINGLE ENGINE" de sota,
+                    // que sobreescriu fuel1Pos/fuel2Pos cada frame amb la SimVar legacy "FUEL TANK SELECTOR:1"
+                    // — irrellevant per aquest avió (fa servir FUELSYSTEM VALVE SWITCH:1/3, vegeu
+                    // RequestDA40FuelTankSelector/3 més amunt) i causava els "rebots" que anul·laven el
+                    // feedback real. Exclòs: fuel1Pos/fuel2Pos ja els actualitzen aquells handlers dedicats.
                     newFuel1Pos = fuel1Pos;
                     newFuel2Pos = fuel2Pos;
                 }
@@ -7174,10 +7279,102 @@ namespace SimConnect3
                     {
                         using var lblBgBrush = new SolidBrush(Color.FromArgb(28, 28, 28));
                         e.Graphics.FillRectangle(lblBgBrush, lbl.Bounds);
-                        using var lblFont = new Font("Arial Narrow", 32f, FontStyle.Bold, GraphicsUnit.Pixel);
+                        using var lblFont = new Font("Arial Narrow", 22f, FontStyle.Bold, GraphicsUnit.Pixel);
                         using var lblFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
                         e.Graphics.DrawString(text, lblFont, Brushes.White, lbl.Bounds, lblFmt);
                     }
+                }
+            }
+
+            // Caravan — fuel boost pump: capa opaca (sense text) + etiqueta "FUEL BOOST", mateix estil
+            // que SW_CARAVAN_ALTGEN2_LBL (STBY/ALT PWR).
+            {
+                var fbCover = overlayImages.FirstOrDefault(o => o.Name == "SW_CARAVAN_FUELBOOST_COVER");
+                if (fbCover != null && (calibrationMode || (fbCover.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var fbCoverBrush = new SolidBrush(Color.FromArgb(28, 28, 28));
+                    e.Graphics.FillRectangle(fbCoverBrush, fbCover.Bounds);
+                }
+                var fbLbl = overlayImages.FirstOrDefault(o => o.Name == "SW_CARAVAN_FUELBOOST_LBL");
+                if (fbLbl != null && (calibrationMode || (fbLbl.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var fbBgBrush = new SolidBrush(Color.FromArgb(28, 28, 28));
+                    e.Graphics.FillRectangle(fbBgBrush, fbLbl.Bounds);
+                    using var fbFont = new Font("Arial Narrow", 32f, FontStyle.Bold, GraphicsUnit.Pixel);
+                    using var fbFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    e.Graphics.DrawString("FUEL BOOST", fbFont, Brushes.White, fbLbl.Bounds, fbFmt);
+                }
+            }
+
+            // Caravan — etiqueta "GENE / RATOR", mateix estil que SW_CARAVAN_ALTGEN2_LBL (STBY/ALT PWR).
+            {
+                var genLbl = overlayImages.FirstOrDefault(o => o.Name == "SW_CARAVAN_GENERATOR_LBL");
+                if (genLbl != null && (calibrationMode || (genLbl.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var genBgBrush = new SolidBrush(Color.FromArgb(28, 28, 28));
+                    e.Graphics.FillRectangle(genBgBrush, genLbl.Bounds);
+                    using var genFont = new Font("Arial Narrow", 32f, FontStyle.Bold, GraphicsUnit.Pixel);
+                    using var genFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    e.Graphics.DrawString("GENE\nRATOR", genFont, Brushes.White, genLbl.Bounds, genFmt);
+                }
+            }
+
+            // Caravan — 2 capes opaques sense text, gris més fosc que la resta d'etiquetes, arrossegables i redimensionables.
+            {
+                foreach (var coverName in new[] { "SW_CARAVAN_COVER_1", "SW_CARAVAN_COVER_2" })
+                {
+                    var cover = overlayImages.FirstOrDefault(o => o.Name == coverName);
+                    if (cover != null && (calibrationMode || (cover.ShowWhen?.Invoke() ?? false)))
+                    {
+                        using var coverBrush = new SolidBrush(Color.FromArgb(25, 25, 25));
+                        e.Graphics.FillRectangle(coverBrush, cover.Bounds);
+                    }
+                }
+            }
+
+            // Caravan — etiquetes ON/OFF/NORM del fuel boost pump, mateix estil que RESET/ON/TRIP.
+            {
+                var fbPosLabels = new (string Name, string Text)[] {
+                    ("SW_CARAVAN_FUELBOOST_LBL_ON", "ON"),
+                    ("SW_CARAVAN_FUELBOOST_LBL_OFF", "OFF"),
+                    ("SW_CARAVAN_FUELBOOST_LBL_NORM", "NORM"),
+                };
+                foreach (var (name, text) in fbPosLabels)
+                {
+                    var lbl = overlayImages.FirstOrDefault(o => o.Name == name);
+                    if (lbl != null && (calibrationMode || (lbl.ShowWhen?.Invoke() ?? false)))
+                    {
+                        using var lblBgBrush = new SolidBrush(Color.FromArgb(28, 28, 28));
+                        e.Graphics.FillRectangle(lblBgBrush, lbl.Bounds);
+                        using var lblFont = new Font("Arial Narrow", 22f, FontStyle.Bold, GraphicsUnit.Pixel);
+                        using var lblFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                        e.Graphics.DrawString(text, lblFont, Brushes.White, lbl.Bounds, lblFmt);
+                    }
+                }
+            }
+
+            // Caravan — etiqueta "FUEL TANK / SELECTORS", mateix color que SW_CARAVAN_COVER_1/2, text 48px
+            // (1.5x FUEL BOOST). Dibuixada AL DAVANT DE TOT (última del grup Caravan) perquè quedi per sobre
+            // de la resta d'etiquetes/capes si es solapen.
+            {
+                var ftsLbl = overlayImages.FirstOrDefault(o => o.Name == "SW_CARAVAN_FUELTANK_SELECTORS_LBL");
+                if (ftsLbl != null && (calibrationMode || (ftsLbl.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var ftsBgBrush = new SolidBrush(Color.FromArgb(25, 25, 25));
+                    e.Graphics.FillRectangle(ftsBgBrush, ftsLbl.Bounds);
+                    using var ftsFont = new Font("Arial Narrow", 48f, FontStyle.Bold, GraphicsUnit.Pixel);
+                    using var ftsFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    e.Graphics.DrawString("FUEL TANK\nSELECTORS", ftsFont, Brushes.White, ftsLbl.Bounds, ftsFmt);
+                }
+            }
+
+            // Bonanza G36 — capa opaca sense text per tapar el selector físic R, mateix estil que SW_CARAVAN_COVER_1/2.
+            {
+                var bonR = overlayImages.FirstOrDefault(o => o.Name == "SW_BONANZA_FUELSEL_R_COVER");
+                if (bonR != null && (calibrationMode || (bonR.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var bonRBrush = new SolidBrush(Color.FromArgb(25, 25, 25));
+                    e.Graphics.FillRectangle(bonRBrush, bonR.Bounds);
                 }
             }
 
@@ -7223,6 +7420,28 @@ namespace SimConnect3
                     e.Graphics.RotateTransform(angle);
                     e.Graphics.DrawImage(sw.Img, -baseW / 2f, -baseH / 2f, baseW, baseH);
                     e.Graphics.Restore(state);
+                }
+            }
+
+            // Bonanza G36 — etiquetes OFF/LO/HI, mateix estil que RESET/ON/TRIP. Dibuixades DESPRÉS del
+            // selector únic i les seves etiquetes perquè quedin al davant de tot (no tapades).
+            {
+                var bonPumpLabels = new (string Name, string Text)[] {
+                    ("SW_BONANZA_FUELPUMP_LBL_OFF", "OFF"),
+                    ("SW_BONANZA_FUELPUMP_LBL_LO", "LO"),
+                    ("SW_BONANZA_FUELPUMP_LBL_HI", "HI"),
+                };
+                foreach (var (name, text) in bonPumpLabels)
+                {
+                    var lbl = overlayImages.FirstOrDefault(o => o.Name == name);
+                    if (lbl != null && (calibrationMode || (lbl.ShowWhen?.Invoke() ?? false)))
+                    {
+                        using var lblBgBrush = new SolidBrush(Color.FromArgb(23, 23, 23));
+                        e.Graphics.FillRectangle(lblBgBrush, lbl.Bounds);
+                        using var lblFont = new Font("Arial Narrow", 22f, FontStyle.Bold, GraphicsUnit.Pixel);
+                        using var lblFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                        e.Graphics.DrawString(text, lblFont, Brushes.White, lbl.Bounds, lblFmt);
+                    }
                 }
             }
 
@@ -7308,7 +7527,12 @@ namespace SimConnect3
                 var sw = overlayImages.FirstOrDefault(o => o.Name == "SW_FUEL2");
                 if (sw?.Img != null && !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36())
                 {
-                    float angle = (fuel2Pos - 1) * 30f + 30f;
+                    // Caravan: fuel2Pos només és 0=OFF/1=ON (sense crossfeed), a diferència de la resta
+                    // d'avions (0=CROSSFEED/1=ON/2=OFF) — la fórmula genèrica de sota confondria OFF(0)
+                    // amb CROSSFEED. Mapegem OFF a la mateixa posició visual que "pos2" (+30°) i ON a "pos1" (0°).
+                    float angle = IsCaravan()
+                        ? (fuel2Pos == 1 ? 30f : 60f)
+                        : (fuel2Pos - 1) * 30f + 30f;
                     float baseW = sw.ZoomWidth;
                     float baseH = baseW / sw.AspectRatio;
                     float cx = sw.BasePos.X + baseW / 2f;
