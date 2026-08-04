@@ -1,5 +1,6 @@
 {
   "permissions": {
+    "defaultMode": "dontAsk",
     "allow": [
       "Bash(dotnet build *)",
       "Bash(mkdir \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\.vscode\")",
@@ -23,7 +24,12 @@
       "PowerShell(Start-Process*)",
       "PowerShell(Remove-Item*)",
       "PowerShell(Get-Content*)",
-      "PowerShell(cd *)"
+      "PowerShell(cd *)",
+      "Edit",
+      "Write",
+      "Read",
+      "Glob",
+      "Grep"
     ],
     "additionalDirectories": [
       "c:\\Users\\usuario\\Desktop\\panelAIR1000-j"

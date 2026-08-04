@@ -277,6 +277,8 @@ namespace SimConnect3
         double _caravanAvionics2LineConn = double.MinValue; // A:LINE CONNECTION ON:AVIONICS_BUS_2_To_PWR_BUS_DISTRIB
         double _caravanAltGen2LineConn = double.MinValue; // A:LINE CONNECTION ON:BATT_BUS_To_ALT_BUS
         double _c400JunctionSetting = double.MinValue; // A:FUELSYSTEM JUNCTION SETTING:1 — opció real seleccionada al C400
+        double _da62EngineMaster1 = double.MinValue; // A:RECIP ENG ENGINE MASTER SWITCH:1 — feedback real DA-62, motor esquerre
+        double _da62EngineMaster2 = double.MinValue; // A:RECIP ENG ENGINE MASTER SWITCH:2 — feedback real DA-62, motor dret
         DateTime _fuelSel1IgnoreFollowUntil = DateTime.MinValue; // evita el "rebot" quan la lectura encara no ha seguit el clic
         DateTime _fuelSel2IgnoreFollowUntil = DateTime.MinValue;
         DateTime _seSelectorIgnoreFollowUntil = DateTime.MinValue; // idem, pel selector únic (C400)
@@ -289,6 +291,8 @@ namespace SimConnect3
         bool starter2Active;
         bool ignition1Active;
         bool ignition2Active;
+        bool da62EngineMaster1On; // feedback real (RECIP ENG ENGINE MASTER SWITCH:1) — DA-62
+        bool da62EngineMaster2On; // feedback real (RECIP ENG ENGINE MASTER SWITCH:2) — DA-62
         private int ign1Pos = 2; // 0=OFF, 1=RIGHT, 2=LEFT(default), 3=BOTH, 4=START
         private int ign2Pos = 2;
         private int fuel1Pos = 0; // 0=OFF(-30°), 1=ON(0°), 2=CROSSFEED(+30°)
@@ -649,6 +653,8 @@ namespace SimConnect3
             CaravanAvionics1LineConnRead,
             CaravanAvionics2LineConnRead,
             CaravanAltGen2LineConnRead,
+            DA62EngineMaster1Read,
+            DA62EngineMaster2Read,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -723,6 +729,10 @@ namespace SimConnect3
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct CaravanAvionics2LineConnStruct { public double value; } // A:LINE CONNECTION ON:AVIONICS_BUS_2_To_PWR_BUS_DISTRIB,Bool
         struct CaravanAltGen2LineConnStruct { public double value; } // A:LINE CONNECTION ON:BATT_BUS_To_ALT_BUS,Bool — interruptor "R ALT GEN 2" (standby alternator)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct DA62EngineMaster1Struct { public double value; } // A:RECIP ENG ENGINE MASTER SWITCH:1,Bool — feedback real del master engine esquerre DA-62
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct DA62EngineMaster2Struct { public double value; } // A:RECIP ENG ENGINE MASTER SWITCH:2,Bool — feedback real del master engine dret DA-62
 
         enum REQUESTS
         {
@@ -745,6 +755,8 @@ namespace SimConnect3
             RequestCaravanAvionics1LineConn,
             RequestCaravanAvionics2LineConn,
             RequestCaravanAltGen2LineConn,
+            RequestDA62EngineMaster1,
+            RequestDA62EngineMaster2,
         }
         enum SIMCONNECT_EVENTS
         {
@@ -986,6 +998,9 @@ namespace SimConnect3
             ELECT_FUEL_PUMP1_SET,
             SET_STARTER1_HELD,
             STARTER1_SET,
+            STARTER2_SET,
+            ENGINE_MASTER_1_SET,
+            ENGINE_MASTER_2_SET,
             AUTOPILOT_DISENGAGE_TOGGLE,
             RUDDER_TRIM_DISABLED_SET,
             AILERON_TRIM_DISABLED_SET,
@@ -2020,6 +2035,8 @@ namespace SimConnect3
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI Emoji", 34f, FontStyle.Bold, GraphicsUnit.Pixel),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Padding = new Padding(6, 2, 0, 0),
                 Cursor = Cursors.Hand
             };
             _gearBtn.FlatAppearance.BorderSize = 1;
@@ -2879,17 +2896,51 @@ namespace SimConnect3
                 }});
 
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_STARTER1", BasePos=new Point(1564, 1653), W=75, H=75, Resizable=true, NoShadow=true,
-                OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_STARTER1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
+                OnClick = () => {
+                    if (IsDA62()) {
+                        if (starter1Active) return;
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.STARTER1_SET, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        Task.Run(async () => {
+                            await Task.Delay(4000);
+                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.STARTER1_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        });
+                        return;
+                    }
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_STARTER1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                } });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_IGNITION1", BasePos=new Point(1624, 1653), W=75, H=75, Resizable=true, NoShadow=true,
-                OnClick = () => simconnect?.TransmitClientEvent(0,
+                OnClick = () => {
+                    if (IsDA62()) {
+                        uint target = da62EngineMaster1On ? 0u : 1u;
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.ENGINE_MASTER_1_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        return;
+                    }
+                    simconnect?.TransmitClientEvent(0,
                     ignition1Active ? SIMCONNECT_EVENTS.KINGAIR_IGN1_OFF : SIMCONNECT_EVENTS.KINGAIR_IGN1_ARM,
-                    0u, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
+                    0u, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_STARTER2", BasePos=new Point(1684, 1653), W=75, H=75, Resizable=true, NoShadow=true,
-                OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_STARTER2, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
+                OnClick = () => {
+                    if (IsDA62()) {
+                        if (starter2Active) return;
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.STARTER2_SET, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        Task.Run(async () => {
+                            await Task.Delay(4000);
+                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.STARTER2_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        });
+                        return;
+                    }
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_STARTER2, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                } });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_IGNITION2", BasePos=new Point(1744, 1653), W=75, H=75, Resizable=true, NoShadow=true,
-                OnClick = () => simconnect?.TransmitClientEvent(0,
+                OnClick = () => {
+                    if (IsDA62()) {
+                        uint target = da62EngineMaster2On ? 0u : 1u;
+                        simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.ENGINE_MASTER_2_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        return;
+                    }
+                    simconnect?.TransmitClientEvent(0,
                     ignition2Active ? SIMCONNECT_EVENTS.KINGAIR_IGN2_OFF : SIMCONNECT_EVENTS.KINGAIR_IGN2_ARM,
-                    0u, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
+                    0u, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_PANELLIGHT", BasePos=new Point(1924, 1653), W=75, H=75, Resizable=true, NoShadow=true,
                 OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PANELLIGHT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_DEICE", BasePos=new Point(1984, 1653), W=75, H=75, Resizable=true, NoShadow=true,
@@ -2946,10 +2997,12 @@ namespace SimConnect3
                         OnClick  = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_RECOGN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
                 new() { Name="SW_DN_STARTER1",  TypeKey="SW_DN_STARTER1",  BasePos=new Point(1564, 1653), ZoomWidth=75, Img=swWhiteImg,
                         ShowWhen = () => !starter1Active, OnClick=null },
-                new() { Name="SW_DN_IGNITION1", TypeKey="SW_DN_IGNITION1", BasePos=new Point(1624, 1653), ZoomWidth=75, Img=swWhiteImg, ShowWhen=null, OnClick=null },
+                new() { Name="SW_DN_IGNITION1", TypeKey="SW_DN_IGNITION1", BasePos=new Point(1624, 1653), ZoomWidth=75, Img=swWhiteImg,
+                        ShowWhen = () => !IsDA62() || !da62EngineMaster1On, OnClick=null },
                 new() { Name="SW_DN_STARTER2",  TypeKey="SW_DN_STARTER2",  BasePos=new Point(1684, 1653), ZoomWidth=75, Img=swWhiteImg,
                         ShowWhen = () => !starter2Active, OnClick=null },
-                new() { Name="SW_DN_IGNITION2", TypeKey="SW_DN_IGNITION2", BasePos=new Point(1744, 1653), ZoomWidth=75, Img=swWhiteImg, ShowWhen=null, OnClick=null },
+                new() { Name="SW_DN_IGNITION2", TypeKey="SW_DN_IGNITION2", BasePos=new Point(1744, 1653), ZoomWidth=75, Img=swWhiteImg,
+                        ShowWhen = () => !IsDA62() || !da62EngineMaster2On, OnClick=null },
                 new() { Name="SW_DN_PANELLIGHT", TypeKey="SW DN white", BasePos=new Point(1924, 1653), ZoomWidth=75, Img=swWhiteImg,
                         ShowWhen = () => !panelLightActive,
                         OnClick  = null },
@@ -3047,6 +3100,30 @@ namespace SimConnect3
                 new() { Name="SW_CARAVAN_GENERATOR_LBL", TypeKey="CARAVAN_GENERATOR_LBL", BasePos=new Point(1780, 1350), ZoomWidth=150, ZoomHeight=80, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsCaravan() },
+                // DA-62 — etiqueta "MASTER", mateix estil que FUEL BOOST però d'una sola línia (alçada
+                // adaptada a 1 línia de text en lloc de 2).
+                new() { Name="SW_DA62_MASTER_LBL", TypeKey="DA62_MASTER_LBL", BasePos=new Point(1624, 1600), ZoomWidth=150, ZoomHeight=40, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsDA62() },
+                // DA-62 — capa opaca sense text, mateixa alçada que MASTER però 15% més estreta (150 -> 128).
+                new() { Name="SW_DA62_MASTER_COVER", TypeKey="DA62_MASTER_COVER", BasePos=new Point(1794, 1604), ZoomWidth=128, ZoomHeight=40, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsDA62() },
+                // DA-62 — duplicat de MASTER_LBL/MASTER_COVER, 200px més a l'esquerra.
+                new() { Name="SW_DA62_MASTER_LBL_2", TypeKey="DA62_MASTER_LBL_2", BasePos=new Point(1424, 1600), ZoomWidth=150, ZoomHeight=40, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsDA62() },
+                new() { Name="SW_DA62_MASTER_COVER_2", TypeKey="DA62_MASTER_COVER_2", BasePos=new Point(1594, 1604), ZoomWidth=128, ZoomHeight=40, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsDA62() },
+                // DA-62 — etiqueta "Diamond DA-62" en cursiva.
+                new() { Name="SW_DA62_TITLE_LBL", TypeKey="DA62_TITLE_LBL", BasePos=new Point(1424, 1500), ZoomWidth=300, ZoomHeight=40, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsDA62() },
+                // DA-62 — capa "tapa" amb relleu (efecte sortint, no enfonsat), mateix color que la resta
+                // d'etiquetes. Arrossegable I redimensionable amb F12.
+                new() { Name="SW_DA62_COVER_RELIEF", TypeKey="DA62_COVER_RELIEF", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
+                        ShowWhen = () => IsDA62() },
                 // Caravan — 3 capes opaques sense text, mateix color de fons, arrossegables i redimensionables.
                 new() { Name="SW_CARAVAN_COVER_1", TypeKey="CARAVAN_COVER_1", BasePos=new Point(1980, 1350), ZoomWidth=150, ZoomHeight=80, Img=null,
                         ShowWhen = () => IsCaravan() },
@@ -5155,6 +5232,12 @@ namespace SimConnect3
                 //simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.STARTER1_SET, "STARTER1_SET");
                 //simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.STARTER1_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.STARTER2_SET, "STARTER2_SET");
+                //simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.STARTER2_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.ENGINE_MASTER_1_SET, "ENGINE_MASTER_1_SET");
+                //simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.ENGINE_MASTER_1_SET, false);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.ENGINE_MASTER_2_SET, "ENGINE_MASTER_2_SET");
+                //simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.ENGINE_MASTER_2_SET, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AUTOPILOT_DISENGAGE_TOGGLE, "AUTOPILOT_DISENGAGE_TOGGLE");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AUTOPILOT_DISENGAGE_TOGGLE, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.RUDDER_TRIM_DISABLED_SET, "RUDDER_TRIM_DISABLED_SET");
@@ -5305,6 +5388,15 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.CaravanAltGen2LineConnRead, "LINE CONNECTION ON:'BATT_BUS_To_ALT_BUS'_n", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CaravanAltGen2LineConnStruct>(DEFINITIONS.CaravanAltGen2LineConnRead);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestCaravanAltGen2LineConn, DEFINITIONS.CaravanAltGen2LineConnRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // DA-62 — feedback real del "engine master" (piston), per sincronitzar l'animació dels botons
+                // que abans feien d'AUTO IGNITION (turboprop).
+                simconnect.AddToDataDefinition(DEFINITIONS.DA62EngineMaster1Read, "RECIP ENG ENGINE MASTER SWITCH:1", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<DA62EngineMaster1Struct>(DEFINITIONS.DA62EngineMaster1Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestDA62EngineMaster1, DEFINITIONS.DA62EngineMaster1Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+                simconnect.AddToDataDefinition(DEFINITIONS.DA62EngineMaster2Read, "RECIP ENG ENGINE MASTER SWITCH:2", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<DA62EngineMaster2Struct>(DEFINITIONS.DA62EngineMaster2Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestDA62EngineMaster2, DEFINITIONS.DA62EngineMaster2Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
             }
             catch (COMException ex)
@@ -5840,6 +5932,38 @@ namespace SimConnect3
                         altGen2Off = newAltGen2OffFromRead;
                         pbMain.Invalidate();
                     }
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestDA62EngineMaster1)
+            {
+                double newVal = ((DA62EngineMaster1Struct)data.dwData[0]).value;
+                if (newVal != _da62EngineMaster1)
+                {
+                    Debug.WriteLine($"[DA62 RECIP ENG ENGINE MASTER SWITCH:1] {_da62EngineMaster1} -> {newVal}");
+                    _da62EngineMaster1 = newVal;
+                }
+                bool newMaster1On = newVal >= 0.5;
+                if (newMaster1On != da62EngineMaster1On)
+                {
+                    da62EngineMaster1On = newMaster1On;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestDA62EngineMaster2)
+            {
+                double newVal = ((DA62EngineMaster2Struct)data.dwData[0]).value;
+                if (newVal != _da62EngineMaster2)
+                {
+                    Debug.WriteLine($"[DA62 RECIP ENG ENGINE MASTER SWITCH:2] {_da62EngineMaster2} -> {newVal}");
+                    _da62EngineMaster2 = newVal;
+                }
+                bool newMaster2On = newVal >= 0.5;
+                if (newMaster2On != da62EngineMaster2On)
+                {
+                    da62EngineMaster2On = newMaster2On;
+                    pbMain.Invalidate();
                 }
                 return;
             }
@@ -7306,6 +7430,61 @@ namespace SimConnect3
                 }
             }
 
+            // DA-62 — etiqueta "MASTER", mateix estil que FUEL BOOST però d'una sola línia.
+            {
+                var masterLbl = overlayImages.FirstOrDefault(o => o.Name == "SW_DA62_MASTER_LBL");
+                if (masterLbl != null && (calibrationMode || (masterLbl.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var masterBgBrush = new SolidBrush(Color.FromArgb(30, 30, 30));
+                    e.Graphics.FillRectangle(masterBgBrush, masterLbl.Bounds);
+                    using var masterFont = new Font("Arial Narrow", 32f, FontStyle.Bold, GraphicsUnit.Pixel);
+                    using var masterFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    e.Graphics.DrawString("MASTER", masterFont, Brushes.White, masterLbl.Bounds, masterFmt);
+                }
+            }
+
+            // DA-62 — capa opaca sense text, mateixa alçada que MASTER, 15% més estreta.
+            {
+                var masterCover = overlayImages.FirstOrDefault(o => o.Name == "SW_DA62_MASTER_COVER");
+                if (masterCover != null && (calibrationMode || (masterCover.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var masterCoverBrush = new SolidBrush(Color.FromArgb(30, 30, 30));
+                    e.Graphics.FillRectangle(masterCoverBrush, masterCover.Bounds);
+                }
+            }
+
+            // DA-62 — duplicat de MASTER_LBL/MASTER_COVER, 200px més a l'esquerra.
+            {
+                var masterLbl2 = overlayImages.FirstOrDefault(o => o.Name == "SW_DA62_MASTER_LBL_2");
+                if (masterLbl2 != null && (calibrationMode || (masterLbl2.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var masterBgBrush2 = new SolidBrush(Color.FromArgb(30, 30, 30));
+                    e.Graphics.FillRectangle(masterBgBrush2, masterLbl2.Bounds);
+                    using var masterFont2 = new Font("Arial Narrow", 32f, FontStyle.Bold, GraphicsUnit.Pixel);
+                    using var masterFmt2 = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    e.Graphics.DrawString("MASTER", masterFont2, Brushes.White, masterLbl2.Bounds, masterFmt2);
+                }
+                var masterCover2 = overlayImages.FirstOrDefault(o => o.Name == "SW_DA62_MASTER_COVER_2");
+                if (masterCover2 != null && (calibrationMode || (masterCover2.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var masterCoverBrush2 = new SolidBrush(Color.FromArgb(30, 30, 30));
+                    e.Graphics.FillRectangle(masterCoverBrush2, masterCover2.Bounds);
+                }
+            }
+
+            // DA-62 — etiqueta "Diamond DA-62" en cursiva.
+            {
+                var titleLbl = overlayImages.FirstOrDefault(o => o.Name == "SW_DA62_TITLE_LBL");
+                if (titleLbl != null && (calibrationMode || (titleLbl.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var titleBgBrush = new SolidBrush(Color.FromArgb(30, 30, 30));
+                    e.Graphics.FillRectangle(titleBgBrush, titleLbl.Bounds);
+                    using var titleFont = new Font("Arial Narrow", 40f, FontStyle.Italic, GraphicsUnit.Pixel);
+                    using var titleFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    e.Graphics.DrawString("Diamond DA-62", titleFont, Brushes.White, titleLbl.Bounds, titleFmt);
+                }
+            }
+
             // Caravan — etiqueta "GENE / RATOR", mateix estil que SW_CARAVAN_ALTGEN2_LBL (STBY/ALT PWR).
             {
                 var genLbl = overlayImages.FirstOrDefault(o => o.Name == "SW_CARAVAN_GENERATOR_LBL");
@@ -7563,6 +7742,29 @@ namespace SimConnect3
                 e.Graphics.FillRectangle(overlayBrush, rudderTrimZone);
             }
 
+
+            // DA-62 — capa "tapa" amb relleu (efecte sortint del panell): mateix gris de fons que la resta
+            // d'etiquetes, amb una vora clara a dalt/esquerra i una vora fosca a baix/dreta simulant llum
+            // des de dalt-esquerra sobre una superfície en relleu. Dibuixada AL FINAL de tot (per sobre del
+            // 4K i de qualsevol animació PNG), just abans de l'overlay de calibratge.
+            {
+                var reliefCover = overlayImages.FirstOrDefault(o => o.Name == "SW_DA62_COVER_RELIEF");
+                if (reliefCover != null && (calibrationMode || (reliefCover.ShowWhen?.Invoke() ?? false)))
+                {
+                    var rb = reliefCover.Bounds;
+                    using var reliefBrush = new SolidBrush(Color.FromArgb(30, 30, 30));
+                    e.Graphics.FillRectangle(reliefBrush, rb);
+                    int bevel = 3;
+                    using var highlightPen = new Pen(Color.FromArgb(70, 70, 70), bevel);
+                    using var shadowPen = new Pen(Color.FromArgb(10, 10, 10), bevel);
+                    // Vora clara (dalt + esquerra)
+                    e.Graphics.DrawLine(highlightPen, rb.Left, rb.Bottom - 1, rb.Left, rb.Top);
+                    e.Graphics.DrawLine(highlightPen, rb.Left, rb.Top, rb.Right - 1, rb.Top);
+                    // Vora fosca (baix + dreta)
+                    e.Graphics.DrawLine(shadowPen, rb.Right - 1, rb.Top, rb.Right - 1, rb.Bottom - 1);
+                    e.Graphics.DrawLine(shadowPen, rb.Right - 1, rb.Bottom - 1, rb.Left, rb.Bottom - 1);
+                }
+            }
 
             // --- CALIBRATGE OVERLAY (F12 per activar/desactivar) ---
             if (calibrationMode)
