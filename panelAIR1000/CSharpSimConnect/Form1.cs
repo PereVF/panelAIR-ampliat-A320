@@ -279,6 +279,8 @@ namespace SimConnect3
         double _c400JunctionSetting = double.MinValue; // A:FUELSYSTEM JUNCTION SETTING:1 — opció real seleccionada al C400
         double _da62EngineMaster1 = double.MinValue; // A:RECIP ENG ENGINE MASTER SWITCH:1 — feedback real DA-62, motor esquerre
         double _da62EngineMaster2 = double.MinValue; // A:RECIP ENG ENGINE MASTER SWITCH:2 — feedback real DA-62, motor dret
+        double _da40EssentialBus2 = double.MinValue; // L:ELECTRICAL_EssentialBus_2 — feedback real ALT/GEN 2 DA-40
+        double _da40EngineMaster1 = double.MinValue; // RECIP ENG ENGINE MASTER SWITCH:1 — feedback real Engine Master DA-40
         DateTime _fuelSel1IgnoreFollowUntil = DateTime.MinValue; // evita el "rebot" quan la lectura encara no ha seguit el clic
         DateTime _fuelSel2IgnoreFollowUntil = DateTime.MinValue;
         DateTime _seSelectorIgnoreFollowUntil = DateTime.MinValue; // idem, pel selector únic (C400)
@@ -293,6 +295,7 @@ namespace SimConnect3
         bool ignition2Active;
         bool da62EngineMaster1On; // feedback real (RECIP ENG ENGINE MASTER SWITCH:1) — DA-62
         bool da62EngineMaster2On; // feedback real (RECIP ENG ENGINE MASTER SWITCH:2) — DA-62
+        bool da40EngineMaster1On; // feedback real (RECIP ENG ENGINE MASTER SWITCH:1) — DA-40, monomotor
         private int ign1Pos = 2; // 0=OFF, 1=RIGHT, 2=LEFT(default), 3=BOTH, 4=START
         private int ign2Pos = 2;
         private int fuel1Pos = 0; // 0=OFF(-30°), 1=ON(0°), 2=CROSSFEED(+30°)
@@ -635,6 +638,7 @@ namespace SimConnect3
             PropLeverWrite,
             PropDeiceWrite,
             LtsTestWrite,
+            GenericRpnClientDataDef,
             AircraftTitle,
             ParkingBrakeRead,
             BatteryVoltageRead,
@@ -655,6 +659,8 @@ namespace SimConnect3
             CaravanAltGen2LineConnRead,
             DA62EngineMaster1Read,
             DA62EngineMaster2Read,
+            DA40EssentialBus2Read,
+            DA40EngineMaster1Read,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -733,6 +739,10 @@ namespace SimConnect3
         struct DA62EngineMaster1Struct { public double value; } // A:RECIP ENG ENGINE MASTER SWITCH:1,Bool — feedback real del master engine esquerre DA-62
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct DA62EngineMaster2Struct { public double value; } // A:RECIP ENG ENGINE MASTER SWITCH:2,Bool — feedback real del master engine dret DA-62
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct DA40EssentialBus2Struct { public double value; } // L:ELECTRICAL_EssentialBus_2 — interruptor "ALT/GEN 2" real de la DA-40 (no fa res via GENERAL ENG MASTER ALTERNATOR:2)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct DA40EngineMaster1Struct { public double value; } // A:RECIP ENG ENGINE MASTER SWITCH:1,Bool — feedback real del master engine de la DA-40 (monomotor)
 
         enum REQUESTS
         {
@@ -757,6 +767,21 @@ namespace SimConnect3
             RequestCaravanAltGen2LineConn,
             RequestDA62EngineMaster1,
             RequestDA62EngineMaster2,
+            RequestDA40EssentialBus2,
+            RequestDA40EngineMaster1,
+        }
+        // Missatger genèric RPN — Client Data Area compartida amb el WASM (SFS_Link/Module.cpp).
+        // Permet enviar qualsevol text RPN (K:, H:, B:, índexs, 'nom'_n, etc.) sense recompilar el
+        // WASM per cada interruptor nou: el WASM només l'executa tal qual amb execute_calculator_code.
+        enum CLIENT_DATA_ID
+        {
+            GenericRpnData
+        }
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi, Pack = 1)]
+        struct GenericRpnStruct
+        {
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 1024)]
+            public string rpn;
         }
         enum SIMCONNECT_EVENTS
         {
@@ -2665,6 +2690,24 @@ namespace SimConnect3
                         pbMain.Invalidate();
                         return;
                     }
+                    if (IsDA40())
+                    {
+                        // DA-40: "ALT/GEN 2" real és L:ELECTRICAL_EssentialBus_2 (bus interconnect), no
+                        // GENERAL ENG MASTER ALTERNATOR:2. RPN complet transcrit del Behavior viewer
+                        // (tanca la connexió bus principal/essencial si cal, redirigeix el relè segons
+                        // l'estat actual de BUS CONNECTION ON:3, i escriu l'estat final), enviat pel
+                        // missatger genèric perquè K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE necessita
+                        // 2 paràmetres (no enviable amb un TransmitClientEvent normal).
+                        int target = altGen2Off ? 1 : 0;
+                        string rpn =
+                            "1 (A:1:BUS CONNECTION ON:2, Bool) == if{ 2 1 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) } " +
+                            $"{target} if{{ 1 (A:1:BUS CONNECTION ON:3, Bool) if{{ 1 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} 2 (A:1:BUS CONNECTION ON:3, Bool) ! if{{ 2 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} }} " +
+                            $"els{{ 1 (A:1:BUS CONNECTION ON:3, Bool) ! if{{ 1 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} 2 (A:1:BUS CONNECTION ON:3, Bool) if{{ 2 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} }} " +
+                            $"{target} (>L:ELECTRICAL_EssentialBus_2)";
+                        SendGenericRpn(rpn);
+                        pbMain.Invalidate();
+                        return;
+                    }
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_ALTERNATOR2, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
                 }});
@@ -2915,6 +2958,15 @@ namespace SimConnect3
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.ENGINE_MASTER_1_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         return;
                     }
+                    if (IsDA40()) {
+                        // DA-40: "Engine Master" real és B:ENGINE_Master_1 (InputEvent, no accessible amb
+                        // TransmitClientEvent normal) — transcrit del Behavior viewer. El Mouserect només
+                        // fa el toggle si la tapa de seguretat (B:ENGINE_Master_1_Cover) està oberta, així
+                        // que forcem la tapa oberta abans de fer el toggle perquè el botó físic sempre faci
+                        // efecte. Enviat pel missatger genèric.
+                        SendGenericRpn("1 (>B:ENGINE_Master_1_Cover) (>B:ENGINE_Master_1_Toggle)");
+                        return;
+                    }
                     simconnect?.TransmitClientEvent(0,
                     ignition1Active ? SIMCONNECT_EVENTS.KINGAIR_IGN1_OFF : SIMCONNECT_EVENTS.KINGAIR_IGN1_ARM,
                     0u, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
@@ -2998,7 +3050,7 @@ namespace SimConnect3
                 new() { Name="SW_DN_STARTER1",  TypeKey="SW_DN_STARTER1",  BasePos=new Point(1564, 1653), ZoomWidth=75, Img=swWhiteImg,
                         ShowWhen = () => !starter1Active, OnClick=null },
                 new() { Name="SW_DN_IGNITION1", TypeKey="SW_DN_IGNITION1", BasePos=new Point(1624, 1653), ZoomWidth=75, Img=swWhiteImg,
-                        ShowWhen = () => !IsDA62() || !da62EngineMaster1On, OnClick=null },
+                        ShowWhen = () => IsDA62() ? !da62EngineMaster1On : IsDA40() ? !da40EngineMaster1On : true, OnClick=null },
                 new() { Name="SW_DN_STARTER2",  TypeKey="SW_DN_STARTER2",  BasePos=new Point(1684, 1653), ZoomWidth=75, Img=swWhiteImg,
                         ShowWhen = () => !starter2Active, OnClick=null },
                 new() { Name="SW_DN_IGNITION2", TypeKey="SW_DN_IGNITION2", BasePos=new Point(1744, 1653), ZoomWidth=75, Img=swWhiteImg,
@@ -3123,7 +3175,11 @@ namespace SimConnect3
                 // DA-62 — capa "tapa" amb relleu (efecte sortint, no enfonsat), mateix color que la resta
                 // d'etiquetes. Arrossegable I redimensionable amb F12.
                 new() { Name="SW_DA62_COVER_RELIEF", TypeKey="DA62_COVER_RELIEF", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
-                        ShowWhen = () => IsDA62() },
+                        ShowWhen = () => IsDA62() || IsDA40() },
+                // DA-40 — tapa amb relleu independent (Pere l'ha posicionat al damunt dels selectors de
+                // combustible via F12, veure calibration_export.txt). Mateix efecte que SW_DA62_COVER_RELIEF.
+                new() { Name="SW_DA40_COVER_RELIEF", TypeKey="DA40_COVER_RELIEF", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
+                        ShowWhen = () => IsDA40() },
                 // Caravan — 3 capes opaques sense text, mateix color de fons, arrossegables i redimensionables.
                 new() { Name="SW_CARAVAN_COVER_1", TypeKey="CARAVAN_COVER_1", BasePos=new Point(1980, 1350), ZoomWidth=150, ZoomHeight=80, Img=null,
                         ShowWhen = () => IsCaravan() },
@@ -3883,6 +3939,22 @@ namespace SimConnect3
                 SimConnect.SIMCONNECT_OBJECT_ID_USER,
                 SIMCONNECT_DATA_SET_FLAG.DEFAULT,
                 new ElecStarterStruct { value = value });
+        }
+
+        // Missatger genèric RPN — envia qualsevol text RPN al WASM (SFS_Link) via Client Data Area,
+        // perquè l'executi directe amb execute_calculator_code. Buffer de 1024 bytes; truncar per sobre
+        // seria perillós (RPN a mitges), per això avisem en comptes de tallar en silenci.
+        private void SendGenericRpn(string rpn)
+        {
+            if (simconnect == null) return;
+            if (rpn.Length > 1023)
+            {
+                Debug.WriteLine($"[GenericRPN] RPN massa llarg ({rpn.Length} chars, màxim 1023) — NO enviat: {rpn}");
+                return;
+            }
+            simconnect.SetClientData(CLIENT_DATA_ID.GenericRpnData, DEFINITIONS.GenericRpnClientDataDef,
+                SIMCONNECT_CLIENT_DATA_SET_FLAG.DEFAULT, 0, new GenericRpnStruct { rpn = rpn });
+            Debug.WriteLine($"[GenericRPN] enviat: {rpn}");
         }
 
         private void SetElecIgnition(double value)
@@ -5398,6 +5470,30 @@ namespace SimConnect3
                 simconnect.RegisterDataDefineStruct<DA62EngineMaster2Struct>(DEFINITIONS.DA62EngineMaster2Read);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestDA62EngineMaster2, DEFINITIONS.DA62EngineMaster2Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
+                // DA-40 — "ALT/GEN 2" real: L: var global (no una O: privada de l'InputEvent), confirmat
+                // al Behavior viewer. Només lectura (feedback): l'escriptura real es fa amb el RPN complet
+                // via el missatger genèric (K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE necessita 2 params).
+                // GENERAL ENG MASTER ALTERNATOR:2 (via Struct1) no reflecteix aquest interruptor en aquest avió.
+                simconnect.AddToDataDefinition(DEFINITIONS.DA40EssentialBus2Read, "L:ELECTRICAL_EssentialBus_2", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<DA40EssentialBus2Struct>(DEFINITIONS.DA40EssentialBus2Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestDA40EssentialBus2, DEFINITIONS.DA40EssentialBus2Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // DA-40 — "Engine Master" real: al Behavior viewer l'InputEvent escriu/llegeix B:ENGINE_Master_1
+                // (privat del template, no llegible per SimConnect fora d'un WASM). Per feedback fem servir el
+                // mateix simvar real que ja funciona per aquest concepte a la DA-62 (RECIP ENG ENGINE MASTER
+                // SWITCH:1) — igual que ALT/GEN 2, la variable de template només mou el switch, el simvar real
+                // és el que reflecteix l'estat del sistema. L'escriptura es fa amb el missatger genèric (B: no
+                // s'hi arriba amb un TransmitClientEvent normal).
+                simconnect.AddToDataDefinition(DEFINITIONS.DA40EngineMaster1Read, "RECIP ENG ENGINE MASTER SWITCH:1", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<DA40EngineMaster1Struct>(DEFINITIONS.DA40EngineMaster1Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestDA40EngineMaster1, DEFINITIONS.DA40EngineMaster1Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // Missatger genèric RPN — Client Data Area compartida amb el WASM (SFS_Link). El WASM ja
+                // ha cridat CreateClientData; aquí només ens hi enganxem amb el mateix nom i definició.
+                simconnect.MapClientDataNameToID("SFS_LINK.GENERIC_RPN", CLIENT_DATA_ID.GenericRpnData);
+                simconnect.AddToClientDataDefinition(DEFINITIONS.GenericRpnClientDataDef, 0, 1024, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<GenericRpnStruct>(DEFINITIONS.GenericRpnClientDataDef);
+
             }
             catch (COMException ex)
             {
@@ -5967,6 +6063,41 @@ namespace SimConnect3
                 }
                 return;
             }
+            if (data.dwRequestID == (uint)REQUESTS.RequestDA40EssentialBus2)
+            {
+                double newVal = ((DA40EssentialBus2Struct)data.dwData[0]).value;
+                if (newVal != _da40EssentialBus2)
+                {
+                    Debug.WriteLine($"[DA40 L:ELECTRICAL_EssentialBus_2] {_da40EssentialBus2} -> {newVal}");
+                    _da40EssentialBus2 = newVal;
+                }
+                if (IsDA40())
+                {
+                    bool newAltGen2OffFromRead = newVal < 0.5;
+                    if (newAltGen2OffFromRead != altGen2Off)
+                    {
+                        altGen2Off = newAltGen2OffFromRead;
+                        pbMain.Invalidate();
+                    }
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestDA40EngineMaster1)
+            {
+                double newVal = ((DA40EngineMaster1Struct)data.dwData[0]).value;
+                if (newVal != _da40EngineMaster1)
+                {
+                    Debug.WriteLine($"[DA40 RECIP ENG ENGINE MASTER SWITCH:1] {_da40EngineMaster1} -> {newVal}");
+                    _da40EngineMaster1 = newVal;
+                }
+                bool newDa40Master1On = newVal >= 0.5;
+                if (newDa40Master1On != da40EngineMaster1On)
+                {
+                    da40EngineMaster1On = newDa40Master1On;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
             if (data.dwRequestID == (uint)REQUESTS.Request1)
             {
                 Struct1 s1 = (Struct1)data.dwData[0];
@@ -6255,7 +6386,7 @@ namespace SimConnect3
                     altGen1Off = newAltGen1Off;
                     needsRepaint = true;
                 }
-                if (!IsCaravan() && newAltGen2Off != altGen2Off)
+                if (!IsCaravan() && !IsDA40() && newAltGen2Off != altGen2Off)
                 {
                     altGen2Off = newAltGen2Off;
                     needsRepaint = true;
@@ -7752,6 +7883,28 @@ namespace SimConnect3
                 if (reliefCover != null && (calibrationMode || (reliefCover.ShowWhen?.Invoke() ?? false)))
                 {
                     var rb = reliefCover.Bounds;
+                    using var reliefBrush = new SolidBrush(Color.FromArgb(30, 30, 30));
+                    e.Graphics.FillRectangle(reliefBrush, rb);
+                    int bevel = 3;
+                    using var highlightPen = new Pen(Color.FromArgb(70, 70, 70), bevel);
+                    using var shadowPen = new Pen(Color.FromArgb(10, 10, 10), bevel);
+                    // Vora clara (dalt + esquerra)
+                    e.Graphics.DrawLine(highlightPen, rb.Left, rb.Bottom - 1, rb.Left, rb.Top);
+                    e.Graphics.DrawLine(highlightPen, rb.Left, rb.Top, rb.Right - 1, rb.Top);
+                    // Vora fosca (baix + dreta)
+                    e.Graphics.DrawLine(shadowPen, rb.Right - 1, rb.Top, rb.Right - 1, rb.Bottom - 1);
+                    e.Graphics.DrawLine(shadowPen, rb.Right - 1, rb.Bottom - 1, rb.Left, rb.Bottom - 1);
+                }
+            }
+
+            // DA-40 — segona tapa amb relleu, independent de SW_DA62_COVER_RELIEF (Pere la fa servir
+            // per una altra zona, veure comentari a la definició de l'overlay). Mateix efecte, dibuixada
+            // també AL FINAL de tot.
+            {
+                var reliefCoverDa40 = overlayImages.FirstOrDefault(o => o.Name == "SW_DA40_COVER_RELIEF");
+                if (reliefCoverDa40 != null && (calibrationMode || (reliefCoverDa40.ShowWhen?.Invoke() ?? false)))
+                {
+                    var rb = reliefCoverDa40.Bounds;
                     using var reliefBrush = new SolidBrush(Color.FromArgb(30, 30, 30));
                     e.Graphics.FillRectangle(reliefBrush, rb);
                     int bevel = 3;
