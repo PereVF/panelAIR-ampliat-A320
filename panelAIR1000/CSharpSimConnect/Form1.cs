@@ -220,6 +220,8 @@ namespace SimConnect3
                 return slot switch { 1 => "LEFT", 2 => "BOTH", _ => "RIGHT" };
             if (IsBonanzaG36())
                 return slot switch { 1 => "OFF", 2 => "LEFT", _ => "RIGHT" };
+            if (IsCirrusSR22())
+                return slot switch { 1 => "OFF", 2 => "LEFT", _ => "RIGHT" };
             if (IsDA40())
                 return slot switch { 1 => "NORMAL", 2 => "EMERGENCY", _ => "OFF" };
             return "";
@@ -270,6 +272,7 @@ namespace SimConnect3
         double _daFuelTankSelector3 = double.MinValue; // A:FUEL TANK SELECTOR:3 — idem (la bomba de la DA-40 fa servir índex 3)
         double _daFuelTankSelector4 = double.MinValue; // A:FUELSYSTEM VALVE SWITCH:4 — hipòtesi: vàlvula dreta de la Caravan
         int _bonanzaFuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la Bonanza (veure Output/Debug de VS)
+        int _cirrusFuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la Cirrus SR22T (veure Output/Debug de VS)
         double _da62AvionicsLineConn = double.MinValue; // A:LINE CONNECTION ON:rh_main_bustoavionics_bus — estat real del bus d'avionics de la DA-62
         double _c172Avionics1LineConn = double.MinValue; // A:LINE CONNECTION ON:BUS_1_To_AVIONICS_BUS_1
         double _c172Avionics2LineConn = double.MinValue; // A:LINE CONNECTION ON:BUS_2_To_AVIONICS_BUS_2
@@ -2751,7 +2754,7 @@ namespace SimConnect3
                 }});
             // SW_FUEL1 — left and right areas
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-LEFT", BasePos=new Point(1620, 1080), W=80, H=120, Resizable=true, NoShadow=true,
-                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36(),
+                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36() && !IsCirrusSR22(),
                 OnClick = () => {
                     if (_isMsfs2024 && IsC408()) {
                         // C408: un sol interruptor FUEL_TRANSFER físic, representat per 2 selectors a l'app.
@@ -2797,7 +2800,7 @@ namespace SimConnect3
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-RIGHT", BasePos=new Point(1720, 1080), W=80, H=120, Resizable=true, NoShadow=true,
-                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36(),
+                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36() && !IsCirrusSR22(),
                 OnClick = () => {
                     if (_isMsfs2024 && IsC408()) {
                         if (fuel1Pos == 1) {
@@ -2835,7 +2838,7 @@ namespace SimConnect3
                 }});
             // SW_FUEL2 — left and right areas
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-LEFT", BasePos=new Point(2120, 1080), W=80, H=120, Resizable=true, NoShadow=true,
-                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36(),
+                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36() && !IsCirrusSR22(),
                 OnClick = () => {
                     if (_isMsfs2024 && IsC408()) {
                         // Selector dret: només es mou entre CROSSFEED(0) i ON(1) — mai OFF(2).
@@ -2878,7 +2881,7 @@ namespace SimConnect3
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-RIGHT", BasePos=new Point(2220, 1080), W=80, H=120, Resizable=true, NoShadow=true,
-                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36(),
+                ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36() && !IsCirrusSR22(),
                 OnClick = () => {
                     if (_isMsfs2024 && IsC408()) {
                         if (fuel2Pos == 0) {
@@ -2922,7 +2925,7 @@ namespace SimConnect3
             // Comanda confirmada via Behaviors "Set" (FUEL_SWITCH_SELECTOR / FUEL_SELECTOR_1) — veure SeSelectorMsfsVal().
             // Posicions per defecte = últim calibratge F12 de Pere (calibration_export.txt), es carreguen igualment via LoadCalibrationPositions.
             cockpitRight.Buttons.Add(new UiButton { Name="SE_SELECTOR-LEFT", BasePos=new Point(1529, 1967), W=186, H=253, Resizable=true, NoShadow=true,
-                ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36(),
+                ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() || IsCirrusSR22(),
                 OnClick = () => {
                     if (seSelectorPos <= 0) return;
                     seSelectorPos--;
@@ -2930,7 +2933,7 @@ namespace SimConnect3
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="SE_SELECTOR-RIGHT", BasePos=new Point(1738, 1967), W=177, H=255, Resizable=true, NoShadow=true,
-                ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36(),
+                ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() || IsCirrusSR22(),
                 OnClick = () => {
                     if (seSelectorPos >= 2) return;
                     seSelectorPos++;
@@ -3056,7 +3059,7 @@ namespace SimConnect3
                 new() { Name="SW_DN_IGNITION2", TypeKey="SW_DN_IGNITION2", BasePos=new Point(1744, 1653), ZoomWidth=75, Img=swWhiteImg,
                         ShowWhen = () => !IsDA62() || !da62EngineMaster2On, OnClick=null },
                 new() { Name="SW_DN_PANELLIGHT", TypeKey="SW DN white", BasePos=new Point(1924, 1653), ZoomWidth=75, Img=swWhiteImg,
-                        ShowWhen = () => !panelLightActive,
+                        ShowWhen = () => panelLightActive,
                         OnClick  = null },
                 new() { Name="SW_DN_DEICE", TypeKey="SW DN green", BasePos=new Point(1984, 1653), ZoomWidth=75, Img=swGreenImg,
                         ShowWhen = () => !deiceActive,
@@ -3129,6 +3132,11 @@ namespace SimConnect3
                 new() { Name="SW_CARAVAN_ALTGEN2_LBL", TypeKey="CARAVAN_ALTGEN2_LBL", BasePos=new Point(1620, 1350), ZoomWidth=160, ZoomHeight=60, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsCaravan() },
+                // DA-40 — etiqueta "ESS / BUS" per l'interruptor ALT/GEN 2 (essential bus). Idèntica mida/
+                // posició/estil que SW_CARAVAN_ALTGEN2_LBL.
+                new() { Name="SW_DA40_ESSBUS_LBL", TypeKey="DA40_ESSBUS_LBL", BasePos=new Point(1620, 1350), ZoomWidth=150, ZoomHeight=80, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsDA40() },
                 // Caravan — etiquetes RESET/ON/TRIP per l'interruptor momentani ALTGEN1 (UP/centre/DN).
                 // Mateix estil que SW_CARAVAN_ALTGEN2_LBL. Arrossegables amb F12, mida fixa.
                 new() { Name="SW_CARAVAN_ALTGEN1_LBL_RESET", TypeKey="CARAVAN_ALTGEN1_LBL", BasePos=new Point(1550, 1170), ZoomWidth=77, ZoomHeight=41, Img=null,
@@ -3161,17 +3169,23 @@ namespace SimConnect3
                 new() { Name="SW_DA62_MASTER_COVER", TypeKey="DA62_MASTER_COVER", BasePos=new Point(1794, 1604), ZoomWidth=128, ZoomHeight=40, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsDA62() },
-                // DA-62 — duplicat de MASTER_LBL/MASTER_COVER, 200px més a l'esquerra.
+                // DA-62 — duplicat de MASTER_LBL/MASTER_COVER, 200px més a l'esquerra: aquesta parella és la
+                // que Pere ha calibrat justa sobre BTN_IGNITION1 (veure calibration_export.txt), per això
+                // també es mostra a la DA-40.
                 new() { Name="SW_DA62_MASTER_LBL_2", TypeKey="DA62_MASTER_LBL_2", BasePos=new Point(1424, 1600), ZoomWidth=150, ZoomHeight=40, Img=null,
                         NoResize = true,
-                        ShowWhen = () => IsDA62() },
+                        ShowWhen = () => IsDA62() || IsDA40() },
                 new() { Name="SW_DA62_MASTER_COVER_2", TypeKey="DA62_MASTER_COVER_2", BasePos=new Point(1594, 1604), ZoomWidth=128, ZoomHeight=40, Img=null,
                         NoResize = true,
-                        ShowWhen = () => IsDA62() },
+                        ShowWhen = () => IsDA62() || IsDA40() },
                 // DA-62 — etiqueta "Diamond DA-62" en cursiva.
                 new() { Name="SW_DA62_TITLE_LBL", TypeKey="DA62_TITLE_LBL", BasePos=new Point(1424, 1500), ZoomWidth=300, ZoomHeight=40, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsDA62() },
+                // DA-40 — idèntica a SW_DA62_TITLE_LBL (mateixa mida/posició/estil), text "Diamond DA40".
+                new() { Name="SW_DA40_TITLE_LBL", TypeKey="DA40_TITLE_LBL", BasePos=new Point(1424, 1500), ZoomWidth=300, ZoomHeight=40, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsDA40() },
                 // DA-62 — capa "tapa" amb relleu (efecte sortint, no enfonsat), mateix color que la resta
                 // d'etiquetes. Arrossegable I redimensionable amb F12.
                 new() { Name="SW_DA62_COVER_RELIEF", TypeKey="DA62_COVER_RELIEF", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
@@ -3179,6 +3193,13 @@ namespace SimConnect3
                 // DA-40 — tapa amb relleu independent (Pere l'ha posicionat al damunt dels selectors de
                 // combustible via F12, veure calibration_export.txt). Mateix efecte que SW_DA62_COVER_RELIEF.
                 new() { Name="SW_DA40_COVER_RELIEF", TypeKey="DA40_COVER_RELIEF", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
+                        ShowWhen = () => IsDA40() },
+                // 2 tapes més amb el mateix efecte de relleu — posició/mida per defecte provisionals,
+                // Pere les col·locarà amb F12. ShowWhen = DA-40 per defecte (context actual); demanar-li
+                // si en vol una altra en veure-les.
+                new() { Name="SW_DA40_COVER_RELIEF_3", TypeKey="DA40_COVER_RELIEF_3", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
+                        ShowWhen = () => IsDA40() },
+                new() { Name="SW_DA40_COVER_RELIEF_4", TypeKey="DA40_COVER_RELIEF_4", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
                         ShowWhen = () => IsDA40() },
                 // Caravan — 3 capes opaques sense text, mateix color de fons, arrossegables i redimensionables.
                 new() { Name="SW_CARAVAN_COVER_1", TypeKey="CARAVAN_COVER_1", BasePos=new Point(1980, 1350), ZoomWidth=150, ZoomHeight=80, Img=null,
@@ -3217,21 +3238,21 @@ namespace SimConnect3
                 // preparem el selector únic de 3 posicions. Arrossegable/redimensionable amb F12.
                 // De moment només actiu a la DA-40; s'anirà activant per altres monomotors més endavant.
                 new() { Name="SW_SE_SELECTOR_COVER", TypeKey="SE_COVER", BasePos=new Point(1280, 1757), ZoomWidth=753, ZoomHeight=350, Img=null,
-                        ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() },
+                        ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() || IsCirrusSR22() },
                 // Selector únic de 3 posicions, centrat sobre el rectangle de tapa. Reutilitza la mateixa
                 // gràfica que els selectors twin-engine (mateix estil de pom vermell). Posició provisional,
                 // a reposicionar/redimensionar amb F12 un cop calibrat el rectangle de sobre.
                 new() { Name="SW_SE_SELECTOR", TypeKey="SE_SELECTOR", BasePos=new Point(1606, 1877), ZoomWidth=100,
-                        Img=swFuelImg, ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() },
+                        Img=swFuelImg, ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() || IsCirrusSR22() },
                 // Etiquetes de les 3 posicions — mateix estil/mida que SW_DA40_FUELTRANSF_LBL (fons fosc +
                 // "Arial Narrow" 27px bold). 3 elements independents perquè Pere els posicioni per separat amb F12.
                 // El text es tria a SeSelectorLabelText() segons l'avió (DA-40: Normal/Emergency/Off; C400: Left/Right/Off).
                 new() { Name="SW_SE_LBL_1", TypeKey="SE_LBL_1", BasePos=new Point(1450, 1877), ZoomWidth=160, ZoomHeight=60, Img=null,
-                        NoResize = true, ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() },
+                        NoResize = true, ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() || IsCirrusSR22() },
                 new() { Name="SW_SE_LBL_2", TypeKey="SE_LBL_2", BasePos=new Point(1620, 1780), ZoomWidth=160, ZoomHeight=60, Img=null,
-                        NoResize = true, ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() },
+                        NoResize = true, ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() || IsCirrusSR22() },
                 new() { Name="SW_SE_LBL_3", TypeKey="SE_LBL_3", BasePos=new Point(1790, 1877), ZoomWidth=160, ZoomHeight=60, Img=null,
-                        NoResize = true, ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() },
+                        NoResize = true, ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() || IsCirrusSR22() },
                 // Flaps switch
                 new() { Name="SW_FLAPS", TypeKey="SW flaps", BasePos=new Point(3000, 1500), ZoomWidth=75,
                         Img=LoadOverlayImage("SW flaps.png"),
@@ -3248,9 +3269,9 @@ namespace SimConnect3
                 new() { Name="SW_IGNITION2", TypeKey="SW ignition2", BasePos=new Point(2120, 1080), ZoomWidth=100,
                         Img=swIgnitionImg, ShowWhen=null, OnClick=null },
                 new() { Name="SW_FUEL1", TypeKey="SW fuel1", BasePos=new Point(1670, 1080), ZoomWidth=100,
-                        Img=swFuelImg, ShowWhen=() => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36(), OnClick=null },
+                        Img=swFuelImg, ShowWhen=() => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36() && !IsCirrusSR22(), OnClick=null },
                 new() { Name="SW_FUEL2", TypeKey="SW fuel2", BasePos=new Point(2170, 1080), ZoomWidth=100,
-                        Img=swFuelImg, ShowWhen=() => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36(), OnClick=null },
+                        Img=swFuelImg, ShowWhen=() => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36() && !IsCirrusSR22(), OnClick=null },
                 new() { Name="SW_BATTERY",    TypeKey="SW battery",    BasePos=new Point(1320, 1080), ZoomWidth=100,
                         Img=swBatteryImg,  ShowWhen = () => masterBatteryOff, OnClick=null },
                 new() { Name="SW_AVIONICS1",  TypeKey="SW avionics1",  BasePos=new Point(1770, 1280), ZoomWidth=100,
@@ -6437,6 +6458,29 @@ namespace SimConnect3
                     newFuel1Pos = fuel1Pos;
                     newFuel2Pos = fuel2Pos;
                 }
+                else if (IsCirrusSR22())
+                {
+                    // Selector únic, mateixa lectura reutilitzada que Bonanza/C400. ASIMETRIA confirmada
+                    // per Pere movent el selector a mà al VC (igual que la Bonanza: escriptura i lectura
+                    // NO fan servir el mateix codi): OFF real -> raw 0, LEFT real -> raw 2 (al revés del
+                    // que s'havia assumit inicialment, que copiava els valors d'escriptura). RIGHT encara
+                    // no s'ha pogut confirmar net (Pere veu l'app oscil·lar entre LEFT i OFF en aquesta
+                    // posició) — es manté raw 1 -> RIGHT com a hipòtesi pendent de confirmar; si segueix
+                    // inestable, mirar el valor cru real a [CIRRUS FUEL TANK SELECTOR:1] al Debug Output.
+                    if (s1.fuel_selector_1 != _cirrusFuelSelectorRawLast)
+                    {
+                        Debug.WriteLine($"[CIRRUS FUEL TANK SELECTOR:1] {_cirrusFuelSelectorRawLast} -> {s1.fuel_selector_1}");
+                        _cirrusFuelSelectorRawLast = s1.fuel_selector_1;
+                    }
+                    int newPosFromRead = s1.fuel_selector_1 switch { 0 => 0, 2 => 1, 1 => 2, _ => seSelectorPos };
+                    if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
+                    {
+                        seSelectorPos = newPosFromRead;
+                        needsRepaint = true;
+                    }
+                    newFuel1Pos = fuel1Pos;
+                    newFuel2Pos = fuel2Pos;
+                }
                 else if (IsCaravan())
                 {
                     // Caravan: monomotor (numEngines==1), per això cauria al bloc "SINGLE ENGINE" de sota,
@@ -6639,6 +6683,26 @@ namespace SimConnect3
                 firstNavSelReceived = true;             
 
             }
+        }
+
+        // Dibuixa una "tapa" opaca amb efecte de relleu (vora clara dalt/esquerra, fosca baix/dreta) a la
+        // posició/mida de l'overlay indicat. Reutilitzat per totes les SW_*_COVER_RELIEF*.
+        private void DrawReliefCover(Graphics g, string overlayName)
+        {
+            var cover = overlayImages.FirstOrDefault(o => o.Name == overlayName);
+            if (cover == null || !(calibrationMode || (cover.ShowWhen?.Invoke() ?? false))) return;
+            var rb = cover.Bounds;
+            using var reliefBrush = new SolidBrush(Color.FromArgb(30, 30, 30));
+            g.FillRectangle(reliefBrush, rb);
+            int bevel = 3;
+            using var highlightPen = new Pen(Color.FromArgb(70, 70, 70), bevel);
+            using var shadowPen = new Pen(Color.FromArgb(10, 10, 10), bevel);
+            // Vora clara (dalt + esquerra)
+            g.DrawLine(highlightPen, rb.Left, rb.Bottom - 1, rb.Left, rb.Top);
+            g.DrawLine(highlightPen, rb.Left, rb.Top, rb.Right - 1, rb.Top);
+            // Vora fosca (baix + dreta)
+            g.DrawLine(shadowPen, rb.Right - 1, rb.Top, rb.Right - 1, rb.Bottom - 1);
+            g.DrawLine(shadowPen, rb.Right - 1, rb.Bottom - 1, rb.Left, rb.Bottom - 1);
         }
 
         private void PbMain_Paint(object? sender, PaintEventArgs e)
@@ -7520,6 +7584,19 @@ namespace SimConnect3
                 }
             }
 
+            // DA-40 — etiqueta "ESS / BUS" (2 files), idèntica a SW_CARAVAN_ALTGEN2_LBL.
+            {
+                var essBusLbl = overlayImages.FirstOrDefault(o => o.Name == "SW_DA40_ESSBUS_LBL");
+                if (essBusLbl != null && (calibrationMode || (essBusLbl.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var lblBgBrush = new SolidBrush(Color.FromArgb(28, 28, 28));
+                    e.Graphics.FillRectangle(lblBgBrush, essBusLbl.Bounds);
+                    using var lblFont = new Font("Arial Narrow", 32f, FontStyle.Bold, GraphicsUnit.Pixel);
+                    using var lblFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    e.Graphics.DrawString("ESS\nBUS", lblFont, Brushes.White, essBusLbl.Bounds, lblFmt);
+                }
+            }
+
             // Caravan — etiquetes RESET/ON/TRIP de l'interruptor ALTGEN1.
             {
                 var altGen1Labels = new (string Name, string Text)[] {
@@ -7613,6 +7690,19 @@ namespace SimConnect3
                     using var titleFont = new Font("Arial Narrow", 40f, FontStyle.Italic, GraphicsUnit.Pixel);
                     using var titleFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
                     e.Graphics.DrawString("Diamond DA-62", titleFont, Brushes.White, titleLbl.Bounds, titleFmt);
+                }
+            }
+
+            // DA-40 — etiqueta "Diamond DA40", idèntica a la de la DA-62.
+            {
+                var titleLblDa40 = overlayImages.FirstOrDefault(o => o.Name == "SW_DA40_TITLE_LBL");
+                if (titleLblDa40 != null && (calibrationMode || (titleLblDa40.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var titleBgBrush = new SolidBrush(Color.FromArgb(30, 30, 30));
+                    e.Graphics.FillRectangle(titleBgBrush, titleLblDa40.Bounds);
+                    using var titleFont = new Font("Arial Narrow", 40f, FontStyle.Italic, GraphicsUnit.Pixel);
+                    using var titleFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    e.Graphics.DrawString("Diamond DA40", titleFont, Brushes.White, titleLblDa40.Bounds, titleFmt);
                 }
             }
 
@@ -7818,7 +7908,7 @@ namespace SimConnect3
             // SW_FUEL1: pos0=OFF(-30°), pos1=ON(0°), pos2=CROSSFEED(+30°)
             {
                 var sw = overlayImages.FirstOrDefault(o => o.Name == "SW_FUEL1");
-                if (sw?.Img != null && !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36())
+                if (sw?.Img != null && !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36() && !IsCirrusSR22())
                 {
                     float angle = (fuel1Pos - 1) * 30f + 30f;
                     float baseW = sw.ZoomWidth;
@@ -7835,7 +7925,7 @@ namespace SimConnect3
             // SW_FUEL2: pos0=CROSSFEED(-30°), pos1=ON(0°), pos2=OFF(+30°)
             {
                 var sw = overlayImages.FirstOrDefault(o => o.Name == "SW_FUEL2");
-                if (sw?.Img != null && !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36())
+                if (sw?.Img != null && !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36() && !IsCirrusSR22())
                 {
                     // Caravan: fuel2Pos només és 0=OFF/1=ON (sense crossfeed), a diferència de la resta
                     // d'avions (0=CROSSFEED/1=ON/2=OFF) — la fórmula genèrica de sota confondria OFF(0)
@@ -7874,50 +7964,14 @@ namespace SimConnect3
             }
 
 
-            // DA-62 — capa "tapa" amb relleu (efecte sortint del panell): mateix gris de fons que la resta
-            // d'etiquetes, amb una vora clara a dalt/esquerra i una vora fosca a baix/dreta simulant llum
-            // des de dalt-esquerra sobre una superfície en relleu. Dibuixada AL FINAL de tot (per sobre del
-            // 4K i de qualsevol animació PNG), just abans de l'overlay de calibratge.
-            {
-                var reliefCover = overlayImages.FirstOrDefault(o => o.Name == "SW_DA62_COVER_RELIEF");
-                if (reliefCover != null && (calibrationMode || (reliefCover.ShowWhen?.Invoke() ?? false)))
-                {
-                    var rb = reliefCover.Bounds;
-                    using var reliefBrush = new SolidBrush(Color.FromArgb(30, 30, 30));
-                    e.Graphics.FillRectangle(reliefBrush, rb);
-                    int bevel = 3;
-                    using var highlightPen = new Pen(Color.FromArgb(70, 70, 70), bevel);
-                    using var shadowPen = new Pen(Color.FromArgb(10, 10, 10), bevel);
-                    // Vora clara (dalt + esquerra)
-                    e.Graphics.DrawLine(highlightPen, rb.Left, rb.Bottom - 1, rb.Left, rb.Top);
-                    e.Graphics.DrawLine(highlightPen, rb.Left, rb.Top, rb.Right - 1, rb.Top);
-                    // Vora fosca (baix + dreta)
-                    e.Graphics.DrawLine(shadowPen, rb.Right - 1, rb.Top, rb.Right - 1, rb.Bottom - 1);
-                    e.Graphics.DrawLine(shadowPen, rb.Right - 1, rb.Bottom - 1, rb.Left, rb.Bottom - 1);
-                }
-            }
-
-            // DA-40 — segona tapa amb relleu, independent de SW_DA62_COVER_RELIEF (Pere la fa servir
-            // per una altra zona, veure comentari a la definició de l'overlay). Mateix efecte, dibuixada
-            // també AL FINAL de tot.
-            {
-                var reliefCoverDa40 = overlayImages.FirstOrDefault(o => o.Name == "SW_DA40_COVER_RELIEF");
-                if (reliefCoverDa40 != null && (calibrationMode || (reliefCoverDa40.ShowWhen?.Invoke() ?? false)))
-                {
-                    var rb = reliefCoverDa40.Bounds;
-                    using var reliefBrush = new SolidBrush(Color.FromArgb(30, 30, 30));
-                    e.Graphics.FillRectangle(reliefBrush, rb);
-                    int bevel = 3;
-                    using var highlightPen = new Pen(Color.FromArgb(70, 70, 70), bevel);
-                    using var shadowPen = new Pen(Color.FromArgb(10, 10, 10), bevel);
-                    // Vora clara (dalt + esquerra)
-                    e.Graphics.DrawLine(highlightPen, rb.Left, rb.Bottom - 1, rb.Left, rb.Top);
-                    e.Graphics.DrawLine(highlightPen, rb.Left, rb.Top, rb.Right - 1, rb.Top);
-                    // Vora fosca (baix + dreta)
-                    e.Graphics.DrawLine(shadowPen, rb.Right - 1, rb.Top, rb.Right - 1, rb.Bottom - 1);
-                    e.Graphics.DrawLine(shadowPen, rb.Right - 1, rb.Bottom - 1, rb.Left, rb.Bottom - 1);
-                }
-            }
+            // Tapes amb relleu (efecte sortint del panell): mateix gris de fons que la resta d'etiquetes,
+            // amb una vora clara a dalt/esquerra i una vora fosca a baix/dreta simulant llum des de
+            // dalt-esquerra sobre una superfície en relleu. Dibuixades AL FINAL de tot (per sobre del 4K
+            // i de qualsevol animació PNG), just abans de l'overlay de calibratge.
+            DrawReliefCover(e.Graphics, "SW_DA62_COVER_RELIEF");
+            DrawReliefCover(e.Graphics, "SW_DA40_COVER_RELIEF");
+            DrawReliefCover(e.Graphics, "SW_DA40_COVER_RELIEF_3");
+            DrawReliefCover(e.Graphics, "SW_DA40_COVER_RELIEF_4");
 
             // --- CALIBRATGE OVERLAY (F12 per activar/desactivar) ---
             if (calibrationMode)
@@ -9203,6 +9257,18 @@ namespace SimConnect3
             if (IsBonanzaG36())
             {
                 uint val = pos switch { 0 => 0u, 1 => 2u, _ => 1u };
+                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, val, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                _seSelectorIgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                return;
+            }
+            // Cirrus SR22T: mateix mecanisme legacy que la Bonanza (K:FUEL_SELECTOR_SET, ja mapejat),
+            // confirmat directament al Behavior viewer (Set bindings de FUEL_SELECTOR_1, "Variable(s)"
+            // mostra que escriu a FUEL TANK SELECTOR:1) i verificat per Pere amb el botó Execute:
+            // LEFT=0, RIGHT=1, OFF=2 (a diferència de la Bonanza, aquí SÍ coincideix amb els valors dels
+            // bindings). Ordre físic pos0=OFF, pos1=LEFT, pos2=RIGHT, igual que Bonanza/C400.
+            if (IsCirrusSR22())
+            {
+                uint val = pos switch { 0 => 2u, 1 => 0u, _ => 1u };
                 simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, val, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                 _seSelectorIgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                 return;
