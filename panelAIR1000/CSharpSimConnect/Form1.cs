@@ -3201,6 +3201,12 @@ namespace SimConnect3
                         ShowWhen = () => IsDA40() },
                 new() { Name="SW_DA40_COVER_RELIEF_4", TypeKey="DA40_COVER_RELIEF_4", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
                         ShowWhen = () => IsDA40() },
+                // Cirrus SR22T — tapa amb relleu, mateix efecte que les de DA-62/DA-40. Posició/mida per
+                // defecte provisionals, Pere la col·locarà amb F12.
+                new() { Name="SW_CIRRUS_COVER_RELIEF", TypeKey="CIRRUS_COVER_RELIEF", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
+                        ShowWhen = () => IsCirrusSR22() },
+                new() { Name="SW_CIRRUS_COVER_RELIEF_2", TypeKey="CIRRUS_COVER_RELIEF_2", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
+                        ShowWhen = () => IsCirrusSR22() },
                 // Caravan — 3 capes opaques sense text, mateix color de fons, arrossegables i redimensionables.
                 new() { Name="SW_CARAVAN_COVER_1", TypeKey="CARAVAN_COVER_1", BasePos=new Point(1980, 1350), ZoomWidth=150, ZoomHeight=80, Img=null,
                         ShowWhen = () => IsCaravan() },
@@ -6461,18 +6467,15 @@ namespace SimConnect3
                 else if (IsCirrusSR22())
                 {
                     // Selector únic, mateixa lectura reutilitzada que Bonanza/C400. ASIMETRIA confirmada
-                    // per Pere movent el selector a mà al VC (igual que la Bonanza: escriptura i lectura
-                    // NO fan servir el mateix codi): OFF real -> raw 0, LEFT real -> raw 2 (al revés del
-                    // que s'havia assumit inicialment, que copiava els valors d'escriptura). RIGHT encara
-                    // no s'ha pogut confirmar net (Pere veu l'app oscil·lar entre LEFT i OFF en aquesta
-                    // posició) — es manté raw 1 -> RIGHT com a hipòtesi pendent de confirmar; si segueix
-                    // inestable, mirar el valor cru real a [CIRRUS FUEL TANK SELECTOR:1] al Debug Output.
+                    // per Pere movent el selector a mà al VC i mirant el Debug Output (igual que la
+                    // Bonanza: escriptura i lectura NO fan servir el mateix codi): raw 0=OFF, raw 2=LEFT,
+                    // raw 3=RIGHT (valors reals confirmats, no coincideixen amb els d'escriptura 0/1/2).
                     if (s1.fuel_selector_1 != _cirrusFuelSelectorRawLast)
                     {
                         Debug.WriteLine($"[CIRRUS FUEL TANK SELECTOR:1] {_cirrusFuelSelectorRawLast} -> {s1.fuel_selector_1}");
                         _cirrusFuelSelectorRawLast = s1.fuel_selector_1;
                     }
-                    int newPosFromRead = s1.fuel_selector_1 switch { 0 => 0, 2 => 1, 1 => 2, _ => seSelectorPos };
+                    int newPosFromRead = s1.fuel_selector_1 switch { 0 => 0, 2 => 1, 3 => 2, _ => seSelectorPos };
                     if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
                     {
                         seSelectorPos = newPosFromRead;
@@ -7972,6 +7975,8 @@ namespace SimConnect3
             DrawReliefCover(e.Graphics, "SW_DA40_COVER_RELIEF");
             DrawReliefCover(e.Graphics, "SW_DA40_COVER_RELIEF_3");
             DrawReliefCover(e.Graphics, "SW_DA40_COVER_RELIEF_4");
+            DrawReliefCover(e.Graphics, "SW_CIRRUS_COVER_RELIEF");
+            DrawReliefCover(e.Graphics, "SW_CIRRUS_COVER_RELIEF_2");
 
             // --- CALIBRATGE OVERLAY (F12 per activar/desactivar) ---
             if (calibrationMode)
@@ -9261,15 +9266,15 @@ namespace SimConnect3
                 _seSelectorIgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                 return;
             }
-            // Cirrus SR22T: mateix mecanisme legacy que la Bonanza (K:FUEL_SELECTOR_SET, ja mapejat),
-            // confirmat directament al Behavior viewer (Set bindings de FUEL_SELECTOR_1, "Variable(s)"
-            // mostra que escriu a FUEL TANK SELECTOR:1) i verificat per Pere amb el botó Execute:
-            // LEFT=0, RIGHT=1, OFF=2 (a diferència de la Bonanza, aquí SÍ coincideix amb els valors dels
-            // bindings). Ordre físic pos0=OFF, pos1=LEFT, pos2=RIGHT, igual que Bonanza/C400.
+            // Cirrus SR22T: K:FUEL_SELECTOR_SET pel missatger genèric confirmat OFF(val=0) i LEFT(val=2) —
+            // exactament els mateixos valors que ja teníem confirmats per LECTURA (raw 0=Off, 2=Left,
+            // 3=Right). RIGHT amb val=1 (l'esquema de la Bonanza) no movia res; adoptem val=3 per RIGHT,
+            // igual que la lectura, ja que aquí escriptura i lectura semblen compartir la mateixa
+            // codificació (a diferència de la Bonanza, on eren diferents).
             if (IsCirrusSR22())
             {
-                uint val = pos switch { 0 => 2u, 1 => 0u, _ => 1u };
-                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, val, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                uint val = pos switch { 0 => 0u, 1 => 2u, _ => 3u };
+                SendGenericRpn($"{val} (>K:FUEL_SELECTOR_SET)");
                 _seSelectorIgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                 return;
             }
