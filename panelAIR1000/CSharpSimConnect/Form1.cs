@@ -284,6 +284,7 @@ namespace SimConnect3
         double _da62EngineMaster2 = double.MinValue; // A:RECIP ENG ENGINE MASTER SWITCH:2 — feedback real DA-62, motor dret
         double _da40EssentialBus2 = double.MinValue; // L:ELECTRICAL_EssentialBus_2 — feedback real ALT/GEN 2 DA-40
         double _da40EngineMaster1 = double.MinValue; // RECIP ENG ENGINE MASTER SWITCH:1 — feedback real Engine Master DA-40
+        double _cirrusDeiceMaster = double.MinValue; // L:XMLVAR_DEICE_MASTER — feedback real deice airframe Cirrus SR22T
         DateTime _fuelSel1IgnoreFollowUntil = DateTime.MinValue; // evita el "rebot" quan la lectura encara no ha seguit el clic
         DateTime _fuelSel2IgnoreFollowUntil = DateTime.MinValue;
         DateTime _seSelectorIgnoreFollowUntil = DateTime.MinValue; // idem, pel selector únic (C400)
@@ -664,6 +665,7 @@ namespace SimConnect3
             DA62EngineMaster2Read,
             DA40EssentialBus2Read,
             DA40EngineMaster1Read,
+            CirrusDeiceMasterRead,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -746,6 +748,8 @@ namespace SimConnect3
         struct DA40EssentialBus2Struct { public double value; } // L:ELECTRICAL_EssentialBus_2 — interruptor "ALT/GEN 2" real de la DA-40 (no fa res via GENERAL ENG MASTER ALTERNATOR:2)
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct DA40EngineMaster1Struct { public double value; } // A:RECIP ENG ENGINE MASTER SWITCH:1,Bool — feedback real del master engine de la DA-40 (monomotor)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct CirrusDeiceMasterStruct { public double value; } // L:XMLVAR_DEICE_MASTER,Bool — variable real del deice airframe de la Cirrus SR22T (confirmada al Behavior viewer, secció "Variable(s)")
 
         enum REQUESTS
         {
@@ -772,6 +776,7 @@ namespace SimConnect3
             RequestDA62EngineMaster2,
             RequestDA40EssentialBus2,
             RequestDA40EngineMaster1,
+            RequestCirrusDeiceMaster,
         }
         // Missatger genèric RPN — Client Data Area compartida amb el WASM (SFS_Link/Module.cpp).
         // Permet enviar qualsevol text RPN (K:, H:, B:, índexs, 'nom'_n, etc.) sense recompilar el
@@ -2999,7 +3004,19 @@ namespace SimConnect3
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_PANELLIGHT", BasePos=new Point(1924, 1653), W=75, H=75, Resizable=true, NoShadow=true,
                 OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PANELLIGHT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_DEICE", BasePos=new Point(1984, 1653), W=75, H=75, Resizable=true, NoShadow=true,
-                OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_DEICE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
+                OnClick = () => {
+                    if (IsCirrusSR22()) {
+                        // Cirrus SR22T: el Set de l'InputEvent només toca una O: privada (inaccessible des
+                        // de fora) — el "Variable(s)" del Behavior viewer confirma que la variable real que
+                        // anima el switch és L:XMLVAR_DEICE_MASTER (global). L'escrivim directament pel
+                        // missatger genèric, saltant-nos l'O: intermèdia.
+                        int target = deiceActive ? 0 : 1;
+                        SendGenericRpn($"{target} (>L:XMLVAR_DEICE_MASTER)");
+                        pbMain.Invalidate();
+                        return;
+                    }
+                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_DEICE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                } });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_L_INC", BasePos=new Point(1500, 1560), W=75, H=40, Resizable=true, NoShadow=true,
                 OnClick = () => { uint target = cowlFlapL == 0 ? 8191u : 16383u;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_L_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
@@ -3148,11 +3165,9 @@ namespace SimConnect3
                 new() { Name="SW_CARAVAN_ALTGEN1_LBL_TRIP", TypeKey="CARAVAN_ALTGEN1_LBL", BasePos=new Point(1550, 1280), ZoomWidth=77, ZoomHeight=41, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsCaravan() },
-                // Caravan — fuel boost pump: capa opaca (sense text, tapa el fons) + etiqueta "FUEL BOOST".
+                // Caravan — fuel boost pump: etiqueta "FUEL BOOST" (la tapa pròpia s'ha eliminat, ara es
+                // reutilitza SW_BONANZA_FUELSEL_R_COVER per Bonanza/Caravan/Cirrus alhora).
                 // Mateixa mida que SW_CARAVAN_ALTGEN2_LBL (150x80). Arrossegables amb F12, mida fixa.
-                new() { Name="SW_CARAVAN_FUELBOOST_COVER", TypeKey="CARAVAN_FUELBOOST_COVER", BasePos=new Point(1780, 1170), ZoomWidth=150, ZoomHeight=80, Img=null,
-                        NoResize = true,
-                        ShowWhen = () => IsCaravan() },
                 new() { Name="SW_CARAVAN_FUELBOOST_LBL", TypeKey="CARAVAN_FUELBOOST_LBL", BasePos=new Point(1780, 1260), ZoomWidth=150, ZoomHeight=80, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsCaravan() },
@@ -3207,6 +3222,17 @@ namespace SimConnect3
                         ShowWhen = () => IsCirrusSR22() },
                 new() { Name="SW_CIRRUS_COVER_RELIEF_2", TypeKey="CIRRUS_COVER_RELIEF_2", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
                         ShowWhen = () => IsCirrusSR22() },
+                // Cirrus SR22T — etiquetes PRIME/OFF/BOOST (bomba de combustible), mateix estil/mida
+                // reduïda que SW_BONANZA_FUELPUMP_LBL_OFF/_LO/_HI (77x41, Arial Narrow 22f).
+                new() { Name="SW_CIRRUS_FUELPUMP_LBL_PRIME", TypeKey="CIRRUS_FUELPUMP_LBL", BasePos=new Point(1980, 1170), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCirrusSR22() },
+                new() { Name="SW_CIRRUS_FUELPUMP_LBL_OFF", TypeKey="CIRRUS_FUELPUMP_LBL", BasePos=new Point(1980, 1220), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCirrusSR22() },
+                new() { Name="SW_CIRRUS_FUELPUMP_LBL_BOOST", TypeKey="CIRRUS_FUELPUMP_LBL", BasePos=new Point(1980, 1280), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCirrusSR22() },
                 // Caravan — 3 capes opaques sense text, mateix color de fons, arrossegables i redimensionables.
                 new() { Name="SW_CARAVAN_COVER_1", TypeKey="CARAVAN_COVER_1", BasePos=new Point(1980, 1350), ZoomWidth=150, ZoomHeight=80, Img=null,
                         ShowWhen = () => IsCaravan() },
@@ -3216,10 +3242,14 @@ namespace SimConnect3
                 // de FUEL BOOST (32f). Arrossegable I redimensionable amb F12 (a diferència de les altres etiquetes).
                 new() { Name="SW_CARAVAN_FUELTANK_SELECTORS_LBL", TypeKey="CARAVAN_FUELTANK_SELECTORS_LBL", BasePos=new Point(1780, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
                         ShowWhen = () => IsCaravan() },
-                // Bonanza G36 — capa opaca sense text per tapar el selector físic de combustible R imprès
-                // al fons, mateix estil que SW_CARAVAN_COVER_1/2. Arrossegable i redimensionable amb F12.
+                // Bonanza G36 / Caravan / Cirrus SR22T — capa opaca sense text compartida (3 en 1, mateix
+                // Name per les 3 => mateixa posició/mida sempre, un únic element reutilitzat), mateix estil
+                // que SW_CARAVAN_COVER_1/2. Abans hi havia una tapa pròpia per Caravan
+                // (SW_CARAVAN_FUELBOOST_COVER, eliminada) i una altra per Cirrus (SW_CIRRUS_COVER_RELIEF_3,
+                // eliminada) — ara totes tres reutilitzen aquesta mateixa capa. Arrossegable i
+                // redimensionable amb F12.
                 new() { Name="SW_BONANZA_FUELSEL_R_COVER", TypeKey="BONANZA_FUELSEL_R_COVER", BasePos=new Point(1780, 1962), ZoomWidth=150, ZoomHeight=240, Img=null,
-                        ShowWhen = () => IsBonanzaG36() },
+                        ShowWhen = () => IsBonanzaG36() || IsCaravan() || IsCirrusSR22() },
                 // Bonanza G36 — etiquetes OFF/LO/HI, mateix estil/mida que RESET/ON/TRIP de la Caravan.
                 new() { Name="SW_BONANZA_FUELPUMP_LBL_OFF", TypeKey="BONANZA_FUELPUMP_LBL", BasePos=new Point(1980, 1170), ZoomWidth=77, ZoomHeight=41, Img=null,
                         NoResize = true,
@@ -5515,6 +5545,14 @@ namespace SimConnect3
                 simconnect.RegisterDataDefineStruct<DA40EngineMaster1Struct>(DEFINITIONS.DA40EngineMaster1Read);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestDA40EngineMaster1, DEFINITIONS.DA40EngineMaster1Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
+                // Cirrus SR22T — "DEICE SWITCH AIRFRAME" real: al Behavior viewer, secció "Variable(s)",
+                // confirma que aquest InputEvent es reflecteix a L:XMLVAR_DEICE_MASTER (global, no una O:
+                // privada com la del binding Set). L'escriptura pel canal genèric perquè la lògica interna
+                // del Set només toca una O: var inaccessible des de fora.
+                simconnect.AddToDataDefinition(DEFINITIONS.CirrusDeiceMasterRead, "L:XMLVAR_DEICE_MASTER", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<CirrusDeiceMasterStruct>(DEFINITIONS.CirrusDeiceMasterRead);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestCirrusDeiceMaster, DEFINITIONS.CirrusDeiceMasterRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
                 // Missatger genèric RPN — Client Data Area compartida amb el WASM (SFS_Link). El WASM ja
                 // ha cridat CreateClientData; aquí només ens hi enganxem amb el mateix nom i definició.
                 simconnect.MapClientDataNameToID("SFS_LINK.GENERIC_RPN", CLIENT_DATA_ID.GenericRpnData);
@@ -6125,6 +6163,25 @@ namespace SimConnect3
                 }
                 return;
             }
+            if (data.dwRequestID == (uint)REQUESTS.RequestCirrusDeiceMaster)
+            {
+                double newVal = ((CirrusDeiceMasterStruct)data.dwData[0]).value;
+                if (newVal != _cirrusDeiceMaster)
+                {
+                    Debug.WriteLine($"[CIRRUS L:XMLVAR_DEICE_MASTER] {_cirrusDeiceMaster} -> {newVal}");
+                    _cirrusDeiceMaster = newVal;
+                }
+                if (IsCirrusSR22())
+                {
+                    bool newDeiceOn = newVal >= 0.5;
+                    if (newDeiceOn != deiceActive)
+                    {
+                        deiceActive = newDeiceOn;
+                        pbMain.Invalidate();
+                    }
+                }
+                return;
+            }
             if (data.dwRequestID == (uint)REQUESTS.Request1)
             {
                 Struct1 s1 = (Struct1)data.dwData[0];
@@ -6314,11 +6371,14 @@ namespace SimConnect3
                     panelLightActive = newPanelLight;
                     needsRepaint = true;
                 }
-                bool newDeice = (s1.read_deice & 1) != 0;
-                if (newDeice != deiceActive)
+                if (!IsCirrusSR22())
                 {
-                    deiceActive = newDeice;
-                    needsRepaint = true;
+                    bool newDeice = (s1.read_deice & 1) != 0;
+                    if (newDeice != deiceActive)
+                    {
+                        deiceActive = newDeice;
+                        needsRepaint = true;
+                    }
                 }
                 bool newPropDeice = (s1.read_propdeice & 1) != 0;
                 if (newPropDeice != propDeiceActive)
@@ -7621,15 +7681,9 @@ namespace SimConnect3
                 }
             }
 
-            // Caravan — fuel boost pump: capa opaca (sense text) + etiqueta "FUEL BOOST", mateix estil
-            // que SW_CARAVAN_ALTGEN2_LBL (STBY/ALT PWR).
+            // Caravan — fuel boost pump: etiqueta "FUEL BOOST", mateix estil que SW_CARAVAN_ALTGEN2_LBL
+            // (STBY/ALT PWR). La tapa pròpia s'ha eliminat — reutilitza SW_BONANZA_FUELSEL_R_COVER.
             {
-                var fbCover = overlayImages.FirstOrDefault(o => o.Name == "SW_CARAVAN_FUELBOOST_COVER");
-                if (fbCover != null && (calibrationMode || (fbCover.ShowWhen?.Invoke() ?? false)))
-                {
-                    using var fbCoverBrush = new SolidBrush(Color.FromArgb(28, 28, 28));
-                    e.Graphics.FillRectangle(fbCoverBrush, fbCover.Bounds);
-                }
                 var fbLbl = overlayImages.FirstOrDefault(o => o.Name == "SW_CARAVAN_FUELBOOST_LBL");
                 if (fbLbl != null && (calibrationMode || (fbLbl.ShowWhen?.Invoke() ?? false)))
                 {
@@ -7722,18 +7776,8 @@ namespace SimConnect3
                 }
             }
 
-            // Caravan — 2 capes opaques sense text, gris més fosc que la resta d'etiquetes, arrossegables i redimensionables.
-            {
-                foreach (var coverName in new[] { "SW_CARAVAN_COVER_1", "SW_CARAVAN_COVER_2" })
-                {
-                    var cover = overlayImages.FirstOrDefault(o => o.Name == coverName);
-                    if (cover != null && (calibrationMode || (cover.ShowWhen?.Invoke() ?? false)))
-                    {
-                        using var coverBrush = new SolidBrush(Color.FromArgb(25, 25, 25));
-                        e.Graphics.FillRectangle(coverBrush, cover.Bounds);
-                    }
-                }
-            }
+            // Caravan — SW_CARAVAN_COVER_1/2: convertides a tapa amb relleu, dibuixades al final (veure
+            // bloc DrawReliefCover a baix de tot).
 
             // Caravan — etiquetes ON/OFF/NORM del fuel boost pump, mateix estil que RESET/ON/TRIP.
             {
@@ -7771,15 +7815,8 @@ namespace SimConnect3
                 }
             }
 
-            // Bonanza G36 — capa opaca sense text per tapar el selector físic R, mateix estil que SW_CARAVAN_COVER_1/2.
-            {
-                var bonR = overlayImages.FirstOrDefault(o => o.Name == "SW_BONANZA_FUELSEL_R_COVER");
-                if (bonR != null && (calibrationMode || (bonR.ShowWhen?.Invoke() ?? false)))
-                {
-                    using var bonRBrush = new SolidBrush(Color.FromArgb(25, 25, 25));
-                    e.Graphics.FillRectangle(bonRBrush, bonR.Bounds);
-                }
-            }
+            // Bonanza G36 / Caravan / Cirrus SR22T — SW_BONANZA_FUELSEL_R_COVER: convertida a tapa amb
+            // relleu, dibuixada al final (veure bloc DrawReliefCover a baix de tot).
 
             // Monomotors — rectangle negre que tapa els selectors LEFT/RIGHT (referència de mides/posició
             // pel futur selector únic de 3 posicions, centrat en aquest requadre).
@@ -7835,6 +7872,27 @@ namespace SimConnect3
                     ("SW_BONANZA_FUELPUMP_LBL_HI", "HI"),
                 };
                 foreach (var (name, text) in bonPumpLabels)
+                {
+                    var lbl = overlayImages.FirstOrDefault(o => o.Name == name);
+                    if (lbl != null && (calibrationMode || (lbl.ShowWhen?.Invoke() ?? false)))
+                    {
+                        using var lblBgBrush = new SolidBrush(Color.FromArgb(23, 23, 23));
+                        e.Graphics.FillRectangle(lblBgBrush, lbl.Bounds);
+                        using var lblFont = new Font("Arial Narrow", 22f, FontStyle.Bold, GraphicsUnit.Pixel);
+                        using var lblFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                        e.Graphics.DrawString(text, lblFont, Brushes.White, lbl.Bounds, lblFmt);
+                    }
+                }
+            }
+
+            // Cirrus SR22T — etiquetes PRIME/OFF/BOOST, mateix estil/mida que les OFF/LO/HI de la Bonanza.
+            {
+                var cirrusPumpLabels = new (string Name, string Text)[] {
+                    ("SW_CIRRUS_FUELPUMP_LBL_PRIME", "PRIME"),
+                    ("SW_CIRRUS_FUELPUMP_LBL_OFF", "OFF"),
+                    ("SW_CIRRUS_FUELPUMP_LBL_BOOST", "BOOST"),
+                };
+                foreach (var (name, text) in cirrusPumpLabels)
                 {
                     var lbl = overlayImages.FirstOrDefault(o => o.Name == name);
                     if (lbl != null && (calibrationMode || (lbl.ShowWhen?.Invoke() ?? false)))
@@ -7977,6 +8035,9 @@ namespace SimConnect3
             DrawReliefCover(e.Graphics, "SW_DA40_COVER_RELIEF_4");
             DrawReliefCover(e.Graphics, "SW_CIRRUS_COVER_RELIEF");
             DrawReliefCover(e.Graphics, "SW_CIRRUS_COVER_RELIEF_2");
+            DrawReliefCover(e.Graphics, "SW_CARAVAN_COVER_1");
+            DrawReliefCover(e.Graphics, "SW_CARAVAN_COVER_2");
+            DrawReliefCover(e.Graphics, "SW_BONANZA_FUELSEL_R_COVER");
 
             // --- CALIBRATGE OVERLAY (F12 per activar/desactivar) ---
             if (calibrationMode)
