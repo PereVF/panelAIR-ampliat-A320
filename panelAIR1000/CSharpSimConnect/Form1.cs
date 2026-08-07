@@ -3210,12 +3210,17 @@ namespace SimConnect3
                         ShowWhen = () => IsDA40() },
                 new() { Name="SW_DA40_COVER_RELIEF_4", TypeKey="DA40_COVER_RELIEF_4", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
                         ShowWhen = () => IsDA40() },
-                // Cirrus SR22T — tapa amb relleu, mateix efecte que les de DA-62/DA-40. Posició/mida per
-                // defecte provisionals, Pere la col·locarà amb F12.
+                // Cirrus SR22T / C400 — tapa amb relleu, mateix efecte que les de DA-62/DA-40. Posició/mida
+                // per defecte provisionals, Pere la col·locarà amb F12.
                 new() { Name="SW_CIRRUS_COVER_RELIEF", TypeKey="CIRRUS_COVER_RELIEF", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
-                        ShowWhen = () => IsCirrusSR22() },
+                        ShowWhen = () => IsCirrusSR22() || IsC400() || IsC172() },
                 new() { Name="SW_CIRRUS_COVER_RELIEF_2", TypeKey="CIRRUS_COVER_RELIEF_2", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
-                        ShowWhen = () => IsCirrusSR22() },
+                        ShowWhen = () => IsCirrusSR22() || IsC400() || IsC172() || IsBaronG58() },
+                // C172 — tapa amb relleu per l'interruptor "R ALT/GEN 2" (ALTGEN2-TOGGLE), no aplicable en
+                // aquest avió (alternador únic). Posició/mida per defecte provisionals, Pere la col·locarà
+                // amb F12.
+                new() { Name="SW_C172_ALTGEN2_COVER", TypeKey="C172_ALTGEN2_COVER", BasePos=new Point(1620, 1220), ZoomWidth=150, ZoomHeight=80, Img=null,
+                        ShowWhen = () => IsC172() },
                 // Cirrus SR22T — etiquetes PRIME/OFF/BOOST (bomba de combustible), mateix estil/mida
                 // reduïda que SW_BONANZA_FUELPUMP_LBL_OFF/_LO/_HI (77x41, Arial Narrow 22f).
                 new() { Name="SW_CIRRUS_FUELPUMP_LBL_PRIME", TypeKey="CIRRUS_FUELPUMP_LBL", BasePos=new Point(1980, 1170), ZoomWidth=77, ZoomHeight=41, Img=null,
@@ -3236,14 +3241,14 @@ namespace SimConnect3
                 // de FUEL BOOST (32f). Arrossegable I redimensionable amb F12 (a diferència de les altres etiquetes).
                 new() { Name="SW_CARAVAN_FUELTANK_SELECTORS_LBL", TypeKey="CARAVAN_FUELTANK_SELECTORS_LBL", BasePos=new Point(1780, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
                         ShowWhen = () => IsCaravan() },
-                // Bonanza G36 / Caravan / Cirrus SR22T — capa opaca sense text compartida (3 en 1, mateix
-                // Name per les 3 => mateixa posició/mida sempre, un únic element reutilitzat), mateix estil
+                // Bonanza G36 / Caravan / Cirrus SR22T / C400 — capa opaca sense text compartida (mateix
+                // Name per totes => mateixa posició/mida sempre, un únic element reutilitzat), mateix estil
                 // que SW_CARAVAN_COVER_1/2. Abans hi havia una tapa pròpia per Caravan
                 // (SW_CARAVAN_FUELBOOST_COVER, eliminada) i una altra per Cirrus (SW_CIRRUS_COVER_RELIEF_3,
-                // eliminada) — ara totes tres reutilitzen aquesta mateixa capa. Arrossegable i
-                // redimensionable amb F12.
+                // eliminada) — ara totes reutilitzen aquesta mateixa capa. Arrossegable i redimensionable
+                // amb F12.
                 new() { Name="SW_BONANZA_FUELSEL_R_COVER", TypeKey="BONANZA_FUELSEL_R_COVER", BasePos=new Point(1780, 1962), ZoomWidth=150, ZoomHeight=240, Img=null,
-                        ShowWhen = () => IsBonanzaG36() || IsCaravan() || IsCirrusSR22() },
+                        ShowWhen = () => IsBonanzaG36() || IsCaravan() || IsCirrusSR22() || IsC400() || IsC172() },
                 // Bonanza G36 — etiquetes OFF/LO/HI, mateix estil/mida que RESET/ON/TRIP de la Caravan.
                 new() { Name="SW_BONANZA_FUELPUMP_LBL_OFF", TypeKey="BONANZA_FUELPUMP_LBL", BasePos=new Point(1980, 1170), ZoomWidth=77, ZoomHeight=41, Img=null,
                         NoResize = true,
@@ -3254,6 +3259,28 @@ namespace SimConnect3
                 new() { Name="SW_BONANZA_FUELPUMP_LBL_HI", TypeKey="BONANZA_FUELPUMP_LBL", BasePos=new Point(1980, 1280), ZoomWidth=77, ZoomHeight=41, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsBonanzaG36() },
+                // Baron G58 — etiquetes OFF/LO/HI per CADA bomba de combustible (motor 1/L i motor 2/R, són
+                // 2 interruptors separats). Mateix estil/mida que les de la Bonanza, però posicionades a
+                // l'ESQUERRA del seu propi interruptor (SW_DN_FUELPUMP1 x=1804 / SW_DN_FUELPUMP2 x=1864),
+                // i en ordre DE BAIX CAP A DALT: OFF, LO, HI (per tant HI és el y més petit / més amunt).
+                new() { Name="SW_BARON_FUELPUMP1_LBL_HI", TypeKey="BARON_FUELPUMP1_LBL", BasePos=new Point(1650, 1170), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsBaronG58() },
+                new() { Name="SW_BARON_FUELPUMP1_LBL_LO", TypeKey="BARON_FUELPUMP1_LBL", BasePos=new Point(1650, 1220), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsBaronG58() },
+                new() { Name="SW_BARON_FUELPUMP1_LBL_OFF", TypeKey="BARON_FUELPUMP1_LBL", BasePos=new Point(1650, 1280), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsBaronG58() },
+                new() { Name="SW_BARON_FUELPUMP2_LBL_HI", TypeKey="BARON_FUELPUMP2_LBL", BasePos=new Point(1750, 1170), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsBaronG58() },
+                new() { Name="SW_BARON_FUELPUMP2_LBL_LO", TypeKey="BARON_FUELPUMP2_LBL", BasePos=new Point(1750, 1220), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsBaronG58() },
+                new() { Name="SW_BARON_FUELPUMP2_LBL_OFF", TypeKey="BARON_FUELPUMP2_LBL", BasePos=new Point(1750, 1280), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsBaronG58() },
                 // Caravan — etiquetes ON/OFF/NORM pel fuel boost pump. Mateix estil/mida que les RESET/ON/TRIP.
                 new() { Name="SW_CARAVAN_FUELBOOST_LBL_ON", TypeKey="CARAVAN_FUELBOOST_POS_LBL", BasePos=new Point(1950, 1170), ZoomWidth=77, ZoomHeight=41, Img=null,
                         NoResize = true,
@@ -7984,6 +8011,30 @@ namespace SimConnect3
                 }
             }
 
+            // Baron G58 — etiquetes OFF/LO/HI per cada bomba (motor 1 i motor 2), mateix estil que la Bonanza.
+            {
+                var baronPumpLabels = new (string Name, string Text)[] {
+                    ("SW_BARON_FUELPUMP1_LBL_OFF", "OFF"),
+                    ("SW_BARON_FUELPUMP1_LBL_LO", "LO"),
+                    ("SW_BARON_FUELPUMP1_LBL_HI", "HI"),
+                    ("SW_BARON_FUELPUMP2_LBL_OFF", "OFF"),
+                    ("SW_BARON_FUELPUMP2_LBL_LO", "LO"),
+                    ("SW_BARON_FUELPUMP2_LBL_HI", "HI"),
+                };
+                foreach (var (name, text) in baronPumpLabels)
+                {
+                    var lbl = overlayImages.FirstOrDefault(o => o.Name == name);
+                    if (lbl != null && (calibrationMode || (lbl.ShowWhen?.Invoke() ?? false)))
+                    {
+                        using var lblBgBrush = new SolidBrush(Color.FromArgb(23, 23, 23));
+                        e.Graphics.FillRectangle(lblBgBrush, lbl.Bounds);
+                        using var lblFont = new Font("Arial Narrow", 22f, FontStyle.Bold, GraphicsUnit.Pixel);
+                        using var lblFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                        e.Graphics.DrawString(text, lblFont, Brushes.White, lbl.Bounds, lblFmt);
+                    }
+                }
+            }
+
             // Cirrus SR22T — etiquetes PRIME/OFF/BOOST, mateix estil/mida que les OFF/LO/HI de la Bonanza.
             {
                 var cirrusPumpLabels = new (string Name, string Text)[] {
@@ -8137,6 +8188,7 @@ namespace SimConnect3
             DrawReliefCover(e.Graphics, "SW_CARAVAN_COVER_1");
             DrawReliefCover(e.Graphics, "SW_CARAVAN_COVER_2");
             DrawReliefCover(e.Graphics, "SW_BONANZA_FUELSEL_R_COVER");
+            DrawReliefCover(e.Graphics, "SW_C172_ALTGEN2_COVER");
 
             // --- CALIBRATGE OVERLAY (F12 per activar/desactivar) ---
             if (calibrationMode)
