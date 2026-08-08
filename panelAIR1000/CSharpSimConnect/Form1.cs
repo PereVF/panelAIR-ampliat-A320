@@ -4364,6 +4364,18 @@ namespace SimConnect3
                 pbMain.Invalidate();
                 return;
             }
+            if (IsBonanzaG36() && !_isMsfs2024 && pumpNum == 1)
+            {
+                // Bonanza G36 a MSFS2020 — simplificat a ON/OFF (LOW no es distingeix, es tracta igual que
+                // HIGH/ON). MobiFlight "Execute" no fa servir cap API moderna d'Input Events — el seu propi
+                // preset (comunitat HubHop) mostra que és calculator code normal, disparable pel nostre
+                // missatger genèric: "1 (>K:ELECT_FUEL_PUMP1_SET) 1 (>L:XMLVAR_FUEL_Pump1_High_ON)" per ON.
+                // OFF per simetria amb 0. HIGH/LOW (next 0 o 1) es tracten igual, només OFF (next 2) difereix.
+                int onOff = next == 2 ? 0 : 1;
+                SendGenericRpn($"{onOff} (>K:ELECT_FUEL_PUMP1_SET) {onOff} (>L:XMLVAR_FUEL_Pump1_High_ON)");
+                pbMain.Invalidate();
+                return;
+            }
             var evt = next switch
             {
                 0 => pumpNum == 1 ? SIMCONNECT_EVENTS.SFS_FUELPUMP1_HIGH : SIMCONNECT_EVENTS.SFS_FUELPUMP2_HIGH,
