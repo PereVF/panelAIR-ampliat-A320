@@ -28,11 +28,13 @@
     <EmbeddedResource Include="Resources\main GA_1000 4K panel_g.png" />
     <EmbeddedResource Include="Resources\main GA_3000 4K panel_m.png" />
     <EmbeddedResource Include="Resources\SW DN white.png" />
+    <EmbeddedResource Include="Resources\SW DN white-b.png" />
     <EmbeddedResource Include="Resources\SW DN green.png" />
     <EmbeddedResource Include="Resources\SW DN blue.png" />
     <EmbeddedResource Include="Resources\SW DN red.png" />
     <EmbeddedResource Include="Resources\SW flaps.png" />
     <EmbeddedResource Include="Resources\SW CENTER white_b.png" />
+    <EmbeddedResource Include="Resources\SW CENTER white_c.png" />
     <EmbeddedResource Include="Resources\SW CENTER  blue.png" />
     <EmbeddedResource Include="Resources\SW CENTER red.png" />
     <EmbeddedResource Include="Resources\trim wheel.png" />
