@@ -268,7 +268,6 @@ namespace SimConnect3
         // Caravan — interruptor STARTER (0=START, 1=OFF, 2=MOTOR, mateixa codificació que L:XMLVAR_Starter1)
         int _caravanStarter1Pos = 1;
         private DateTime _lastCaravanStarter1ClickUtc = DateTime.MinValue;
-        DateTime _caravanStarter1IgnoreFollowUntil = DateTime.MinValue; // evita el "rebot" quan la lectura encara no ha seguit el clic
         bool pbrakeActive;
         double _lastFuelSelLeftDebugValue = double.MinValue; // temporal, per diagnosticar la lectura del selector esquerre (veure Output/Debug de VS)
         double _propRpm1 = 0; // PROP RPM:1 — usat per sincronitzar el selector de combustible de la DA-62
@@ -2694,9 +2693,11 @@ namespace SimConnect3
                 }});
             // Caravan — interruptor momentani de 3 posicions (RESET/centre/TRIP), repòs al centre.
             // K:TOGGLE_ALTERNATOR1 directe (sense WASM) — confirmat funcional per l'efecte elèctric.
-            // La RPN completa (escrivint O:ELECTRICAL_Alternator_1_Position via WASM) es va provar i
-            // NO funciona (les O: vars d'aquest InputEvent no són accessibles des d'un WASM extern) —
-            // abandonat, ens quedem sense el moviment visual de l'agulla al VC.
+            // Provat DOS camins pel moviment visual, cap dels dos funciona: (1) escriure
+            // O:ELECTRICAL_Alternator_1_Position via WASM (les O: d'aquest InputEvent no són accessibles
+            // des de fora), (2) disparar (>B:ELECTRICAL_Alternator_1_Reset) tal com fa el Mouserect real —
+            // tampoc mou l'agulla. Abandonat el moviment visual (com l'ALTGEN2 en el seu moment); ens
+            // quedem només amb l'efecte elèctric real via K:TOGGLE_ALTERNATOR1.
             cockpitRight.Buttons.Add(new UiButton { Name="ALTGEN1-UP", BasePos=new Point(1420, 1170), W=100, H=60, Resizable=true, NoShadow=true,
                 ShowWhen = () => IsCaravan(),
                 OnClick = () => {
@@ -3032,14 +3033,25 @@ namespace SimConnect3
                 OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PANELLIGHT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_DEICE", BasePos=new Point(1984, 1653), W=75, H=75, Resizable=true, NoShadow=true,
                 OnClick = () => {
-                    if (IsCirrusSR22()) {
+                    if (IsCirrusSR22() || IsCaravan()) {
                         // Cirrus SR22T: el Set de l'InputEvent només toca una O: privada (inaccessible des
                         // de fora) — el "Variable(s)" del Behavior viewer confirma que la variable real que
                         // anima el switch és L:XMLVAR_DEICE_MASTER (global). L'escrivim directament pel
                         // missatger genèric, saltant-nos l'O: intermèdia.
+                        // Caravan: TOGGLE_STRUCTURAL_DEICE (SWITCH_DEICE) no feia res — provem la mateixa
+                        // L:XMLVAR_DEICE_MASTER (Asobo sol reutilitzar el mateix nom de variable entre
+                        // avions de la mateixa família d'InputEvents). Pere ho verificarà amb el WASM ràpid.
                         int target = deiceActive ? 0 : 1;
                         SendGenericRpn($"{target} (>L:XMLVAR_DEICE_MASTER)");
                         pbMain.Invalidate();
+                        return;
+                    }
+                    if (IsBonanzaG36()) {
+                        // Bonanza G36: l'únic switch de "deice" real és el de l'hèlix (prop de-ice elèctric,
+                        // no té botes estructurals). Mouserect confirmat: (>B:DEICE_Propeller_1_Toggle),
+                        // animació basada en (B:DEICE_Propeller_1) — mateix patró de trigger B: pla que
+                        // l'ignition de la Caravan.
+                        SendGenericRpn("1 (>B:DEICE_Propeller_1_Toggle)");
                         return;
                     }
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_DEICE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
@@ -3240,10 +3252,14 @@ namespace SimConnect3
                 new() { Name="SW_DA40_TITLE_LBL", TypeKey="DA40_TITLE_LBL", BasePos=new Point(1424, 1500), ZoomWidth=300, ZoomHeight=40, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsDA40() },
+                // Caravan — idèntica a SW_DA62_TITLE_LBL (mateixa mida/posició/estil), text "Cessna Caravan".
+                new() { Name="SW_CARAVAN_TITLE_LBL", TypeKey="CARAVAN_TITLE_LBL", BasePos=new Point(1424, 1500), ZoomWidth=300, ZoomHeight=40, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
                 // DA-62 — capa "tapa" amb relleu (efecte sortint, no enfonsat), mateix color que la resta
                 // d'etiquetes. Arrossegable I redimensionable amb F12.
                 new() { Name="SW_DA62_COVER_RELIEF", TypeKey="DA62_COVER_RELIEF", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
-                        ShowWhen = () => IsDA62() || IsDA40() || IsC408() },
+                        ShowWhen = () => IsDA62() || IsDA40() || IsC408() || IsCaravan() },
                 // DA-40 — tapa amb relleu independent (Pere l'ha posicionat al damunt dels selectors de
                 // combustible via F12, veure calibration_export.txt). Mateix efecte que SW_DA62_COVER_RELIEF.
                 new() { Name="SW_DA40_COVER_RELIEF", TypeKey="DA40_COVER_RELIEF", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
@@ -3253,14 +3269,21 @@ namespace SimConnect3
                 // si en vol una altra en veure-les.
                 new() { Name="SW_DA40_COVER_RELIEF_3", TypeKey="DA40_COVER_RELIEF_3", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
                         ShowWhen = () => IsDA40() },
-                new() { Name="SW_DA40_COVER_RELIEF_4", TypeKey="DA40_COVER_RELIEF_4", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
+                new() { Name="SW_DA40_COVER_RELIEF_4", TypeKey="DA40_COVER_RELIEF_4", BasePos=new Point(916, 1510), ZoomWidth=283, ZoomHeight=227, Img=null,
                         ShowWhen = () => IsDA40() },
                 // Cirrus SR22T / C400 — tapa amb relleu, mateix efecte que les de DA-62/DA-40. Posició/mida
                 // per defecte provisionals, Pere la col·locarà amb F12.
                 new() { Name="SW_CIRRUS_COVER_RELIEF", TypeKey="CIRRUS_COVER_RELIEF", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
-                        ShowWhen = () => IsCirrusSR22() || IsC400() || IsC172() },
+                        ShowWhen = () => IsCirrusSR22() || IsC400() || IsC172() || IsBonanzaG36() },
+                // Caravan — tapa del selector d'ignition/start DRET (la Caravan només fa servir l'esquerre).
+                // NO reutilitza SW_CIRRUS_COVER_RELIEF (compartida amb Cirrus/C400/C172, coordenades pròpies
+                // d'aquell grup) perquè hi quedava damunt del rotatiu de 5 posicions. Posició presa de
+                // SW_DA40_COVER_RELIEF_4 (920,1514,283,227), confirmada per Pere com a ben posada per aquest
+                // mateix propòsit (ignition/start dret) a la DA-40.
+                new() { Name="SW_CARAVAN_COVER_IGNITION_R", TypeKey="CARAVAN_COVER_IGNITION_R", BasePos=new Point(916, 1510), ZoomWidth=283, ZoomHeight=227, Img=null,
+                        ShowWhen = () => IsCaravan() },
                 new() { Name="SW_CIRRUS_COVER_RELIEF_2", TypeKey="CIRRUS_COVER_RELIEF_2", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
-                        ShowWhen = () => IsCirrusSR22() || IsC400() || IsC172() || IsBaronG58() },
+                        ShowWhen = () => IsCirrusSR22() || IsC400() || IsC172() || IsBaronG58() || IsBonanzaG36() },
                 // C172 — tapa amb relleu per l'interruptor "R ALT/GEN 2" (ALTGEN2-TOGGLE), no aplicable en
                 // aquest avió (alternador únic). Posició/mida per defecte provisionals, Pere la col·locarà
                 // amb F12.
@@ -3341,6 +3364,19 @@ namespace SimConnect3
                         NoResize = true,
                         ShowWhen = () => IsCaravan() },
                 new() { Name="SW_CARAVAN_FUELBOOST_LBL_NORM", TypeKey="CARAVAN_FUELBOOST_POS_LBL", BasePos=new Point(1950, 1280), ZoomWidth=77, ZoomHeight=41, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
+                // Caravan — etiquetes MOTOR/OFF/START pel STARTER (3 posicions), mateixes mida i offset
+                // relatius al seu switch (BTN_STARTER1, centre real 704,1676) que ja té FUEL BOOST respecte
+                // al seu propi switch (SW_DN_FUELPUMP1, 2074,1828): START (dalt, com ON) offset (-79,+11),
+                // OFF (centre, com NORM) offset (-80,+53), MOTOR (baix, com OFF) offset (-79,+97).
+                new() { Name="SW_CARAVAN_STARTER1_LBL_START", TypeKey="CARAVAN_STARTER1_POS_LBL", BasePos=new Point(605, 1612), ZoomWidth=69, ZoomHeight=37, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
+                new() { Name="SW_CARAVAN_STARTER1_LBL_OFF", TypeKey="CARAVAN_STARTER1_POS_LBL", BasePos=new Point(604, 1654), ZoomWidth=69, ZoomHeight=37, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
+                new() { Name="SW_CARAVAN_STARTER1_LBL_MOTOR", TypeKey="CARAVAN_STARTER1_POS_LBL", BasePos=new Point(605, 1698), ZoomWidth=69, ZoomHeight=37, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsCaravan() },
                 // Monomotors — rectangle negre que tapa els 2 selectors físics de tank (LEFT/RIGHT) mentre
@@ -4076,20 +4112,30 @@ namespace SimConnect3
                 new ElecStarterStruct { value = value });
         }
 
+        private int _genericRpnSeq = 0;
+
         // Missatger genèric RPN — envia qualsevol text RPN al WASM (SFS_Link) via Client Data Area,
         // perquè l'executi directe amb execute_calculator_code. Buffer de 1024 bytes; truncar per sobre
         // seria perillós (RPN a mitges), per això avisem en comptes de tallar en silenci.
+        // Hipòtesi (2026-08-08, no confirmada): alguns botons (p.ex. IGNITION de la Caravan) envien
+        // SEMPRE el mateix text de RPN independentment de l'estat (un toggle pla), i de tant en tant no
+        // fan efecte al primer clic — possible que el WASM només reaccioni quan el contingut del Client
+        // Data CANVIA de valor, i 2 clics seguits amb el mateix text no generin cap canvi detectable.
+        // S'afegeix un número incremental al final (valor sobrant a la pila, inofensiu — les crides
+        // K:/B: ja han consumit els seus propis paràmetres abans d'arribar-hi) per garantir que el text
+        // sempre sigui diferent del de l'enviament anterior.
         private void SendGenericRpn(string rpn)
         {
             if (simconnect == null) return;
-            if (rpn.Length > 1023)
+            string fullRpn = $"{rpn} {_genericRpnSeq++ % 1000}";
+            if (fullRpn.Length > 1023)
             {
-                Debug.WriteLine($"[GenericRPN] RPN massa llarg ({rpn.Length} chars, màxim 1023) — NO enviat: {rpn}");
+                Debug.WriteLine($"[GenericRPN] RPN massa llarg ({fullRpn.Length} chars, màxim 1023) — NO enviat: {fullRpn}");
                 return;
             }
             simconnect.SetClientData(CLIENT_DATA_ID.GenericRpnData, DEFINITIONS.GenericRpnClientDataDef,
-                SIMCONNECT_CLIENT_DATA_SET_FLAG.DEFAULT, 0, new GenericRpnStruct { rpn = rpn });
-            Debug.WriteLine($"[GenericRPN] enviat: {rpn}");
+                SIMCONNECT_CLIENT_DATA_SET_FLAG.DEFAULT, 0, new GenericRpnStruct { rpn = fullRpn });
+            Debug.WriteLine($"[GenericRPN] enviat: {fullRpn}");
         }
 
         private void SetElecIgnition(double value)
@@ -4350,13 +4396,15 @@ namespace SimConnect3
             // Mouserect real del Behavior viewer no fa un "Set" directe: dispara un trigger B: diferent
             // segons la posició DESTÍ (Off/Start/Motor), un pas cada vegada — mateix patró que
             // StepFuelPumpBaron però amb triggers B: en lloc d'events K: amb valor.
+            // NO actualitzem _caravanStarter1Pos aquí (sense estat optimista ni ignore-follow): aquest
+            // switch interacciona amb IGNITION de maneres que un simple "pas local" no pot preveure, així
+            // que l'estat visual el marca NOMÉS la lectura real (L:XMLVAR_Starter1) — igual que IGNITION,
+            // que mai ha tingut aquest problema precisament perquè sempre ha estat 100% feedback-driven.
             var now = DateTime.UtcNow;
             if ((now - _lastCaravanStarter1ClickUtc).TotalMilliseconds < 250) return;
             _lastCaravanStarter1ClickUtc = now;
             int next = Math.Clamp(_caravanStarter1Pos + direction, 0, 2);
             if (next == _caravanStarter1Pos) return;
-            _caravanStarter1Pos = next;
-            _caravanStarter1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
             string trigger = next switch
             {
                 0 => "ENGINE_Starter_Ignition_1_Start",
@@ -6308,7 +6356,7 @@ namespace SimConnect3
                     Debug.WriteLine($"[CIRRUS L:XMLVAR_DEICE_MASTER] {_cirrusDeiceMaster} -> {newVal}");
                     _cirrusDeiceMaster = newVal;
                 }
-                if (IsCirrusSR22())
+                if (IsCirrusSR22() || IsCaravan())
                 {
                     bool newDeiceOn = newVal >= 0.5;
                     if (newDeiceOn != deiceActive)
@@ -6379,7 +6427,7 @@ namespace SimConnect3
                 if (IsCaravan())
                 {
                     int newPos = Math.Clamp((int)Math.Round(newVal), 0, 2);
-                    if (newPos != _caravanStarter1Pos && DateTime.UtcNow >= _caravanStarter1IgnoreFollowUntil)
+                    if (newPos != _caravanStarter1Pos)
                     {
                         _caravanStarter1Pos = newPos;
                         pbMain.Invalidate();
@@ -6586,7 +6634,7 @@ namespace SimConnect3
                     panelLightActive = newPanelLight;
                     needsRepaint = true;
                 }
-                if (!IsCirrusSR22())
+                if (!IsCirrusSR22() && !IsCaravan() && !IsBonanzaG36())
                 {
                     bool newDeice = (s1.read_deice & 1) != 0;
                     if (newDeice != deiceActive)
@@ -6599,6 +6647,16 @@ namespace SimConnect3
                 if (newPropDeice != propDeiceActive)
                 {
                     propDeiceActive = newPropDeice;
+                    needsRepaint = true;
+                }
+                if (IsBonanzaG36() && newPropDeice != deiceActive)
+                {
+                    // Bonanza G36: BTN_DEICE/SW_DN_DEICE (deiceActive) fan servir el switch real de prop
+                    // de-ice. Llegir B:DEICE_Propeller_1 directe via AddToDataDefinition no funciona (les B:
+                    // no són llegibles per aquesta via, només escrivibles pel missatger genèric) — el
+                    // "PROP DEICE SWITCH:1" clàssic (ja llegit a Struct1 com read_propdeice) sí que reflecteix
+                    // bé l'estat real, així que reutilitzem aquest valor en lloc de la lectura B: dedicada.
+                    deiceActive = newPropDeice;
                     needsRepaint = true;
                 }
                 bool newPitotL = (s1.read_pitot1 & 1) != 0;
@@ -7978,6 +8036,19 @@ namespace SimConnect3
                 }
             }
 
+            // Caravan — etiqueta "Cessna Caravan", idèntica a la de la DA-62.
+            {
+                var titleLblCaravan = overlayImages.FirstOrDefault(o => o.Name == "SW_CARAVAN_TITLE_LBL");
+                if (titleLblCaravan != null && (calibrationMode || (titleLblCaravan.ShowWhen?.Invoke() ?? false)))
+                {
+                    using var titleBgBrush = new SolidBrush(Color.FromArgb(30, 30, 30));
+                    e.Graphics.FillRectangle(titleBgBrush, titleLblCaravan.Bounds);
+                    using var titleFont = new Font("Arial Narrow", 40f, FontStyle.Italic, GraphicsUnit.Pixel);
+                    using var titleFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                    e.Graphics.DrawString("Cessna Caravan", titleFont, Brushes.White, titleLblCaravan.Bounds, titleFmt);
+                }
+            }
+
             // Caravan — etiqueta "GENE / RATOR", mateix estil que SW_CARAVAN_ALTGEN2_LBL (STBY/ALT PWR).
             {
                 var genLbl = overlayImages.FirstOrDefault(o => o.Name == "SW_CARAVAN_GENERATOR_LBL");
@@ -8006,6 +8077,25 @@ namespace SimConnect3
                         using var lblBgBrush = new SolidBrush(Color.FromArgb(28, 28, 28));
                         e.Graphics.FillRectangle(lblBgBrush, lbl.Bounds);
                         using var lblFont = new Font("Arial Narrow", 22f, FontStyle.Bold, GraphicsUnit.Pixel);
+                        using var lblFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                        e.Graphics.DrawString(text, lblFont, Brushes.White, lbl.Bounds, lblFmt);
+                    }
+                }
+            }
+
+            // Caravan — etiquetes MOTOR/OFF/START del STARTER, mateix estil que les del fuel boost.
+            {
+                var starterPosLabels = new (string Name, string Text)[] {
+                    ("SW_CARAVAN_STARTER1_LBL_START", "START"),
+                    ("SW_CARAVAN_STARTER1_LBL_OFF", "OFF"),
+                    ("SW_CARAVAN_STARTER1_LBL_MOTOR", "MOTOR"),
+                };
+                foreach (var (name, text) in starterPosLabels)
+                {
+                    var lbl = overlayImages.FirstOrDefault(o => o.Name == name);
+                    if (lbl != null && (calibrationMode || (lbl.ShowWhen?.Invoke() ?? false)))
+                    {
+                        using var lblFont = new Font("Arial Narrow", 19.8f, FontStyle.Bold, GraphicsUnit.Pixel);
                         using var lblFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
                         e.Graphics.DrawString(text, lblFont, Brushes.White, lbl.Bounds, lblFmt);
                     }
@@ -8065,7 +8155,7 @@ namespace SimConnect3
                 {
                     using var seTitleFont = new Font("Arial", 34f, FontStyle.Bold, GraphicsUnit.Pixel);
                     using var seTitleFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-                    e.Graphics.DrawString("TANKS FUEL SELECTOR", seTitleFont, Brushes.White, seTitleLbl.Bounds, seTitleFmt);
+                    e.Graphics.DrawString("TANK FUEL SELECTOR", seTitleFont, Brushes.White, seTitleLbl.Bounds, seTitleFmt);
                 }
             }
 
@@ -8315,6 +8405,7 @@ namespace SimConnect3
             DrawReliefCover(e.Graphics, "SW_DA40_COVER_RELIEF_4");
             DrawReliefCover(e.Graphics, "SW_CIRRUS_COVER_RELIEF");
             DrawReliefCover(e.Graphics, "SW_CIRRUS_COVER_RELIEF_2");
+            DrawReliefCover(e.Graphics, "SW_CARAVAN_COVER_IGNITION_R");
             DrawReliefCover(e.Graphics, "SW_BONANZA_FUELSEL_R_COVER");
             DrawReliefCover(e.Graphics, "SW_C172_ALTGEN2_COVER");
 
