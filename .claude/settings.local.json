@@ -25,6 +25,8 @@
       "PowerShell(Remove-Item*)",
       "PowerShell(Get-Content*)",
       "PowerShell(cd *)",
+      "PowerShell(*)",
+      "Bash(*)",
       "Edit",
       "Write",
       "Read",

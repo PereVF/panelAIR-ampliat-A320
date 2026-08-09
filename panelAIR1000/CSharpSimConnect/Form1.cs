@@ -242,7 +242,9 @@ namespace SimConnect3
             _currentAircraftTitle.IndexOf("Cirrus", StringComparison.OrdinalIgnoreCase) >= 0;
 
         // Caravan i Cirrus SR22 comparteixen el mateix esquema de bomba (mateixes B: vars al WASM) — pendent de confirmar en vol.
-        bool UsesCaravanPumpScheme() => IsCaravan() || IsCirrusSR22();
+        // Caravan només fa servir l'esquema WASM propi (SFS.FuelPump1_On/Auto/Off) sota MSFS2024 —
+        // sota MSFS2020 cau a l'esquema genèric (SWITCH_FUELPUMP1 natiu) ja existent per defecte.
+        bool UsesCaravanPumpScheme() => (IsCaravan() && _isMsfs2024) || IsCirrusSR22();
 
         // Monomotor — bomba única (pump 1), mateix esquema HIGH/LOW/OFF que la Baron (B:FUEL_Pump_1_High/_Low/_Off,
         // confirmat a Behaviors, idèntic al de la Baron — reutilitza els mateixos events WASM, no en calen de nous).
@@ -678,6 +680,7 @@ namespace SimConnect3
             C408Ignition2Read,
             CaravanIgnition1Read,
             CaravanStarter1Read,
+            BonanzaAntiIcePosRead,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -772,6 +775,8 @@ namespace SimConnect3
         struct CaravanIgnition1Struct { public double value; } // A:TURB ENG IGNITION SWITCH EX1:1,Enum — interruptor real d'ignition de la Caravan (0=OFF, !=0=actiu), confirmat al Behavior viewer (Data>Set de l'InputEvent ENGINE_IGNITION_1 la llegeix per decidir si cal cridar K:TURBINE_IGNITION_SWITCH_SET1)
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct CaravanStarter1Struct { public double value; } // L:XMLVAR_Starter1,Number — interruptor STARTER de la Caravan (0=START, 1=OFF, 2=MOTOR), variable global llegida pel Mouserect real
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct BonanzaAntiIcePosStruct { public double value; } // GENERAL ENG ANTI ICE POSITION:1,Percent — "Defrost Pull ON" de la Bonanza a MSFS2020, progressiu (no 0/1)
 
         enum REQUESTS
         {
@@ -804,6 +809,7 @@ namespace SimConnect3
             RequestC408Ignition2,
             RequestCaravanIgnition1,
             RequestCaravanStarter1,
+            RequestBonanzaAntiIcePos,
         }
         // Missatger genèric RPN — Client Data Area compartida amb el WASM (SFS_Link/Module.cpp).
         // Permet enviar qualsevol text RPN (K:, H:, B:, índexs, 'nom'_n, etc.) sense recompilar el
@@ -1392,6 +1398,21 @@ namespace SimConnect3
         private System.Windows.Forms.Button _testAvionicsToggleBtn = null!;
         private bool  _testAvionicsToggleBtnDragging;
         private Point _testAvionicsToggleBtnDragOffset;
+        private System.Windows.Forms.Button _testStarterRpnBtn = null!;
+        private bool  _testStarterRpnBtnDragging;
+        private Point _testStarterRpnBtnDragOffset;
+        private int _testStarterRpnIdx = 0;
+        // Caravan STARTER (2020) — revòlver de candidats RPN cap a MOTOR (valor 2), un per clic, per
+        // provar-los d'1 en 1 sense cicle d'edició/build. Quan un funcioni, es transcriu a StepCaravanStarter1.
+        private readonly string[] _testStarterRpnCandidates = new[] {
+            "2 (>L:XMLVAR_Starter1)",
+            "2 (>B:ENGINE_Starter_Ignition_1_Motor)",
+            "2 (>B:ENGINE_Starter_Ignition_1_Motor, Number)",
+            "1 (>B:ENGINE_Starter_Ignition_1_Motor)",
+            "2.0 (>L:XMLVAR_Starter1)",
+            "2 (>L:XMLVAR_Starter1) 2 (>B:ENGINE_Starter_Ignition_1_Motor)",
+            "2 (>B:ENGINE_Starter_Ignition_1_Motor) 2 (>L:XMLVAR_Starter1)",
+        };
 
         private System.Windows.Forms.Button _g3000Btn = null!;
         private bool  _g3000BtnDragging;
@@ -1750,7 +1771,7 @@ namespace SimConnect3
                 StartPosition = FormStartPosition.Manual,
                 BackColor = Color.FromArgb(40, 40, 40),
                 ShowInTaskbar = false,
-                Size = new Size(3440, 270),
+                Size = new Size(3440, 330),
                 Location = new Point(this.Left + 200, this.Top + 1160)
             };
             _overlayPanel.KeyPreview = true;
@@ -2452,9 +2473,10 @@ namespace SimConnect3
             _testJunctionSendBtn.Location = new Point(3210, 230);
             _testJunctionSendBtn.Click += (s, e) => {
                 if (calibrationMode) return;
-                if (!uint.TryParse(_testJunctionInput.Text, out uint code)) return;
-                Debug.WriteLine($">>> JUNCTION TEST premut, codi={code} (junction={code / 10}, opcio={code % 10}), simconnect null? {simconnect == null}");
-                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_TEST, code, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                // Caravan STARTER — prova aïllada del preset MobiFlight "C208 Engine Starter Switch Start",
+                // sense passar per StepCaravanStarter1 (sense debounce ni estat _caravanStarter1Pos pel mig).
+                Debug.WriteLine(">>> SEND: Caravan STARTER -> START (preset MobiFlight)");
+                SendGenericRpn("1 s0 (A:TURB ENG IGNITION SWITCH EX1:1, enum) != if{ 10 (>K:TURBINE_IGNITION_SWITCH_SET1) } (A:GENERAL ENG STARTER:1, Bool) ! if{ 1 (>K:SET_STARTER1_HELD) }");
             };
             _testJunctionSendBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testJunctionSendBtnDragging = true; _testJunctionSendBtnDragOffset = e.Location; };
             _testJunctionSendBtn.MouseMove += (s, e) => {
@@ -2471,9 +2493,9 @@ namespace SimConnect3
             _testTriggerSendBtn.Location = new Point(3320, 230);
             _testTriggerSendBtn.Click += (s, e) => {
                 if (calibrationMode) return;
-                if (!uint.TryParse(_testJunctionInput.Text, out uint code)) return;
-                Debug.WriteLine($">>> TRIGGER TEST premut, codi={code} (index={code / 10}, valor={code % 10}), simconnect null? {simconnect == null}");
-                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_FUELTRIGGER_TEST, code, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                // Caravan STARTER — prova aïllada del preset MobiFlight "C208 Engine Starter Switch Off".
+                Debug.WriteLine(">>> TRIG: Caravan STARTER -> OFF (preset MobiFlight)");
+                SendGenericRpn("0 s0 (A:TURB ENG IGNITION SWITCH EX1:1, enum) != if{ 10 (>K:TURBINE_IGNITION_SWITCH_SET1) } (A:GENERAL ENG STARTER:1, Bool) if{ 0 (>K:SET_STARTER1_HELD) (>K:TOGGLE_STARTER1) }");
             };
             _testTriggerSendBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testTriggerSendBtnDragging = true; _testTriggerSendBtnDragOffset = e.Location; };
             _testTriggerSendBtn.MouseMove += (s, e) => {
@@ -2491,9 +2513,9 @@ namespace SimConnect3
             _testAvionicsToggleBtn.Location = new Point(3430, 230);
             _testAvionicsToggleBtn.Click += (s, e) => {
                 if (calibrationMode) return;
-                if (!uint.TryParse(_testJunctionInput.Text, out uint idx)) return;
-                Debug.WriteLine($">>> AVIONICS TOGGLE TEST premut, index={idx}, simconnect null? {simconnect == null}");
-                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA62_AVIONICS_TOGGLE, idx, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                // Caravan STARTER — prova aïllada del preset MobiFlight "C208 Engine Starter Switch Motor".
+                Debug.WriteLine(">>> AVT: Caravan STARTER -> MOTOR (preset MobiFlight)");
+                SendGenericRpn("0 s5 (A:TURB ENG IGNITION SWITCH EX1:1, enum) != if{ 15 (>K:TURBINE_IGNITION_SWITCH_SET1) } (A:GENERAL ENG STARTER:1, Bool) ! if{ 1 (>K:SET_STARTER1_HELD) }");
             };
             _testAvionicsToggleBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testAvionicsToggleBtnDragging = true; _testAvionicsToggleBtnDragOffset = e.Location; };
             _testAvionicsToggleBtn.MouseMove += (s, e) => {
@@ -2504,6 +2526,26 @@ namespace SimConnect3
             };
             _testAvionicsToggleBtn.MouseUp += (s, e) => { _testAvionicsToggleBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             _overlayPanel.Controls.Add(_testAvionicsToggleBtn);
+
+            // ── Caravan STARTER (2020) — revòlver de candidats RPN cap a MOTOR, un per clic ──
+            _testStarterRpnBtn = MakeGroupBtn("STARTER RPN", 140, 40);
+            _testStarterRpnBtn.Location = new Point(3100, 280);
+            _testStarterRpnBtn.Click += (s, e) => {
+                if (calibrationMode) return;
+                string rpn = _testStarterRpnCandidates[_testStarterRpnIdx % _testStarterRpnCandidates.Length];
+                Debug.WriteLine($">>> STARTER RPN TEST #{_testStarterRpnIdx} de {_testStarterRpnCandidates.Length}: {rpn}");
+                SendGenericRpn(rpn);
+                _testStarterRpnIdx++;
+            };
+            _testStarterRpnBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testStarterRpnBtnDragging = true; _testStarterRpnBtnDragOffset = e.Location; };
+            _testStarterRpnBtn.MouseMove += (s, e) => {
+                if (!_testStarterRpnBtnDragging) return;
+                var sp = _testStarterRpnBtn.PointToScreen(e.Location);
+                var fp = _overlayPanel!.PointToClient(sp);
+                _testStarterRpnBtn.Location = new Point(fp.X - _testStarterRpnBtnDragOffset.X, fp.Y - _testStarterRpnBtnDragOffset.Y);
+            };
+            _testStarterRpnBtn.MouseUp += (s, e) => { _testStarterRpnBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            _overlayPanel.Controls.Add(_testStarterRpnBtn);
 
             //this.TopMost = true;
             this.Load += frmMain_Load;
@@ -2648,9 +2690,11 @@ namespace SimConnect3
                         pbMain.Invalidate();
                         return;
                     }
-                    if (IsCaravan())
+                    if (IsCaravan() && _isMsfs2024)
                     {
-                        // Caravan: mateix mecanisme que la C172, bus 'AVIONICS_BUS_1_To_PWR_BUS_DISTRIB'.
+                        // Caravan (MSFS2024): mateix mecanisme que la C172, bus 'AVIONICS_BUS_1_To_PWR_BUS_DISTRIB'.
+                        // MSFS2020: sense branca pròpia — cau a l'event natiu AVIONICS_MASTER_1_ON/OFF de
+                        // més avall, el mecanisme original d'abans d'aquest descobriment.
                         uint val = avionics1Off ? 1u : 0u;
                         Debug.WriteLine($">>> CARAVAN AVIONICS1 SET premut, val={val}, simconnect null? {simconnect == null}");
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_CARAVAN_AVIONICS1_SET, val, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
@@ -2671,8 +2715,9 @@ namespace SimConnect3
                         pbMain.Invalidate();
                         return;
                     }
-                    if (IsCaravan())
+                    if (IsCaravan() && _isMsfs2024)
                     {
+                        // MSFS2020: cau a AVIONICS_MASTER_2_ON/OFF de més avall (mecanisme original).
                         uint val = avionics2Off ? 1u : 0u;
                         Debug.WriteLine($">>> CARAVAN AVIONICS2 SET premut, val={val}, simconnect null? {simconnect == null}");
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_CARAVAN_AVIONICS2_SET, val, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
@@ -2717,11 +2762,13 @@ namespace SimConnect3
             // ALT/GEN switch 2 — single toggle area
             cockpitRight.Buttons.Add(new UiButton { Name="ALTGEN2-TOGGLE", BasePos=new Point(1620, 1220), W=100, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
-                    if (IsCaravan())
+                    if (IsCaravan() && _isMsfs2024)
                     {
-                        // Caravan: aquest interruptor no és el segon alternador (monomotor), és el
-                        // "R ALT GEN 2" / standby alternator (ELECTRICAL_SWITCH_ALTERNATOR_STBY_1),
+                        // Caravan (MSFS2024): aquest interruptor no és el segon alternador (monomotor),
+                        // és el "R ALT GEN 2" / standby alternator (ELECTRICAL_SWITCH_ALTERNATOR_STBY_1),
                         // ON/OFF real via LINE CONNECTION 'BATT_BUS_To_ALT_BUS'_n.
+                        // MSFS2020: sense branca pròpia — cau a l'event natiu TOGGLE_ALTERNATOR2 de més
+                        // avall, el mecanisme original d'abans d'aquest descobriment.
                         uint val = altGen2Off ? 1u : 0u;
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_CARAVAN_ALTGEN2_SET, val, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         pbMain.Invalidate();
@@ -2792,13 +2839,15 @@ namespace SimConnect3
                 OnClick = () => {
                     if (fuel1Pos <= 0) return;
                     int newPos = fuel1Pos - 1;
-                    if (IsCaravan()) {
-                        // Caravan (C208B): trigger booleà independent, índex 3=Left. Sense crossfeed (2 estats
-                        // Off/On), per això aquest selector va de 0 a 1 (vegeu bound del botó RIGHT). Confirmat
-                        // via docs oficials: FUELSYSTEM_TRIGGER_ON/OFF són la variant d'1 paràmetre (només
-                        // índex) de K:2:FUELSYSTEM_TRIGGER_SET — enviable directe des de C#, sense WASM.
-                        // Feedback real confirmat (FUELSYSTEM VALVE SWITCH:1) — no toquem fuel1Pos aquí,
-                        // el determina només la lectura (com AVIONICS/BATTERY).
+                    if (IsCaravan() && _isMsfs2024) {
+                        // Caravan (C208B) a MSFS2024: trigger booleà independent, índex 3=Left. Sense
+                        // crossfeed (2 estats Off/On), per això aquest selector va de 0 a 1 (vegeu bound
+                        // del botó RIGHT). Confirmat via docs oficials: FUELSYSTEM_TRIGGER_ON/OFF són la
+                        // variant d'1 paràmetre (només índex) de K:2:FUELSYSTEM_TRIGGER_SET — enviable
+                        // directe des de C#, sense WASM. Feedback real confirmat (FUELSYSTEM VALVE
+                        // SWITCH:1) — no toquem fuel1Pos aquí, el determina només la lectura.
+                        // MSFS2020: sense branca pròpia — cau al fallback genèric monomotor de més avall
+                        // (SingleEngineFuelVal + FUEL_SELECTOR_SET), el mecanisme original.
                         var evt = newPos == 1 ? SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON : SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF;
                         simconnect?.TransmitClientEvent(0, evt, 3, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     } else if (_isMsfs2024 && IsDA62()) {
@@ -2825,10 +2874,11 @@ namespace SimConnect3
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-RIGHT", BasePos=new Point(1720, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36() && !IsCirrusSR22() && !IsC408(),
                 OnClick = () => {
-                    if (IsCaravan() ? fuel1Pos >= 1 : fuel1Pos >= 2) return;
+                    if (IsCaravan() && _isMsfs2024 ? fuel1Pos >= 1 : fuel1Pos >= 2) return;
                     int newPos = fuel1Pos + 1;
-                    if (IsCaravan()) {
-                        // Feedback real confirmat — no toquem fuel1Pos aquí.
+                    if (IsCaravan() && _isMsfs2024) {
+                        // Feedback real confirmat — no toquem fuel1Pos aquí. MSFS2020: cau al fallback
+                        // genèric monomotor de més avall (mecanisme original).
                         var evt = newPos == 1 ? SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON : SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF;
                         simconnect?.TransmitClientEvent(0, evt, 3, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     } else if (_isMsfs2024 && IsDA62()) {
@@ -2854,8 +2904,9 @@ namespace SimConnect3
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-LEFT", BasePos=new Point(2120, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36() && !IsCirrusSR22() && !IsC408(),
                 OnClick = () => {
-                    if (IsCaravan()) {
-                        // Caravan: zones invertides respecte la resta d'avions — l'esquerra ara ENCÉN.
+                    if (IsCaravan() && _isMsfs2024) {
+                        // Caravan a MSFS2024: zones invertides respecte la resta d'avions — l'esquerra
+                        // ara ENCÉN. MSFS2020: sense branca pròpia, cau al fallback genèric de més avall.
                         if (fuel2Pos >= 1) return;
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON, 4, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         pbMain.Invalidate();
@@ -2887,8 +2938,9 @@ namespace SimConnect3
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-RIGHT", BasePos=new Point(2220, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36() && !IsCirrusSR22() && !IsC408(),
                 OnClick = () => {
-                    if (IsCaravan()) {
-                        // Caravan: zones invertides respecte la resta d'avions — la dreta ara APAGA.
+                    if (IsCaravan() && _isMsfs2024) {
+                        // Caravan a MSFS2024: zones invertides respecte la resta d'avions — la dreta ara
+                        // APAGA. MSFS2020: sense branca pròpia, cau al fallback genèric de més avall.
                         if (fuel2Pos <= 0) return;
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF, 4, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         pbMain.Invalidate();
@@ -2937,9 +2989,11 @@ namespace SimConnect3
                 }});
 
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_STARTER1", BasePos=new Point(1564, 1653), W=75, H=75, Resizable=true, NoShadow=true,
-                // A la Caravan aquesta zona la gestionen BTN_CARAVAN_STARTER1_UP/DN (2 zones separades) —
-                // cal amagar-la del tot, si no el ClickRect (que ocupa tota l'àrea) interceptaria sempre
-                // el clic abans que arribi a les 2 zones noves (Buttons s'itera en ordre i para al primer match).
+                // A la Caravan (2020 i 2024) aquesta zona la gestionen BTN_CARAVAN_STARTER1_UP/DN (2 zones
+                // separades) — cal amagar-la del tot, si no el ClickRect (que ocupa tota l'àrea)
+                // interceptaria sempre el clic abans que arribi a les 2 zones noves (Buttons s'itera en
+                // ordre i para al primer match). Confirmat en viu (2026-08-09) que L:XMLVAR_Starter1 i els
+                // triggers B:ENGINE_Starter_Ignition_1_Start/_Off/_Motor funcionen igual a MSFS2020.
                 ShowWhen = () => !IsCaravan(),
                 OnClick = () => {
                     if (IsDA62()) {
@@ -2989,10 +3043,12 @@ namespace SimConnect3
                         SendGenericRpn($"{c408target} (>L:XMLVAR_IGNITION_1_1)");
                         return;
                     }
-                    if (IsCaravan()) {
-                        // Caravan: únic ignition (turboprop). El clic real no passa pel Set complex —
-                        // el Mouserect del Behavior viewer confirma que dispara directament
+                    if (IsCaravan() && _isMsfs2024) {
+                        // Caravan (MSFS2024): únic ignition (turboprop). El clic real no passa pel Set
+                        // complex — el Mouserect del Behavior viewer confirma que dispara directament
                         // (>B:ENGINE_Ignition_1_Toggle), igual patró que l'Engine Master de la DA-40.
+                        // MSFS2020: sense branca pròpia — cau a l'event natiu KINGAIR_IGN1_ARM/OFF de
+                        // més avall, que ja és el mecanisme original confirmat abans d'aquest descobriment.
                         SendGenericRpn("1 (>B:ENGINE_Ignition_1_Toggle)");
                         return;
                     }
@@ -3046,12 +3102,21 @@ namespace SimConnect3
                         pbMain.Invalidate();
                         return;
                     }
-                    if (IsBonanzaG36()) {
-                        // Bonanza G36: l'únic switch de "deice" real és el de l'hèlix (prop de-ice elèctric,
-                        // no té botes estructurals). Mouserect confirmat: (>B:DEICE_Propeller_1_Toggle),
-                        // animació basada en (B:DEICE_Propeller_1) — mateix patró de trigger B: pla que
-                        // l'ignition de la Caravan.
+                    if (IsBonanzaG36() && _isMsfs2024) {
+                        // Bonanza G36 a MSFS2024: l'únic switch de "deice" real és el de l'hèlix (prop
+                        // de-ice elèctric, no té botes estructurals). Mouserect confirmat:
+                        // (>B:DEICE_Propeller_1_Toggle), animació basada en (B:DEICE_Propeller_1) — mateix
+                        // patró de trigger B: pla que l'ignition de la Caravan. Confirmat funcionant, NO TOCAR.
                         SendGenericRpn("1 (>B:DEICE_Propeller_1_Toggle)");
+                        return;
+                    }
+                    if (IsBonanzaG36() && !_isMsfs2024) {
+                        // Bonanza G36 a MSFS2020: cap de les vies pel prop de-ice (B:DEICE_Propeller_1_Set,
+                        // K:TOGGLE_PROPELLER_DEICE, etc.) mouen res — provat i descartat (prova/error amb 8
+                        // candidates). En canvi, K:ANTI_ICE_TOGGLE SÍ funciona real (confirmat per Pere), però
+                        // controla un altre interruptor: "Defrost Pull ON". Ens hi passem — Pere ho accepta
+                        // com a bloc d'ice protection d'aquest avió en lloc del prop de-ice.
+                        SendGenericRpn("1 (>K:ANTI_ICE_TOGGLE)");
                         return;
                     }
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_DEICE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
@@ -3110,13 +3175,13 @@ namespace SimConnect3
                         OnClick  = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_RECOGN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
                 new() { Name="SW_DN_STARTER1",  TypeKey="SW_DN_STARTER1",  BasePos=new Point(1564, 1653), ZoomWidth=75, Img=swWhiteImg,
                         ShowWhen = () => IsCaravan() ? false : !starter1Active, OnClick=null },
-                // Caravan — posició MOTOR (baix) del STARTER, imatge dedicada "SW DN white-b.png" (no la
-                // compartida swWhiteImg, per no afectar la resta de switches que la fan servir).
+                // Caravan (2020 i 2024) — posició MOTOR (baix) del STARTER, imatge dedicada "SW DN white-b.png"
+                // (no la compartida swWhiteImg, per no afectar la resta de switches que la fan servir).
                 new() { Name="SW_DN_STARTER1_B", TypeKey="SW_DN_STARTER1_B", BasePos=new Point(673, 1619), ZoomWidth=72, Img=swWhiteImgB,
                         ShowWhen = () => IsCaravan() && _caravanStarter1Pos == 2, OnClick=null },
-                // Caravan — posició OFF (centre) del STARTER de 3 posicions. Mateixa imatge que fem servir
-                // al cowl flap (SW CENTER white_b.png), posicionada amb el mateix offset relatiu que hi ha
-                // entre SW_CN_COWLFLAP_L i SW_DN_COWLFLAP_L (~+2,-3 respecte a la posició DN real,
+                // Caravan (2020 i 2024) — posició OFF (centre) del STARTER de 3 posicions. Mateixa imatge que
+                // fem servir al cowl flap (SW CENTER white_b.png), posicionada amb el mateix offset relatiu
+                // que hi ha entre SW_CN_COWLFLAP_L i SW_DN_COWLFLAP_L (~+2,-3 respecte a la posició DN real,
                 // calibration_export.txt) aplicat sobre la posició real de SW_DN_STARTER1 (673,1611).
                 new() { Name="SW_CN_STARTER1", TypeKey="SW_CN_STARTER1", BasePos=new Point(674, 1617), ZoomWidth=69, Img=swCenterWhiteImgC,
                         ShowWhen = () => IsCaravan() && _caravanStarter1Pos == 1, OnClick=null },
@@ -3148,12 +3213,20 @@ namespace SimConnect3
                         OnClick  = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PITOTHEAT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
                 // Blau — pumps sota de strobe i recognition (Y+100)
                 new() { Name="SW_DN_FUELPUMP1", TypeKey="SW DN blue",  BasePos=new Point(1804, 1653), ZoomWidth=75, Img=swBlueImg,
-                        ShowWhen = () => (IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()) ? _fuelPump1State3 == 2 : !fuelpump1Active,
-                        OnClickEnabled = () => !(IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()),
+                        ShowWhen = () => (IsBaronG58() || UsesCaravanPumpScheme() || (IsBonanzaG36() && _isMsfs2024)) ? _fuelPump1State3 == 2 : !fuelpump1Active,
+                        OnClickEnabled = () => !(IsBaronG58() || UsesCaravanPumpScheme() || (IsBonanzaG36() && _isMsfs2024)),
                         OnClick  = () => {
                             if (_isMsfs2024 && (IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()))
                             {
                                 // Baron/Caravan/Cirrus/Bonanza: la interacció es fa amb les 2 àrees dedicades SW_FUELPUMP1_UP/DN, no amb aquest switch.
+                            }
+                            else if (IsBonanzaG36() && !_isMsfs2024)
+                            {
+                                // Bonanza G36 a MSFS2020: mateix model ON/OFF genèric que la C172 (1 sola
+                                // zona clicable, sense PNG center ni etiquetes), però reutilitzant la comanda
+                                // real ja confirmada (K:ELECT_FUEL_PUMP1_SET + L:XMLVAR_FUEL_Pump1_High_ON).
+                                int onOff = fuelpump1Active ? 0 : 1;
+                                SendGenericRpn($"{onOff} (>K:ELECT_FUEL_PUMP1_SET) {onOff} (>L:XMLVAR_FUEL_Pump1_High_ON)");
                             }
                             else if (_isMsfs2024)
                             {
@@ -3178,15 +3251,15 @@ namespace SimConnect3
                         } },
                 // Baron G58 / Cessna Caravan / Cirrus SR22 / Bonanza G36 — posició LOW/AUTO (centre) de les bombes de 3 posicions
                 new() { Name="SW_CN_FUELPUMP1", TypeKey="SW CN blue", BasePos=new Point(1804, 1653), ZoomWidth=75, Img=swCenterBlueImg,
-                        ShowWhen = () => (IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()) && _fuelPump1State3 == 1, OnClick=null },
+                        ShowWhen = () => (IsBaronG58() || UsesCaravanPumpScheme() || (IsBonanzaG36() && _isMsfs2024)) && _fuelPump1State3 == 1, OnClick=null },
                 new() { Name="SW_CN_FUELPUMP2", TypeKey="SW CN blue", BasePos=new Point(1864, 1653), ZoomWidth=75, Img=swCenterBlueImg,
                         ShowWhen = () => IsBaronG58() && _fuelPump2State3 == 1, OnClick=null },
                 // Baron G58 / Cessna Caravan / Cirrus SR22 / Bonanza G36 — 2 àrees clicables per bomba (pujar cap a HIGH/ON / baixar cap a OFF),
                 // redimensionables i movibles amb F12. No depenen de cap lectura: cada clic avança un pas l'estat local.
                 new() { Name="SW_FUELPUMP1_UP", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1804, 1720), ZoomWidth=75, ZoomHeight=40, Img=null,
-                        OnClick = () => { if (IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()) StepFuelPumpBaron(1, -1); } },
+                        OnClick = () => { if (IsBaronG58() || UsesCaravanPumpScheme() || (IsBonanzaG36() && _isMsfs2024)) StepFuelPumpBaron(1, -1); } },
                 new() { Name="SW_FUELPUMP1_DN", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1804, 1770), ZoomWidth=75, ZoomHeight=40, Img=null,
-                        OnClick = () => { if (IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()) StepFuelPumpBaron(1, 1); } },
+                        OnClick = () => { if (IsBaronG58() || UsesCaravanPumpScheme() || (IsBonanzaG36() && _isMsfs2024)) StepFuelPumpBaron(1, 1); } },
                 new() { Name="SW_FUELPUMP2_UP", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1864, 1720), ZoomWidth=75, ZoomHeight=40, Img=null,
                         OnClick = () => { if (IsBaronG58()) StepFuelPumpBaron(2, -1); } },
                 new() { Name="SW_FUELPUMP2_DN", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1864, 1770), ZoomWidth=75, ZoomHeight=40, Img=null,
@@ -3320,13 +3393,13 @@ namespace SimConnect3
                 // Bonanza G36 — etiquetes OFF/LO/HI, mateix estil/mida que RESET/ON/TRIP de la Caravan.
                 new() { Name="SW_BONANZA_FUELPUMP_LBL_OFF", TypeKey="BONANZA_FUELPUMP_LBL", BasePos=new Point(2002, 1923), ZoomWidth=71, ZoomHeight=41, Img=null,
                         NoResize = true,
-                        ShowWhen = () => IsBonanzaG36() },
+                        ShowWhen = () => IsBonanzaG36() && _isMsfs2024 },
                 new() { Name="SW_BONANZA_FUELPUMP_LBL_LO", TypeKey="BONANZA_FUELPUMP_LBL", BasePos=new Point(2003, 1881), ZoomWidth=71, ZoomHeight=41, Img=null,
                         NoResize = true,
-                        ShowWhen = () => IsBonanzaG36() },
+                        ShowWhen = () => IsBonanzaG36() && _isMsfs2024 },
                 new() { Name="SW_BONANZA_FUELPUMP_LBL_HI", TypeKey="BONANZA_FUELPUMP_LBL", BasePos=new Point(2005, 1838), ZoomWidth=71, ZoomHeight=41, Img=null,
                         NoResize = true,
-                        ShowWhen = () => IsBonanzaG36() },
+                        ShowWhen = () => IsBonanzaG36() && _isMsfs2024 },
                 // Baron G58 — etiquetes OFF/LO/HI per la bomba de combustible ESQUERRA. SW_DN_FUELPUMP1
                 // (el switch real, compartit entre avions) ja no és al BasePos original d'aquest fitxer de
                 // codi (1804,1653): Pere l'ha calibrat en real a (2074,1828) — veure calibration_export.txt.
@@ -3359,17 +3432,17 @@ namespace SimConnect3
                 // Caravan — etiquetes ON/OFF/NORM pel fuel boost pump. Mateix estil/mida que les RESET/ON/TRIP.
                 new() { Name="SW_CARAVAN_FUELBOOST_LBL_ON", TypeKey="CARAVAN_FUELBOOST_POS_LBL", BasePos=new Point(1950, 1170), ZoomWidth=77, ZoomHeight=41, Img=null,
                         NoResize = true,
-                        ShowWhen = () => IsCaravan() },
+                        ShowWhen = () => IsCaravan() && _isMsfs2024 },
                 new() { Name="SW_CARAVAN_FUELBOOST_LBL_OFF", TypeKey="CARAVAN_FUELBOOST_POS_LBL", BasePos=new Point(1950, 1220), ZoomWidth=77, ZoomHeight=41, Img=null,
                         NoResize = true,
-                        ShowWhen = () => IsCaravan() },
+                        ShowWhen = () => IsCaravan() && _isMsfs2024 },
                 new() { Name="SW_CARAVAN_FUELBOOST_LBL_NORM", TypeKey="CARAVAN_FUELBOOST_POS_LBL", BasePos=new Point(1950, 1280), ZoomWidth=77, ZoomHeight=41, Img=null,
                         NoResize = true,
-                        ShowWhen = () => IsCaravan() },
-                // Caravan — etiquetes MOTOR/OFF/START pel STARTER (3 posicions), mateixes mida i offset
-                // relatius al seu switch (BTN_STARTER1, centre real 704,1676) que ja té FUEL BOOST respecte
-                // al seu propi switch (SW_DN_FUELPUMP1, 2074,1828): START (dalt, com ON) offset (-79,+11),
-                // OFF (centre, com NORM) offset (-80,+53), MOTOR (baix, com OFF) offset (-79,+97).
+                        ShowWhen = () => IsCaravan() && _isMsfs2024 },
+                // Caravan (2020 i 2024) — etiquetes MOTOR/OFF/START pel STARTER (3 posicions), mateixes mida i
+                // offset relatius al seu switch (BTN_STARTER1, centre real 704,1676) que ja té FUEL BOOST
+                // respecte al seu propi switch (SW_DN_FUELPUMP1, 2074,1828): START (dalt, com ON) offset
+                // (-79,+11), OFF (centre, com NORM) offset (-80,+53), MOTOR (baix, com OFF) offset (-79,+97).
                 new() { Name="SW_CARAVAN_STARTER1_LBL_START", TypeKey="CARAVAN_STARTER1_POS_LBL", BasePos=new Point(605, 1612), ZoomWidth=69, ZoomHeight=37, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsCaravan() },
@@ -4404,10 +4477,15 @@ namespace SimConnect3
 
         private void StepCaravanStarter1(int direction)
         {
-            // Caravan — interruptor STARTER (turboprop, 0=START/dalt, 1=OFF/centre, 2=MOTOR/baix). El
-            // Mouserect real del Behavior viewer no fa un "Set" directe: dispara un trigger B: diferent
-            // segons la posició DESTÍ (Off/Start/Motor), un pas cada vegada — mateix patró que
-            // StepFuelPumpBaron però amb triggers B: en lloc d'events K: amb valor.
+            // Caravan — interruptor STARTER (turboprop, 0=START/dalt, 1=OFF/centre, 2=MOTOR/baix).
+            // Ni el trigger B:ENGINE_Starter_Ignition_1_Start/_Off/_Motor ni escriure directament
+            // L:XMLVAR_Starter1 es queden fixats de manera fiable (rebot intermitent, confirmat en viu
+            // 2026-08-09). El mecanisme REAL són aquests 3 presets de MobiFlight/HubHop ("C208 Engine
+            // Starter Switch Start/Off/Motor", Jaime Leon), transcrits literals — cadascun posa l'ignition
+            // switch al valor que calgui (K:TURBINE_IGNITION_SWITCH_SET1) només si no hi és ja, i gestiona
+            // l'estat del starter (K:SET_STARTER1_HELD / K:TOGGLE_STARTER1) només si cal. Confirmat
+            // funcionant per Pere via MobiFlight Execute + VC (Motor); Start/Off pendents de confirmar en
+            // viu però transcrits amb el mateix rigor.
             // NO actualitzem _caravanStarter1Pos aquí (sense estat optimista ni ignore-follow): aquest
             // switch interacciona amb IGNITION de maneres que un simple "pas local" no pot preveure, així
             // que l'estat visual el marca NOMÉS la lectura real (L:XMLVAR_Starter1) — igual que IGNITION,
@@ -4417,13 +4495,13 @@ namespace SimConnect3
             _lastCaravanStarter1ClickUtc = now;
             int next = Math.Clamp(_caravanStarter1Pos + direction, 0, 2);
             if (next == _caravanStarter1Pos) return;
-            string trigger = next switch
+            string rpn = next switch
             {
-                0 => "ENGINE_Starter_Ignition_1_Start",
-                1 => "ENGINE_Starter_Ignition_1_Off",
-                _ => "ENGINE_Starter_Ignition_1_Motor",
+                0 => "1 s0 (A:TURB ENG IGNITION SWITCH EX1:1, enum) != if{ 10 (>K:TURBINE_IGNITION_SWITCH_SET1) } (A:GENERAL ENG STARTER:1, Bool) ! if{ 1 (>K:SET_STARTER1_HELD) }",
+                1 => "0 s0 (A:TURB ENG IGNITION SWITCH EX1:1, enum) != if{ 10 (>K:TURBINE_IGNITION_SWITCH_SET1) } (A:GENERAL ENG STARTER:1, Bool) if{ 0 (>K:SET_STARTER1_HELD) (>K:TOGGLE_STARTER1) }",
+                _ => "0 s5 (A:TURB ENG IGNITION SWITCH EX1:1, enum) != if{ 15 (>K:TURBINE_IGNITION_SWITCH_SET1) } (A:GENERAL ENG STARTER:1, Bool) ! if{ 1 (>K:SET_STARTER1_HELD) }",
             };
-            SendGenericRpn($"1 (>B:{trigger})");
+            SendGenericRpn(rpn);
             pbMain.Invalidate();
         }
 
@@ -5750,6 +5828,11 @@ namespace SimConnect3
                 simconnect.RegisterDataDefineStruct<CaravanStarter1Struct>(DEFINITIONS.CaravanStarter1Read);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestCaravanStarter1, DEFINITIONS.CaravanStarter1Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
+                // Bonanza G36 a MSFS2020 — "Defrost Pull ON" és progressiu (posició, no booleà 0/1).
+                simconnect.AddToDataDefinition(DEFINITIONS.BonanzaAntiIcePosRead, "GENERAL ENG ANTI ICE POSITION:1", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<BonanzaAntiIcePosStruct>(DEFINITIONS.BonanzaAntiIcePosRead);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestBonanzaAntiIcePos, DEFINITIONS.BonanzaAntiIcePosRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
                 // Missatger genèric RPN — Client Data Area compartida amb el WASM (SFS_Link). El WASM ja
                 // ha cridat CreateClientData; aquí només ens hi enganxem amb el mateix nom i definició.
                 simconnect.MapClientDataNameToID("SFS_LINK.GENERIC_RPN", CLIENT_DATA_ID.GenericRpnData);
@@ -6001,7 +6084,7 @@ namespace SimConnect3
                     ForceBaronFuelPumpsOff();
                 else if (UsesCaravanPumpScheme() && !wasCaravanScheme)
                     ForceCaravanFuelPumpOff();
-                else if (IsBonanzaG36() && !wasBonanza)
+                else if (IsBonanzaG36() && !wasBonanza && _isMsfs2024)
                     ForceBonanzaFuelPumpOff();
                 else if (IsDA62() && !wasDA62)
                     SyncDA62FuelValvesFromRpm();
@@ -6041,10 +6124,12 @@ namespace SimConnect3
                 // Confirmat: la DA-62 NO fa servir L:FUEL_Switch_Cutoff_Crossfeed_1 (fa servir
                 // O:XMLVAR_FUEL_VALVE_LEFT_Value) — exclosa, es queda amb la posició local optimista.
                 // La C408 tampoc: és un altre selector (FUEL_TRANSFER), aquesta L:Var no li correspon.
-                // 2026-08-02: la Caravan tampoc — fa servir FUELSYSTEM VALVE SWITCH:1/4 (lectura dedicada
-                // més amunt); aquesta L:Var hi competia i causava l'oscil·lació infinita de fuel1Pos/fuel2Pos
-                // (el mateix bug recurrent d'excloure un avió nou d'una lectura genèrica — veure memòria).
-                if (!IsDA62() && !IsC408() && !IsCaravan())
+                // 2026-08-02: la Caravan a MSFS2024 tampoc — fa servir FUELSYSTEM VALVE SWITCH:1/4
+                // (lectura dedicada més amunt); aquesta L:Var hi competia i causava l'oscil·lació infinita
+                // de fuel1Pos/fuel2Pos (el mateix bug recurrent d'excloure un avió nou d'una lectura
+                // genèrica — veure memòria). A MSFS2020 la Caravan NO té lectura dedicada (era d'un
+                // mecanisme 2024 que no existia abans), així que aquí sí que ha de fer-se servir.
+                if (!IsDA62() && !IsC408() && !(IsCaravan() && _isMsfs2024))
                 {
                     int newFuel1PosFromRead = fsl.value < 0.5 ? 0 : (fsl.value < 1.5 ? 1 : 2);
                     if (newFuel1PosFromRead != fuel1Pos && DateTime.UtcNow >= _fuelSel1IgnoreFollowUntil)
@@ -6058,7 +6143,7 @@ namespace SimConnect3
             if (data.dwRequestID == (uint)REQUESTS.RequestFuelSelRight)
             {
                 var fsr = (FuelSelRightStruct)data.dwData[0];
-                if (!IsDA62() && !IsC408() && !IsCaravan())
+                if (!IsDA62() && !IsC408() && !(IsCaravan() && _isMsfs2024))
                 {
                     // Aquesta variable ja ve en l'ordre físic del nostre selector (0=Xfeed, 1=On, 2=Off) — sense invertir.
                     int newFuel2PosFromRead = fsr.value < 0.5 ? 0 : (fsr.value < 1.5 ? 1 : 2);
@@ -6088,10 +6173,12 @@ namespace SimConnect3
                     Debug.WriteLine($"[DA40 FUELSYSTEM VALVE SWITCH:1] {_daFuelTankSelector} -> {newVal}");
                     _daFuelTankSelector = newVal;
                 }
-                if (IsCaravan())
+                if (IsCaravan() && _isMsfs2024)
                 {
-                    // Feedback real (confirmat 2026-08-02): fuel1Pos (LEFT) el determina només aquesta
-                    // lectura, mai el click local. Caravan: booleà pur, 0=OFF, 1=ON (sense crossfeed).
+                    // Feedback real (confirmat 2026-08-02, MSFS2024 només): fuel1Pos (LEFT) el determina
+                    // només aquesta lectura, mai el click local. Caravan: booleà pur, 0=OFF, 1=ON (sense
+                    // crossfeed). MSFS2020: cau a la lectura genèrica FUEL_Switch_Cutoff_Crossfeed_1 de més
+                    // amunt (mecanisme original).
                     int newFuel1PosFromRead = newVal < 0.5 ? 0 : 1;
                     if (newFuel1PosFromRead != fuel1Pos)
                     {
@@ -6132,10 +6219,11 @@ namespace SimConnect3
                     Debug.WriteLine($"[DA40 FUELSYSTEM VALVE SWITCH:4] {_daFuelTankSelector4} -> {newVal}");
                     _daFuelTankSelector4 = newVal;
                 }
-                if (IsCaravan())
+                if (IsCaravan() && _isMsfs2024)
                 {
-                    // Hipòtesi 2026-08-02: fuel2Pos (RIGHT) ve de SWITCH:4, no SWITCH:3 (confirmar a VC:
-                    // mou el switch dret a mà i mira si l'app el segueix i si aquest log canvia).
+                    // Hipòtesi 2026-08-02 (MSFS2024 només): fuel2Pos (RIGHT) ve de SWITCH:4, no SWITCH:3
+                    // (confirmar a VC: mou el switch dret a mà i mira si l'app el segueix i si aquest log
+                    // canvia). MSFS2020: cau a la lectura genèrica de més amunt (mecanisme original).
                     int newFuel2PosFromRead = newVal < 0.5 ? 0 : 1;
                     if (newFuel2PosFromRead != fuel2Pos)
                     {
@@ -6244,7 +6332,7 @@ namespace SimConnect3
                     Debug.WriteLine($"[CARAVAN LINE CONNECTION ON:AVIONICS_BUS_1_To_PWR_BUS_DISTRIB] {_caravanAvionics1LineConn} -> {newVal}");
                     _caravanAvionics1LineConn = newVal;
                 }
-                if (IsCaravan())
+                if (IsCaravan() && _isMsfs2024)
                 {
                     bool newAvionics1OffFromRead = newVal < 0.5;
                     if (newAvionics1OffFromRead != avionics1Off)
@@ -6263,7 +6351,7 @@ namespace SimConnect3
                     Debug.WriteLine($"[CARAVAN LINE CONNECTION ON:AVIONICS_BUS_2_To_PWR_BUS_DISTRIB] {_caravanAvionics2LineConn} -> {newVal}");
                     _caravanAvionics2LineConn = newVal;
                 }
-                if (IsCaravan())
+                if (IsCaravan() && _isMsfs2024)
                 {
                     bool newAvionics2OffFromRead = newVal < 0.5;
                     if (newAvionics2OffFromRead != avionics2Off)
@@ -6282,7 +6370,7 @@ namespace SimConnect3
                     Debug.WriteLine($"[CARAVAN LINE CONNECTION ON:BATT_BUS_To_ALT_BUS] {_caravanAltGen2LineConn} -> {newVal}");
                     _caravanAltGen2LineConn = newVal;
                 }
-                if (IsCaravan())
+                if (IsCaravan() && _isMsfs2024)
                 {
                     bool newAltGen2OffFromRead = newVal < 0.5;
                     if (newAltGen2OffFromRead != altGen2Off)
@@ -6442,6 +6530,20 @@ namespace SimConnect3
                     if (newPos != _caravanStarter1Pos)
                     {
                         _caravanStarter1Pos = newPos;
+                        pbMain.Invalidate();
+                    }
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestBonanzaAntiIcePos)
+            {
+                double newVal = ((BonanzaAntiIcePosStruct)data.dwData[0]).value;
+                if (IsBonanzaG36() && !_isMsfs2024)
+                {
+                    bool newDeiceOn = newVal >= 0.5; // progressiu — "actiu" quan la posició supera la meitat
+                    if (newDeiceOn != deiceActive)
+                    {
+                        deiceActive = newDeiceOn;
                         pbMain.Invalidate();
                     }
                 }
@@ -6661,13 +6763,15 @@ namespace SimConnect3
                     propDeiceActive = newPropDeice;
                     needsRepaint = true;
                 }
-                if (IsBonanzaG36() && newPropDeice != deiceActive)
+                if (IsBonanzaG36() && _isMsfs2024 && newPropDeice != deiceActive)
                 {
-                    // Bonanza G36: BTN_DEICE/SW_DN_DEICE (deiceActive) fan servir el switch real de prop
-                    // de-ice. Llegir B:DEICE_Propeller_1 directe via AddToDataDefinition no funciona (les B:
-                    // no són llegibles per aquesta via, només escrivibles pel missatger genèric) — el
-                    // "PROP DEICE SWITCH:1" clàssic (ja llegit a Struct1 com read_propdeice) sí que reflecteix
-                    // bé l'estat real, així que reutilitzem aquest valor en lloc de la lectura B: dedicada.
+                    // Bonanza G36 a MSFS2024: BTN_DEICE/SW_DN_DEICE (deiceActive) fan servir el switch real
+                    // de prop de-ice. Llegir B:DEICE_Propeller_1 directe via AddToDataDefinition no funciona
+                    // (les B: no són llegibles per aquesta via, només escrivibles pel missatger genèric) —
+                    // el "PROP DEICE SWITCH:1" clàssic (ja llegit a Struct1 com read_propdeice) sí que
+                    // reflecteix bé l'estat real, així que reutilitzem aquest valor en lloc de la lectura B:
+                    // dedicada. A MSFS2020 aquest switch ja no s'usa (ens hem passat a "Defrost Pull ON",
+                    // llegit via el bloc genèric STRUCTURAL DEICE SWITCH de més amunt).
                     deiceActive = newPropDeice;
                     needsRepaint = true;
                 }
@@ -6729,10 +6833,12 @@ namespace SimConnect3
                     masterBatteryOff = newMasterBatteryOff;
                     needsRepaint = true;
                 }
-                // DA-62/C172/Caravan: exclosos — "AVIONICS MASTER SWITCH:1/2" no reflecteix el seu sistema
-                // elèctric modular (LINE CONNECTION); cadascun té la seva pròpia lectura dedicada de dalt
-                // (mateix bug recurrent que ja ha passat amb els selectors de combustible — veure memòria).
-                if (!IsDA62() && !IsC172() && !IsCaravan())
+                // DA-62/C172/Caravan (MSFS2024): exclosos — "AVIONICS MASTER SWITCH:1/2" no reflecteix el
+                // seu sistema elèctric modular (LINE CONNECTION); cadascun té la seva pròpia lectura
+                // dedicada de dalt (mateix bug recurrent que ja ha passat amb els selectors de combustible
+                // — veure memòria). La Caravan a MSFS2020 no té aquesta lectura dedicada (és un mecanisme
+                // 2024 que no existia abans), així que aquí sí que ha de fer-se servir.
+                if (!IsDA62() && !IsC172() && !(IsCaravan() && _isMsfs2024))
                 {
                     bool newAvionics1Off = s1.avionics_master_1 == 0;
                     if (newAvionics1Off != avionics1Off)
@@ -6741,7 +6847,7 @@ namespace SimConnect3
                         needsRepaint = true;
                     }
                 }
-                if (!IsC172() && !IsCaravan())
+                if (!IsC172() && !(IsCaravan() && _isMsfs2024))
                 {
                     bool newAvionics2Off = s1.avionics_master_2 == 0;
                     if (newAvionics2Off != avionics2Off)
@@ -6758,7 +6864,7 @@ namespace SimConnect3
                     altGen1Off = newAltGen1Off;
                     needsRepaint = true;
                 }
-                if (!IsCaravan() && !IsDA40() && newAltGen2Off != altGen2Off)
+                if (!(IsCaravan() && _isMsfs2024) && !IsDA40() && newAltGen2Off != altGen2Off)
                 {
                     altGen2Off = newAltGen2Off;
                     needsRepaint = true;

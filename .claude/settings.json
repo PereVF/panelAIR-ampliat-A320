@@ -1,10 +1,11 @@
 {
   "permissions": {
-    "defaultMode": "acceptEdits",
+    "defaultMode": "dontAsk",
     "allow": [
       "Read",
       "Glob",
-      "Grep"
+      "Grep",
+      "Bash(tasklist*)"
     ]
   }
 }

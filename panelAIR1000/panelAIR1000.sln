@@ -5,6 +5,8 @@ VisualStudioVersion = 17.9.34728.123
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "panelAIR1000", "CSharpSimConnect\panelAIR1000.csproj", "{EDBED78B-55AE-4CF0-BB46-54C24A418661}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "SimVarWatcher", "SimVarWatcher\SimVarWatcher.csproj", "{589483AC-9238-45DF-88FF-E612F06EE270}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -15,6 +17,10 @@ Global
 		{EDBED78B-55AE-4CF0-BB46-54C24A418661}.Debug|x64.Build.0 = Debug|x64
 		{EDBED78B-55AE-4CF0-BB46-54C24A418661}.Release|x64.ActiveCfg = Release|x64
 		{EDBED78B-55AE-4CF0-BB46-54C24A418661}.Release|x64.Build.0 = Release|x64
+		{589483AC-9238-45DF-88FF-E612F06EE270}.Debug|x64.ActiveCfg = Debug|x64
+		{589483AC-9238-45DF-88FF-E612F06EE270}.Debug|x64.Build.0 = Debug|x64
+		{589483AC-9238-45DF-88FF-E612F06EE270}.Release|x64.ActiveCfg = Release|x64
+		{589483AC-9238-45DF-88FF-E612F06EE270}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
