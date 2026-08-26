@@ -49,6 +49,9 @@ namespace SimVarWatcher
             public double propRpm1;
             public double fuelsystemValveSwitch1;
             public double fuelsystemValveSwitch4;
+            public double generalEngMasterAlternator1;
+            public double xmlvarAlternatorResetTrip;
+            public double xmlvarAlternator1ResetTrip;
         }
 
         private SimConnect? simconnect;
@@ -144,6 +147,12 @@ namespace SimVarWatcher
                 simconnect.AddToDataDefinition(DEFINITIONS.Watch, "PROP RPM:1", "Rpm", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Watch, "FUELSYSTEM VALVE SWITCH:1", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Watch, "FUELSYSTEM VALVE SWITCH:4", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                // ALTGEN1 (generator) — investigant el moviment visual de RESET (veure [[project_wasm_pending_changes]]).
+                // "L:XMLVAR_Alternator_Reset_Trip" és el nom citat al RPN fallit d'una sessió anterior (mai
+                // provat aïllat, només dins d'un RPN complet que fallava sencer per una O: inaccessible al mig).
+                simconnect.AddToDataDefinition(DEFINITIONS.Watch, "GENERAL ENG MASTER ALTERNATOR:1", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Watch, "L:XMLVAR_Alternator_Reset_Trip", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.Watch, "L:XMLVAR_Alternator_1_Reset_Trip", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<WatchStruct>(DEFINITIONS.Watch);
 
                 simconnect.RequestDataOnSimObject(REQUESTS.Watch, DEFINITIONS.Watch, SimConnect.SIMCONNECT_OBJECT_ID_USER,
@@ -238,7 +247,9 @@ namespace SimVarWatcher
             AppendLog($"STARTER={v.generalEngStarter1:0.00}  STARTER_ACTIVE={v.generalEngStarterActive1:0.00}  " +
                       $"TURB_IGN_SWITCH={v.turbEngIgnitionSwitchEx1_1:0.00}  XMLVAR_Starter1={v.xmlvarStarter1:0.00}  " +
                       $"COMBUSTION={v.generalEngCombustion1:0.00}  PROP_RPM={v.propRpm1:0.0}  " +
-                      $"FUELVALVE1={v.fuelsystemValveSwitch1:0.00}  FUELVALVE4={v.fuelsystemValveSwitch4:0.00}");
+                      $"FUELVALVE1={v.fuelsystemValveSwitch1:0.00}  FUELVALVE4={v.fuelsystemValveSwitch4:0.00}  " +
+                      $"ALTGEN1_MASTER={v.generalEngMasterAlternator1:0.00}  XMLVAR_AltResetTrip={v.xmlvarAlternatorResetTrip:0.00}  " +
+                      $"XMLVAR_Alt1ResetTrip={v.xmlvarAlternator1ResetTrip:0.00}");
         }
 
         private void AppendLog(string line)

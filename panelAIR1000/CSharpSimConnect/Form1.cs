@@ -306,6 +306,24 @@ namespace SimConnect3
         bool starter2Active;
         bool ignition1Active;
         bool ignition2Active;
+        // Caravan IGNITION (NORM/ON) — estat LOCAL, no derivat de la lectura d'A:TURB ENG IGNITION
+        // SWITCH EX1:1 (compartida amb STARTER). Investigació real 2026-08-26: al VC físic no hi ha cap
+        // lligam mecànic entre STARTER i IGNITION — moure STARTER mai mou visualment IGNITION, encara
+        // que per sota afecti la mateixa variable elèctrica. Si deixéssim IGNITION 100% feedback-driven
+        // (com la resta de switches), es mouria sol cada cop que STARTER canvia, cosa que Pere ha
+        // confirmat que NO passa al VC real — per això aquí, excepcionalment, cal estat local.
+        bool _caravanIgnitionOn;
+        // Debounce: quan IGNITION escriu al mateix K:TURBINE_IGNITION_SWITCH_SET1 que fa servir
+        // StepCaravanStarter1, el propi MSFS actualitza L:XMLVAR_Starter1 com a efecte colateral
+        // (electrico, real) — però Pere ha confirmat que al VC físic això MAI mou visualment el
+        // selector de STARTER. Ignorem la següent lectura de STARTER durant una finestra curta
+        // just després d'un clic d'IGNITION, mateix patró que _fuelSel1IgnoreFollowUntil/_thrIgnoreFollowUntil.
+        DateTime _caravanStarter1IgnoreFollowUntil = DateTime.MinValue;
+        // ALTGEN1 (generator) — animació purament cosmètica de RESET (2026-08-26): confirmat que la
+        // posició 3D real al VC és inabastable des de fora (veure [[project_wasm_pending_changes]]), però
+        // Pere vol igualment el "flaix" d'1 segon a l'app quan es clica amunt. NO envia cap comanda pròpia
+        // — és estat 100% local, l'única excepció comptada a "mai animar sense feedback".
+        bool _altGen1ResetAnim;
         bool da62EngineMaster1On; // feedback real (RECIP ENG ENGINE MASTER SWITCH:1) — DA-62
         bool da62EngineMaster2On; // feedback real (RECIP ENG ENGINE MASTER SWITCH:2) — DA-62
         bool da40EngineMaster1On; // feedback real (RECIP ENG ENGINE MASTER SWITCH:1) — DA-40, monomotor
@@ -1413,6 +1431,29 @@ namespace SimConnect3
             "2 (>L:XMLVAR_Starter1) 2 (>B:ENGINE_Starter_Ignition_1_Motor)",
             "2 (>B:ENGINE_Starter_Ignition_1_Motor) 2 (>L:XMLVAR_Starter1)",
         };
+        // Caravan ALTGEN1 (2026-08-26) — revòlver de candidats RPN pel moviment visual de RESET,
+        // reutilitzant el botó "SEND" de la pantalla AUX (un clic = un candidat nou). Fer-ho amb
+        // l'alternador ja en TRIP/OFF abans de clicar (RESET normalment només té sentit des d'apagat).
+        // Vegeu [[project_wasm_pending_changes]] — 2 intents previs (O: i B:ELECTRICAL_Alternator_1_Reset
+        // sols, amb l'alternador ja engegat) van fallar; aquests combinen el B: amb el TOGGLE real.
+        private int _testAltGen1ResetIdx = 0;
+        // Confirmat 2026-08-26 al Behavior Debug (LocalVariables, filtre "alt", "Show only vars set
+        // by plane") que XMLVAR_Alternator_Reset_Trip i XMLVAR_Alternator_1_Reset_Trip SÓN variables
+        // reals de l'avió (no invents). Ara provem un valor clarament diferent de 0 per confirmar
+        // en directe (mirant aquell mateix panell) si el nostre missatger genèric les pot escriure.
+        // Caravan IGNITION (2026-08-26, MSFS2020) — als Pinned Events del Behavior Debug, Execute sobre
+        // "ENGINE_Ignition_1_Auto" i "ENGINE_Ignition_1_On" SÍ mouen el selector al VC (confirmat per
+        // Pere); "ENGINE_Ignition_1_Toggle" (el que ja fem servir pel 2024) NO fa res a 2020.
+        private readonly string[] _testAltGen1ResetCandidates = new[] {
+            "0 (>B:ENGINE_Ignition_1_Auto)",
+            "0 (>B:ENGINE_Ignition_1_On)",
+            "1 (>B:ENGINE_Ignition_1_On)",
+            "(>B:ENGINE_Ignition_1_Auto)",
+            "(>B:ENGINE_Ignition_1_On)",
+            "1 (>B:ENGINE_Ignition_1)",
+            "0 (>B:ENGINE_Ignition_1)",
+            "(>B:ENGINE_Ignition_1_Toggle)",
+        };
 
         private System.Windows.Forms.Button _g3000Btn = null!;
         private bool  _g3000BtnDragging;
@@ -2473,10 +2514,11 @@ namespace SimConnect3
             _testJunctionSendBtn.Location = new Point(3210, 230);
             _testJunctionSendBtn.Click += (s, e) => {
                 if (calibrationMode) return;
-                // Caravan STARTER — prova aïllada del preset MobiFlight "C208 Engine Starter Switch Start",
-                // sense passar per StepCaravanStarter1 (sense debounce ni estat _caravanStarter1Pos pel mig).
-                Debug.WriteLine(">>> SEND: Caravan STARTER -> START (mecanisme net, confirmat 2026-08-09)");
-                SendGenericRpn("1 (>K:TURBINE_IGNITION_SWITCH_SET1) (A:GENERAL ENG STARTER:1, Bool) ! if{ 1 (>K:SET_STARTER1_HELD) }");
+                // Caravan ALTGEN1 — revòlver de candidats pel moviment visual de RESET (un per clic).
+                string rpn = _testAltGen1ResetCandidates[_testAltGen1ResetIdx % _testAltGen1ResetCandidates.Length];
+                Debug.WriteLine($">>> SEND: ALTGEN1 RESET TEST #{_testAltGen1ResetIdx} de {_testAltGen1ResetCandidates.Length}: {rpn}");
+                SendGenericRpn(rpn);
+                _testAltGen1ResetIdx++;
             };
             _testJunctionSendBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testJunctionSendBtnDragging = true; _testJunctionSendBtnDragOffset = e.Location; };
             _testJunctionSendBtn.MouseMove += (s, e) => {
@@ -2749,7 +2791,12 @@ namespace SimConnect3
                     // UP -> RESET: engega només si estava apagat.
                     if (altGen1Off)
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TOGGLE_ALTERNATOR1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    // Flaix cosmètic d'1s a RESET (2026-08-26, a petició de Pere) — la posició 3D real és
+                    // inabastable des de fora (veure comentari de sobre), així que això és NOMÉS visual,
+                    // no envia cap comanda pròpia ni representa cap estat real.
+                    _altGen1ResetAnim = true;
                     pbMain.Invalidate();
+                    Task.Delay(1000).ContinueWith(_ => this.BeginInvoke(() => { _altGen1ResetAnim = false; pbMain.Invalidate(); }));
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="ALTGEN1-DN", BasePos=new Point(1420, 1280), W=100, H=60, Resizable=true, NoShadow=true,
                 ShowWhen = () => IsCaravan(),
@@ -3043,13 +3090,32 @@ namespace SimConnect3
                         SendGenericRpn($"{c408target} (>L:XMLVAR_IGNITION_1_1)");
                         return;
                     }
-                    if (IsCaravan() && _isMsfs2024) {
-                        // Caravan (MSFS2024): únic ignition (turboprop). El clic real no passa pel Set
-                        // complex — el Mouserect del Behavior viewer confirma que dispara directament
-                        // (>B:ENGINE_Ignition_1_Toggle), igual patró que l'Engine Master de la DA-40.
-                        // MSFS2020: sense branca pròpia — cau a l'event natiu KINGAIR_IGN1_ARM/OFF de
-                        // més avall, que ja és el mecanisme original confirmat abans d'aquest descobriment.
-                        SendGenericRpn("1 (>B:ENGINE_Ignition_1_Toggle)");
+                    if (IsCaravan()) {
+                        // Caravan — IGNITION (turboprop). Confirmat 2026-08-26 llegint el Set complet de
+                        // l'InputEvent ASOBO_ENGINE_Ignition_SubTemplate al Behavior Debug: NO és un B:
+                        // trigger pla (B:ENGINE_Ignition_1_Toggle/_Auto/_On provats abans, cap funcionava
+                        // des de fora) — és EXACTAMENT el mateix mecanisme del STARTER (mateixa variable
+                        // A:TURB ENG IGNITION SWITCH EX1:1, mateix event K:TURBINE_IGNITION_SWITCH_SET1),
+                        // físicament el mateix interruptor combinat, només amb un valor nou mai fet
+                        // servir: 0=OFF/MOTOR, 1=AUTO (=START del STARTER), 2=ON/OVERRIDE (ignició
+                        // contínua). IGNITION alterna entre AUTO(1) i ON(2); mai toca 0 (MOTOR).
+                        // Recerca real de Pere 2026-08-26 (PT6, família Air Tractor/King Air/Thrush):
+                        // STARTER i IGNITION són 2 interruptors físicament separats, SENSE cap lligam
+                        // mecànic — la relació és NOMÉS elèctrica i unidireccional (STARTER a START
+                        // "encén" la ignició si IGNITION és NORM, però mai mou el selector d'IGNITION;
+                        // IGNITION a ON força ignició contínua però mai mou el selector de STARTER).
+                        // Per això la part VISUAL de cada un és local (_caravanIgnitionOn aquí,
+                        // _caravanStarter1Pos protegit amb el debounce de sota) — mai es mouen l'un a
+                        // l'altre, encara que per sota comparteixin la mateixa variable elèctrica real.
+                        _caravanIgnitionOn = !_caravanIgnitionOn;
+                        int target = _caravanIgnitionOn ? 2 : (_caravanStarter1Pos == 0 ? 1 : 0);
+                        // Permanent (no temporal): MSFS canvia L:XMLVAR_Starter1 de veritat i s'hi queda
+                        // (confirmat 2026-08-26, un debounce de 2s no n'hi havia prou). Deixem de confiar
+                        // en la lectura de STARTER fins que l'usuari torni a fer clic al STARTER mateix
+                        // (StepCaravanStarter1 ho reactiva).
+                        _caravanStarter1IgnoreFollowUntil = DateTime.MaxValue;
+                        SendGenericRpn($"{target} (>K:TURBINE_IGNITION_SWITCH_SET1)");
+                        pbMain.Invalidate();
                         return;
                     }
                     simconnect?.TransmitClientEvent(0,
@@ -3149,6 +3215,10 @@ namespace SimConnect3
             var swAvionicsImg = LoadOverlayImage("SW avionics.png");
             var swDnRedImg    = LoadOverlayImage("SW DN red.png");
             var swCenterRedImg = LoadOverlayImage("SW CENTER red.png");
+            // No hi ha cap "SW UP red.png" (ni "ON") perquè el fons 4K ja mostra tots els interruptors
+            // en aquesta posició per defecte — els overlays només calen per DESVIAR-se'n (CENTER/OFF).
+            // Per l'animació de RESET (veure ALTGEN1-UP) no cal cap imatge nova: només amagar els
+            // overlays existents perquè es vegi el fons tal qual.
             var swCenterWhiteImg = LoadOverlayImage("SW CENTER white_b.png");
             var swCenterWhiteImgC = LoadOverlayImage("SW CENTER white_c.png");
             var swWhiteImgB = LoadOverlayImage("SW DN white-b.png");
@@ -3186,7 +3256,9 @@ namespace SimConnect3
                 new() { Name="SW_CN_STARTER1", TypeKey="SW_CN_STARTER1", BasePos=new Point(674, 1617), ZoomWidth=69, Img=swCenterWhiteImgC,
                         ShowWhen = () => IsCaravan() && _caravanStarter1Pos == 1, OnClick=null },
                 new() { Name="SW_DN_IGNITION1", TypeKey="SW_DN_IGNITION1", BasePos=new Point(1624, 1653), ZoomWidth=75, Img=swWhiteImg,
-                        ShowWhen = () => IsDA62() ? !da62EngineMaster1On : IsDA40() ? !da40EngineMaster1On : (IsC408() || IsCaravan()) ? !ignition1Active : true, OnClick=null },
+                        // Caravan: NO fem servir ignition1Active (compartida amb STARTER) — visual local
+                        // _caravanIgnitionOn, independent de STARTER, igual que al VC real (veure OnClick).
+                        ShowWhen = () => IsDA62() ? !da62EngineMaster1On : IsDA40() ? !da40EngineMaster1On : IsC408() ? !ignition1Active : IsCaravan() ? !_caravanIgnitionOn : true, OnClick=null },
                 new() { Name="SW_DN_STARTER2",  TypeKey="SW_DN_STARTER2",  BasePos=new Point(1684, 1653), ZoomWidth=75, Img=swWhiteImg,
                         ShowWhen = () => !starter2Active, OnClick=null },
                 new() { Name="SW_DN_IGNITION2", TypeKey="SW_DN_IGNITION2", BasePos=new Point(1744, 1653), ZoomWidth=75, Img=swWhiteImg,
@@ -3502,13 +3574,13 @@ namespace SimConnect3
                 new() { Name="SW_AVIONICS2",  TypeKey="SW avionics2",  BasePos=new Point(1970, 1280), ZoomWidth=100,
                         Img=swAvionicsImg, ShowWhen = () => avionics2Off,     OnClick=null },
                 new() { Name="SW_ALT1", TypeKey="SW altgen1", BasePos=new Point(1420, 1280), ZoomWidth=100,
-                        Img=swDnRedImg, ShowWhen = () => altGen1Off, OnClick=null },
+                        Img=swDnRedImg, ShowWhen = () => altGen1Off && !_altGen1ResetAnim, OnClick=null },
                 new() { Name="SW_ALT2", TypeKey="SW altgen2", BasePos=new Point(1620, 1280), ZoomWidth=100,
                         Img=swDnRedImg, ShowWhen = () => altGen2Off, OnClick=null },
                 // Caravan — posició de repòs/ON (centre) del switch d'alternador, mateix patró que
                 // SW_CN_FUELPUMP1/SW_DN_FUELPUMP1: es va alternant amb SW_ALT1 segons altGen1Off.
                 new() { Name="SW_ALT1_CENTER", TypeKey="SW CN red", BasePos=new Point(1420, 1280), ZoomWidth=75,
-                        Img=swCenterRedImg, ShowWhen = () => IsCaravan() && !altGen1Off, OnClick=null },
+                        Img=swCenterRedImg, ShowWhen = () => IsCaravan() && !altGen1Off && !_altGen1ResetAnim, OnClick=null },
                 new() { Name="LED_PBRAKE", TypeKey="LED_PBRAKE", BasePos=new Point(2918, 1755), ZoomWidth=32, Img=ledRedImg,
                         ShowWhen = () => mainBusVolts >= 5.0 && pbrakeActive },
                 // GEAR LEDs
@@ -4484,10 +4556,6 @@ namespace SimConnect3
             // posició — A:GENERAL ENG STARTER:1 (Bool, via K:SET_STARTER1_HELD/K:TOGGLE_STARTER1) decideix
             // OFF vs actiu, i A:TURB ENG IGNITION SWITCH EX1:1 (Enum, via K:TURBINE_IGNITION_SWITCH_SET1
             // amb valor 0 o 1 — NO 10/15) decideix MOTOR (0) vs START (1) quan el starter és actiu.
-            // NO actualitzem _caravanStarter1Pos aquí (sense estat optimista ni ignore-follow): aquest
-            // switch interacciona amb IGNITION de maneres que un simple "pas local" no pot preveure, així
-            // que l'estat visual el marca NOMÉS la lectura real (L:XMLVAR_Starter1) — igual que IGNITION,
-            // que mai ha tingut aquest problema precisament perquè sempre ha estat 100% feedback-driven.
             var now = DateTime.UtcNow;
             if ((now - _lastCaravanStarter1ClickUtc).TotalMilliseconds < 250) return;
             _lastCaravanStarter1ClickUtc = now;
@@ -4500,6 +4568,14 @@ namespace SimConnect3
                 _ => "0 (>K:TURBINE_IGNITION_SWITCH_SET1) (A:GENERAL ENG STARTER:1, Bool) ! if{ 1 (>K:SET_STARTER1_HELD) }",
             };
             SendGenericRpn(rpn);
+            // Estat optimista + debounce curt (mateix patró que els selectors de combustible), en lloc de
+            // confiar immediatament en la lectura real: confirmat 2026-08-26 que, si l'enum compartit
+            // s'havia quedat a 2 (ON/override, per un clic previ d'IGNITION mentre STARTER era a MOTOR),
+            // la lectura de MSFS flaixa un instant cap a START abans d'assentar-se — aquesta finestra
+            // curta evita que ho arribem a mostrar. També reactiva la confiança en la lectura (per si
+            // IGNITION l'havia deixat congelada — veure BTN_IGNITION1/_caravanStarter1IgnoreFollowUntil).
+            _caravanStarter1Pos = next;
+            _caravanStarter1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
             pbMain.Invalidate();
         }
 
@@ -6525,7 +6601,10 @@ namespace SimConnect3
                 if (IsCaravan())
                 {
                     int newPos = Math.Clamp((int)Math.Round(newVal), 0, 2);
-                    if (newPos != _caravanStarter1Pos)
+                    // Ignorem el "rebot" que MSFS provoca a L:XMLVAR_Starter1 quan IGNITION escriu la
+                    // mateixa A:TURB ENG IGNITION SWITCH EX1:1 — Pere ha confirmat al VC real que STARTER
+                    // mai es mou visualment per culpa d'IGNITION (relació purament elèctrica).
+                    if (newPos != _caravanStarter1Pos && DateTime.UtcNow >= _caravanStarter1IgnoreFollowUntil)
                     {
                         _caravanStarter1Pos = newPos;
                         pbMain.Invalidate();
