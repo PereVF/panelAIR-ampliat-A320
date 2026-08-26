@@ -2475,8 +2475,8 @@ namespace SimConnect3
                 if (calibrationMode) return;
                 // Caravan STARTER — prova aïllada del preset MobiFlight "C208 Engine Starter Switch Start",
                 // sense passar per StepCaravanStarter1 (sense debounce ni estat _caravanStarter1Pos pel mig).
-                Debug.WriteLine(">>> SEND: Caravan STARTER -> START (preset MobiFlight)");
-                SendGenericRpn("1 s0 (A:TURB ENG IGNITION SWITCH EX1:1, enum) != if{ 10 (>K:TURBINE_IGNITION_SWITCH_SET1) } (A:GENERAL ENG STARTER:1, Bool) ! if{ 1 (>K:SET_STARTER1_HELD) }");
+                Debug.WriteLine(">>> SEND: Caravan STARTER -> START (mecanisme net, confirmat 2026-08-09)");
+                SendGenericRpn("1 (>K:TURBINE_IGNITION_SWITCH_SET1) (A:GENERAL ENG STARTER:1, Bool) ! if{ 1 (>K:SET_STARTER1_HELD) }");
             };
             _testJunctionSendBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testJunctionSendBtnDragging = true; _testJunctionSendBtnDragOffset = e.Location; };
             _testJunctionSendBtn.MouseMove += (s, e) => {
@@ -2494,8 +2494,8 @@ namespace SimConnect3
             _testTriggerSendBtn.Click += (s, e) => {
                 if (calibrationMode) return;
                 // Caravan STARTER — prova aïllada del preset MobiFlight "C208 Engine Starter Switch Off".
-                Debug.WriteLine(">>> TRIG: Caravan STARTER -> OFF (preset MobiFlight)");
-                SendGenericRpn("0 s0 (A:TURB ENG IGNITION SWITCH EX1:1, enum) != if{ 10 (>K:TURBINE_IGNITION_SWITCH_SET1) } (A:GENERAL ENG STARTER:1, Bool) if{ 0 (>K:SET_STARTER1_HELD) (>K:TOGGLE_STARTER1) }");
+                Debug.WriteLine(">>> TRIG: Caravan STARTER -> OFF (nostre WASM, prova)");
+                SendGenericRpn("(A:GENERAL ENG STARTER:1, Bool) if{ 0 (>K:SET_STARTER1_HELD) (>K:TOGGLE_STARTER1) }");
             };
             _testTriggerSendBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testTriggerSendBtnDragging = true; _testTriggerSendBtnDragOffset = e.Location; };
             _testTriggerSendBtn.MouseMove += (s, e) => {
@@ -2514,8 +2514,8 @@ namespace SimConnect3
             _testAvionicsToggleBtn.Click += (s, e) => {
                 if (calibrationMode) return;
                 // Caravan STARTER — prova aïllada del preset MobiFlight "C208 Engine Starter Switch Motor".
-                Debug.WriteLine(">>> AVT: Caravan STARTER -> MOTOR (preset MobiFlight)");
-                SendGenericRpn("0 s5 (A:TURB ENG IGNITION SWITCH EX1:1, enum) != if{ 15 (>K:TURBINE_IGNITION_SWITCH_SET1) } (A:GENERAL ENG STARTER:1, Bool) ! if{ 1 (>K:SET_STARTER1_HELD) }");
+                Debug.WriteLine(">>> AVT: Caravan STARTER -> MOTOR (mecanisme net, confirmat 2026-08-09)");
+                SendGenericRpn("0 (>K:TURBINE_IGNITION_SWITCH_SET1) (A:GENERAL ENG STARTER:1, Bool) ! if{ 1 (>K:SET_STARTER1_HELD) }");
             };
             _testAvionicsToggleBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testAvionicsToggleBtnDragging = true; _testAvionicsToggleBtnDragOffset = e.Location; };
             _testAvionicsToggleBtn.MouseMove += (s, e) => {
@@ -4478,14 +4478,12 @@ namespace SimConnect3
         private void StepCaravanStarter1(int direction)
         {
             // Caravan — interruptor STARTER (turboprop, 0=START/dalt, 1=OFF/centre, 2=MOTOR/baix).
-            // Ni el trigger B:ENGINE_Starter_Ignition_1_Start/_Off/_Motor ni escriure directament
-            // L:XMLVAR_Starter1 es queden fixats de manera fiable (rebot intermitent, confirmat en viu
-            // 2026-08-09). El mecanisme REAL són aquests 3 presets de MobiFlight/HubHop ("C208 Engine
-            // Starter Switch Start/Off/Motor", Jaime Leon), transcrits literals — cadascun posa l'ignition
-            // switch al valor que calgui (K:TURBINE_IGNITION_SWITCH_SET1) només si no hi és ja, i gestiona
-            // l'estat del starter (K:SET_STARTER1_HELD / K:TOGGLE_STARTER1) només si cal. Confirmat
-            // funcionant per Pere via MobiFlight Execute + VC (Motor); Start/Off pendents de confirmar en
-            // viu però transcrits amb el mateix rigor.
+            // Mecanisme REAL confirmat en viu 2026-08-09 (via SimVarWatcher + molta prova/error —
+            // NO és el que deien els presets de MobiFlight/HubHop, que feien servir valors 10/15 per
+            // l'ignition switch i mai van funcionar de debò): 2 variables independents governen la
+            // posició — A:GENERAL ENG STARTER:1 (Bool, via K:SET_STARTER1_HELD/K:TOGGLE_STARTER1) decideix
+            // OFF vs actiu, i A:TURB ENG IGNITION SWITCH EX1:1 (Enum, via K:TURBINE_IGNITION_SWITCH_SET1
+            // amb valor 0 o 1 — NO 10/15) decideix MOTOR (0) vs START (1) quan el starter és actiu.
             // NO actualitzem _caravanStarter1Pos aquí (sense estat optimista ni ignore-follow): aquest
             // switch interacciona amb IGNITION de maneres que un simple "pas local" no pot preveure, així
             // que l'estat visual el marca NOMÉS la lectura real (L:XMLVAR_Starter1) — igual que IGNITION,
@@ -4497,9 +4495,9 @@ namespace SimConnect3
             if (next == _caravanStarter1Pos) return;
             string rpn = next switch
             {
-                0 => "1 s0 (A:TURB ENG IGNITION SWITCH EX1:1, enum) != if{ 10 (>K:TURBINE_IGNITION_SWITCH_SET1) } (A:GENERAL ENG STARTER:1, Bool) ! if{ 1 (>K:SET_STARTER1_HELD) }",
-                1 => "0 s0 (A:TURB ENG IGNITION SWITCH EX1:1, enum) != if{ 10 (>K:TURBINE_IGNITION_SWITCH_SET1) } (A:GENERAL ENG STARTER:1, Bool) if{ 0 (>K:SET_STARTER1_HELD) (>K:TOGGLE_STARTER1) }",
-                _ => "0 s5 (A:TURB ENG IGNITION SWITCH EX1:1, enum) != if{ 15 (>K:TURBINE_IGNITION_SWITCH_SET1) } (A:GENERAL ENG STARTER:1, Bool) ! if{ 1 (>K:SET_STARTER1_HELD) }",
+                0 => "1 (>K:TURBINE_IGNITION_SWITCH_SET1) (A:GENERAL ENG STARTER:1, Bool) ! if{ 1 (>K:SET_STARTER1_HELD) }",
+                1 => "(A:GENERAL ENG STARTER:1, Bool) if{ 0 (>K:SET_STARTER1_HELD) (>K:TOGGLE_STARTER1) }",
+                _ => "0 (>K:TURBINE_IGNITION_SWITCH_SET1) (A:GENERAL ENG STARTER:1, Bool) ! if{ 1 (>K:SET_STARTER1_HELD) }",
             };
             SendGenericRpn(rpn);
             pbMain.Invalidate();

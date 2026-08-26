@@ -14,16 +14,29 @@ namespace SimVarWatcher
         // sense haver de clicar res dins de panelAIR1000.exe.
         private const string CmdFilePath = @"C:\Users\usuario\AppData\Local\Temp\claude\c--Users-usuario-Desktop-panelAIR1000-j\0a6ec016-2204-4bf5-8292-5fa4ead20d38\scratchpad\simvarwatcher_cmd.txt";
         private const string LogFilePath = @"C:\Users\usuario\AppData\Local\Temp\claude\c--Users-usuario-Desktop-panelAIR1000-j\0a6ec016-2204-4bf5-8292-5fa4ead20d38\scratchpad\simvarwatcher_log.txt";
+        // Canal separat: envia el mateix RPN però pel WASM de MobiFlight ("MobiFlight.Command"),
+        // amb la comanda "MF.SimVars.Set.<rpn>" — per aïllar si el problema és del nostre WASM
+        // (SFS_Link) o del contingut de la comanda en si. Prova puntual, no infraestructura definitiva.
+        private const string MfCmdFilePath = @"C:\Users\usuario\AppData\Local\Temp\claude\c--Users-usuario-Desktop-panelAIR1000-j\0a6ec016-2204-4bf5-8292-5fa4ead20d38\scratchpad\simvarwatcher_mf_cmd.txt";
 
-        private enum DEFINITIONS { Watch, GenericRpnClientDataDef }
+        private enum DEFINITIONS { Watch, GenericRpnClientDataDef, MobiFlightCommandDef }
         private enum REQUESTS { Watch }
-        private enum CLIENT_DATA_ID { GenericRpnData }
+        private enum CLIENT_DATA_ID { GenericRpnData, MobiFlightCommand }
 
         [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi, Pack = 1)]
         private struct GenericRpnStruct
         {
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 1024)]
             public string rpn;
+        }
+
+        // Mida de 256 bytes és una suposició (no confirmada al codi font de MobiFlight) — si la mida
+        // real és diferent, l'excepció en connectar ho revelarà.
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi, Pack = 1)]
+        private struct MobiFlightCommandStruct
+        {
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
+            public string command;
         }
 
         private struct WatchStruct
@@ -78,6 +91,7 @@ namespace SimVarWatcher
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(LogFilePath)!);
                 File.WriteAllText(CmdFilePath, "");
+                File.WriteAllText(MfCmdFilePath, "");
             }
             catch { }
 
@@ -86,7 +100,7 @@ namespace SimVarWatcher
             reconnectTimer.Start();
 
             cmdPollTimer = new System.Windows.Forms.Timer { Interval = 500 };
-            cmdPollTimer.Tick += (s, e) => PollCommandFile();
+            cmdPollTimer.Tick += (s, e) => { PollCommandFile(); PollMobiFlightCommandFile(); };
             cmdPollTimer.Start();
 
             TryConnect();
@@ -140,10 +154,22 @@ namespace SimVarWatcher
                 simconnect.MapClientDataNameToID("SFS_LINK.GENERIC_RPN", CLIENT_DATA_ID.GenericRpnData);
                 simconnect.AddToClientDataDefinition(DEFINITIONS.GenericRpnClientDataDef, 0, 1024, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<GenericRpnStruct>(DEFINITIONS.GenericRpnClientDataDef);
+
+                // Canal de comandes del WASM de MobiFlight (protocol públic, github.com/MobiFlight).
+                // Un client nou es registra escrivint "MF.Clients.Add.<nom>" al canal per defecte
+                // "MobiFlight.Command"; un cop registrat, es poden enviar comandes "MF.SimVars.Set.<rpn>".
+                simconnect.MapClientDataNameToID("MobiFlight.Command", CLIENT_DATA_ID.MobiFlightCommand);
+                simconnect.AddToClientDataDefinition(DEFINITIONS.MobiFlightCommandDef, 0, 256, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<MobiFlightCommandStruct>(DEFINITIONS.MobiFlightCommandDef);
+                simconnect.SetClientData(CLIENT_DATA_ID.MobiFlightCommand, DEFINITIONS.MobiFlightCommandDef,
+                    SIMCONNECT_CLIENT_DATA_SET_FLAG.DEFAULT, 0, new MobiFlightCommandStruct { command = "MF.Clients.Add.SimVarWatcher" });
+                AppendLog("--- Registrat com a client MobiFlight ('MF.Clients.Add.SimVarWatcher') ---");
+
                 _clientDataReady = true;
 
                 AppendLog("--- Connectat. Variables vigilades: STARTER, STARTER ACTIVE, TURB IGNITION SWITCH, XMLVAR_Starter1, COMBUSTION, PROP RPM ---");
-                AppendLog($"--- Canal de comandes actiu: escriu un RPN a {CmdFilePath} i s'enviarà automàticament ---");
+                AppendLog($"--- Canal de comandes SFS_Link actiu: escriu un RPN a {CmdFilePath} ---");
+                AppendLog($"--- Canal de comandes MobiFlight actiu: escriu un RPN a {MfCmdFilePath} ---");
             }
             catch (COMException)
             {
@@ -176,6 +202,31 @@ namespace SimVarWatcher
             catch (Exception ex)
             {
                 AppendLog($"[ERROR enviant RPN] {ex.Message}");
+            }
+        }
+
+        private void PollMobiFlightCommandFile()
+        {
+            if (!_clientDataReady || simconnect == null) return;
+            string rpn;
+            try
+            {
+                rpn = File.ReadAllText(MfCmdFilePath).Trim();
+                if (string.IsNullOrEmpty(rpn)) return;
+                File.WriteAllText(MfCmdFilePath, "");
+            }
+            catch { return; }
+
+            string command = $"MF.SimVars.Set.{rpn}";
+            try
+            {
+                simconnect.SetClientData(CLIENT_DATA_ID.MobiFlightCommand, DEFINITIONS.MobiFlightCommandDef,
+                    SIMCONNECT_CLIENT_DATA_SET_FLAG.DEFAULT, 0, new MobiFlightCommandStruct { command = command });
+                AppendLog($">>> MF COMMAND ENVIAT: {command}");
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"[ERROR enviant comanda MobiFlight] {ex.Message}");
             }
         }
 
