@@ -1444,15 +1444,20 @@ namespace SimConnect3
         // Caravan IGNITION (2026-08-26, MSFS2020) — als Pinned Events del Behavior Debug, Execute sobre
         // "ENGINE_Ignition_1_Auto" i "ENGINE_Ignition_1_On" SÍ mouen el selector al VC (confirmat per
         // Pere); "ENGINE_Ignition_1_Toggle" (el que ja fem servir pel 2024) NO fa res a 2020.
+        // Caravan FUEL SELECTORS (2026-08-26, MSFS2020) — 2 selectors independents confirmats al
+        // Behavior Debug (FUEL_Selector_1 llegeix/escriu A:FUEL TANK SELECTOR:1 via K:FUEL_SELECTOR_SET;
+        // FUEL_Selector_2 la seva pròpia A:FUEL TANK SELECTOR:2). El codi actual els barreja tots dos a
+        // través de SingleEngineFuelVal (pensat per UN selector combinat, no 2 d'independents) — per
+        // això es mouen sense sentit. Candidats: valors 0-3 pel selector 1 (event pla) i pel 2 (indexat).
         private readonly string[] _testAltGen1ResetCandidates = new[] {
-            "0 (>B:ENGINE_Ignition_1_Auto)",
-            "0 (>B:ENGINE_Ignition_1_On)",
-            "1 (>B:ENGINE_Ignition_1_On)",
-            "(>B:ENGINE_Ignition_1_Auto)",
-            "(>B:ENGINE_Ignition_1_On)",
-            "1 (>B:ENGINE_Ignition_1)",
-            "0 (>B:ENGINE_Ignition_1)",
-            "(>B:ENGINE_Ignition_1_Toggle)",
+            "0 (>K:FUEL_SELECTOR_SET)",
+            "1 (>K:FUEL_SELECTOR_SET)",
+            "2 (>K:FUEL_SELECTOR_SET)",
+            "3 (>K:FUEL_SELECTOR_SET)",
+            "0 2 (>K:2:FUEL_SELECTOR_SET)",
+            "1 2 (>K:2:FUEL_SELECTOR_SET)",
+            "2 2 (>K:2:FUEL_SELECTOR_SET)",
+            "3 2 (>K:2:FUEL_SELECTOR_SET)",
         };
 
         private System.Windows.Forms.Button _g3000Btn = null!;
@@ -2915,13 +2920,21 @@ namespace SimConnect3
                     } else {
                         uint msfsVal = SingleEngineFuelVal(newPos, fuel2Pos);
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, msfsVal, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        if (IsCaravan()) {
+                            // Estat optimista + debounce (2026-08-26): la lectura real "rebota" un
+                            // instant després del clic — veure guard a Simconnect_OnRecvSimobjectData.
+                            fuel1Pos = newPos;
+                            _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                        }
                     }
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-RIGHT", BasePos=new Point(1720, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36() && !IsCirrusSR22() && !IsC408(),
                 OnClick = () => {
-                    if (IsCaravan() && _isMsfs2024 ? fuel1Pos >= 1 : fuel1Pos >= 2) return;
+                    // Caravan: 2 posicions reals (OFF/ON), sense CROSSFEED — límit a 1, no a 2 (2026-08-26,
+                    // abans només aplicava a 2024, ara també a 2020).
+                    if (IsCaravan() ? fuel1Pos >= 1 : fuel1Pos >= 2) return;
                     int newPos = fuel1Pos + 1;
                     if (IsCaravan() && _isMsfs2024) {
                         // Feedback real confirmat — no toquem fuel1Pos aquí. MSFS2020: cau al fallback
@@ -2944,6 +2957,12 @@ namespace SimConnect3
                     } else {
                         uint msfsVal = SingleEngineFuelVal(newPos, fuel2Pos);
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, msfsVal, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        if (IsCaravan()) {
+                            // Estat optimista + debounce (2026-08-26): la lectura real "rebota" un
+                            // instant després del clic — veure guard a Simconnect_OnRecvSimobjectData.
+                            fuel1Pos = newPos;
+                            _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                        }
                     }
                     pbMain.Invalidate();
                 }});
@@ -2959,7 +2978,9 @@ namespace SimConnect3
                         pbMain.Invalidate();
                         return;
                     }
-                    if (fuel2Pos <= 0) return;
+                    // Caravan: 2 posicions reals (ON/OFF), sense CROSSFEED — el seu ON és 1, no 0
+                    // (2026-08-26).
+                    if (IsCaravan() ? fuel2Pos <= 1 : fuel2Pos <= 0) return;
                     int newPos = fuel2Pos - 1;
                     if (_isMsfs2024 && IsDA62()) {
                         // DA-62: mateix mecanisme que l'esquerra, índex 2 (K:2:FUELSYSTEM_TRIGGER_SET/VALVE_SET). Confirmat.
@@ -2979,6 +3000,12 @@ namespace SimConnect3
                     } else {
                         uint msfsVal = SingleEngineFuelVal(fuel1Pos, newPos);
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, msfsVal, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        if (IsCaravan()) {
+                            // Estat optimista + debounce (2026-08-26): la lectura real "rebota" un
+                            // instant després del clic — veure guard a Simconnect_OnRecvSimobjectData.
+                            fuel2Pos = newPos;
+                            _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                        }
                     }
                     pbMain.Invalidate();
                 }});
@@ -3011,6 +3038,12 @@ namespace SimConnect3
                     } else {
                         uint msfsVal = SingleEngineFuelVal(fuel1Pos, newPos);
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, msfsVal, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        if (IsCaravan()) {
+                            // Estat optimista + debounce (2026-08-26): la lectura real "rebota" un
+                            // instant després del clic — veure guard a Simconnect_OnRecvSimobjectData.
+                            fuel2Pos = newPos;
+                            _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                        }
                     }
                     pbMain.Invalidate();
                 }});
@@ -3522,6 +3555,15 @@ namespace SimConnect3
                         NoResize = true,
                         ShowWhen = () => IsCaravan() },
                 new() { Name="SW_CARAVAN_STARTER1_LBL_MOTOR", TypeKey="CARAVAN_STARTER1_POS_LBL", BasePos=new Point(605, 1698), ZoomWidth=69, ZoomHeight=37, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
+                // Caravan — etiquetes NORM/ON per l'IGNITION (2 posicions), mateix patró/mida que les del
+                // STARTER, relatives al centre real de BTN_IGNITION1 (843,1671): ON (dalt, com START)
+                // offset (-99,-64), NORM (centre, com OFF) offset (-100,-22).
+                new() { Name="SW_CARAVAN_IGNITION1_LBL_ON", TypeKey="CARAVAN_IGNITION1_POS_LBL", BasePos=new Point(744, 1607), ZoomWidth=69, ZoomHeight=37, Img=null,
+                        NoResize = true,
+                        ShowWhen = () => IsCaravan() },
+                new() { Name="SW_CARAVAN_IGNITION1_LBL_NORM", TypeKey="CARAVAN_IGNITION1_POS_LBL", BasePos=new Point(743, 1649), ZoomWidth=69, ZoomHeight=37, Img=null,
                         NoResize = true,
                         ShowWhen = () => IsCaravan() },
                 // Monomotors — rectangle negre que tapa els 2 selectors físics de tank (LEFT/RIGHT) mentre
@@ -6201,9 +6243,12 @@ namespace SimConnect3
                 // 2026-08-02: la Caravan a MSFS2024 tampoc — fa servir FUELSYSTEM VALVE SWITCH:1/4
                 // (lectura dedicada més amunt); aquesta L:Var hi competia i causava l'oscil·lació infinita
                 // de fuel1Pos/fuel2Pos (el mateix bug recurrent d'excloure un avió nou d'una lectura
-                // genèrica — veure memòria). A MSFS2020 la Caravan NO té lectura dedicada (era d'un
-                // mecanisme 2024 que no existia abans), així que aquí sí que ha de fer-se servir.
-                if (!IsDA62() && !IsC408() && !(IsCaravan() && _isMsfs2024))
+                // genèrica — veure memòria).
+                // 2026-08-26: confirmat que la Caravan a MSFS2020 TAMPOC la fa servir — el mecanisme real
+                // és A:FUEL TANK SELECTOR:1 via el bloc "SINGLE ENGINE" de sota (mateix K:FUEL_SELECTOR_SET
+                // ja usat per escriure). Aquesta L:Var hi competia igual que a 2024 i causava els mateixos
+                // rebots — exclosa la Caravan del tot, independent del sim.
+                if (!IsDA62() && !IsC408() && !IsCaravan())
                 {
                     int newFuel1PosFromRead = fsl.value < 0.5 ? 0 : (fsl.value < 1.5 ? 1 : 2);
                     if (newFuel1PosFromRead != fuel1Pos && DateTime.UtcNow >= _fuelSel1IgnoreFollowUntil)
@@ -6217,7 +6262,7 @@ namespace SimConnect3
             if (data.dwRequestID == (uint)REQUESTS.RequestFuelSelRight)
             {
                 var fsr = (FuelSelRightStruct)data.dwData[0];
-                if (!IsDA62() && !IsC408() && !(IsCaravan() && _isMsfs2024))
+                if (!IsDA62() && !IsC408() && !IsCaravan())
                 {
                     // Aquesta variable ja ve en l'ordre físic del nostre selector (0=Xfeed, 1=On, 2=Off) — sense invertir.
                     int newFuel2PosFromRead = fsr.value < 0.5 ? 0 : (fsr.value < 1.5 ? 1 : 2);
@@ -7012,13 +7057,20 @@ namespace SimConnect3
                     newFuel1Pos = fuel1Pos;
                     newFuel2Pos = fuel2Pos;
                 }
-                else if (IsCaravan())
+                else if (IsCaravan() && _isMsfs2024)
                 {
-                    // Caravan: monomotor (numEngines==1), per això cauria al bloc "SINGLE ENGINE" de sota,
-                    // que sobreescriu fuel1Pos/fuel2Pos cada frame amb la SimVar legacy "FUEL TANK SELECTOR:1"
-                    // — irrellevant per aquest avió (fa servir FUELSYSTEM VALVE SWITCH:1/3, vegeu
-                    // RequestDA40FuelTankSelector/3 més amunt) i causava els "rebots" que anul·laven el
-                    // feedback real. Exclòs: fuel1Pos/fuel2Pos ja els actualitzen aquells handlers dedicats.
+                    // Caravan (MSFS2024 NOMÉS): monomotor (numEngines==1), per això cauria al bloc "SINGLE
+                    // ENGINE" de sota, que sobreescriu fuel1Pos/fuel2Pos cada frame amb la SimVar legacy
+                    // "FUEL TANK SELECTOR:1" — irrellevant per aquest avió A 2024 (fa servir FUELSYSTEM
+                    // VALVE SWITCH:1/4, vegeu RequestDA40FuelTankSelector/4 més amunt) i causava els
+                    // "rebots" que anul·laven el feedback real. Exclòs: fuel1Pos/fuel2Pos ja els actualitzen
+                    // aquells handlers dedicats.
+                    // MSFS2020 (confirmat 2026-08-26): la Caravan NO té lectura dedicada — cau al bloc
+                    // "SINGLE ENGINE" de sota, que SÍ és la lectura real correcta (A:FUEL TANK SELECTOR:1,
+                    // el mateix mecanisme confirmat amb candidates de K:FUEL_SELECTOR_SET, 0=OFF/1=BOTH/
+                    // 2=LEFT/3=RIGHT). Aquesta branca abans excloïa la Caravan SEMPRE (sense `_isMsfs2024`),
+                    // deixant fuel1Pos/fuel2Pos sense sincronitzar mai a 2020 — arrel del moviment
+                    // descontrolat que reportava Pere.
                     newFuel1Pos = fuel1Pos;
                     newFuel2Pos = fuel2Pos;
                 }
@@ -7044,6 +7096,14 @@ namespace SimConnect3
                     else if (s1.fuel_selector_2 == 3)                              newFuel2Pos = 1; // ON
                     else if (s1.fuel_selector_2 == 0 || s1.fuel_selector_2 == 20) newFuel2Pos = 2; // OFF
                     else                                                           newFuel2Pos = fuel2Pos;
+                }
+                else if (IsCaravan() && DateTime.UtcNow < _fuelSel1IgnoreFollowUntil)
+                {
+                    // Caravan (2020, confirmat 2026-08-26): just després d'un clic, la lectura real
+                    // "rebota" per un instant abans d'assentar-se (mateix patró que STARTER/IGNITION) —
+                    // ignorem la lectura durant una finestra curta, mantenint l'estat local del clic.
+                    newFuel1Pos = fuel1Pos;
+                    newFuel2Pos = fuel2Pos;
                 }
                 else
                 {
@@ -8286,6 +8346,24 @@ namespace SimConnect3
                     ("SW_CARAVAN_STARTER1_LBL_MOTOR", "MOTOR"),
                 };
                 foreach (var (name, text) in starterPosLabels)
+                {
+                    var lbl = overlayImages.FirstOrDefault(o => o.Name == name);
+                    if (lbl != null && (calibrationMode || (lbl.ShowWhen?.Invoke() ?? false)))
+                    {
+                        using var lblFont = new Font("Arial Narrow", 19.8f, FontStyle.Bold, GraphicsUnit.Pixel);
+                        using var lblFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                        e.Graphics.DrawString(text, lblFont, Brushes.White, lbl.Bounds, lblFmt);
+                    }
+                }
+            }
+
+            // Caravan — etiquetes NORM/ON de l'IGNITION, mateix estil que les del STARTER.
+            {
+                var ignitionPosLabels = new (string Name, string Text)[] {
+                    ("SW_CARAVAN_IGNITION1_LBL_ON", "ON"),
+                    ("SW_CARAVAN_IGNITION1_LBL_NORM", "NORM"),
+                };
+                foreach (var (name, text) in ignitionPosLabels)
                 {
                     var lbl = overlayImages.FirstOrDefault(o => o.Name == name);
                     if (lbl != null && (calibrationMode || (lbl.ShowWhen?.Invoke() ?? false)))
