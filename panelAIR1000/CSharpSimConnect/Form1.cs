@@ -1455,18 +1455,21 @@ namespace SimConnect3
         // Caravan DEICE (2026-08-26, MSFS2020) — DEICE_Airframe_1 (valor vist 2.000) i
         // XMLVAR_DeiceWindshield_1 (valor vist 1.000) confirmats REALS al Behavior Debug LocalVariables
         // (no invents, com el vell L:XMLVAR_DEICE_MASTER que mai es va confirmar per la Caravan).
-        // C172 PANEL LIGHT (2026-08-27, MSFS2020) — el K:PANEL_LIGHTS_TOGGLE natiu (genèric, usat per
-        // tots els avions) no fa res a la C172, com passava amb l'avionics abans del fix WASM. Sense
-        // preset MF confirmat; barreja de candidats K:/potenciòmetre/L:/B: per trobar el mecanisme real.
+        // DA-40 MASTER — RESOLT 2026-08-28: K:ENGINE_MASTER_1_SET (mateix event que la DA-62).
+        // DA-40 ESSENTIAL BUS / ALT-GEN2 (2026-08-28, MSFS2020) — Ronda 2: Pere ha confirmat MANUALMENT
+        // (Execute del Behavior Debug) que ELECTRICAL_EssentialBus_2_Inc/_Dec/_Set MOUEN l'interruptor
+        // de debò a la VC (Set amb 0/1 al paràmetre). Però enviant "1/0 (>B:ELECTRICAL_EssentialBus_2_Set)"
+        // pel nostre missatger NO fa res — ni amunt ni avall. Provem Inc/Dec (sense paràmetre, com un
+        // rocker) i variants de sintaxi del Set per si el problema és de format del RPN.
         private readonly string[] _testAltGen1ResetCandidates = new[] {
-            "1 (>K:PANEL_LIGHTS_TOGGLE)",
-            "1 (>K:LIGHT_POTENTIOMETER_2_SET)",
-            "100 (>K:2:LIGHT_POTENTIOMETER_SET)",
-            "1 (>K:LIGHT_PANEL_ON)",
-            "1 (>K:TOGGLE_PANEL_LIGHTS)",
-            "1 (>L:LIGHT_PANEL_ON) 1 (>K:PANEL_LIGHTS_TOGGLE)",
-            "1 (>B:LIGHTING_Panel_1_Toggle)",
-            "1 (>L:LIGHTING_Panel_1)",
+            "1 (>B:ELECTRICAL_EssentialBus_2_Inc)",
+            "1 (>B:ELECTRICAL_EssentialBus_2_Dec)",
+            "0 (>B:ELECTRICAL_EssentialBus_2_Set)",
+            "1 (>B:ELECTRICAL_EssentialBus_2_Set)",
+            "1.0 (>B:ELECTRICAL_EssentialBus_2_Set)",
+            "0.0 (>B:ELECTRICAL_EssentialBus_2_Set)",
+            "1 (>B:ELECTRICAL_EssentialBus_2_Inc) 1 (>B:ELECTRICAL_EssentialBus_2_Inc) 1 (>B:ELECTRICAL_EssentialBus_2_Inc)",
+            "1 (>B:ELECTRICAL_EssentialBus_2_Dec) 1 (>B:ELECTRICAL_EssentialBus_2_Dec) 1 (>B:ELECTRICAL_EssentialBus_2_Dec)",
         };
 
         private System.Windows.Forms.Button _g3000Btn = null!;
@@ -2528,9 +2531,9 @@ namespace SimConnect3
             _testJunctionSendBtn.Location = new Point(3210, 230);
             _testJunctionSendBtn.Click += (s, e) => {
                 if (calibrationMode) return;
-                // C172 PANEL LIGHT — revòlver de candidats (un per clic).
+                // DA-40 ESSENTIAL BUS — revòlver de candidats (un per clic).
                 string rpn = _testAltGen1ResetCandidates[_testAltGen1ResetIdx % _testAltGen1ResetCandidates.Length];
-                Debug.WriteLine($">>> SEND: C172 PANEL LIGHT TEST #{_testAltGen1ResetIdx} de {_testAltGen1ResetCandidates.Length}: {rpn}");
+                Debug.WriteLine($">>> SEND: DA40 ESSBUS TEST #{_testAltGen1ResetIdx} de {_testAltGen1ResetCandidates.Length}: {rpn}");
                 SendGenericRpn(rpn);
                 _testAltGen1ResetIdx++;
             };
@@ -2766,6 +2769,13 @@ namespace SimConnect3
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="AVIONICS2-TOGGLE", BasePos=new Point(1970, 1220), W=100, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
+                    if (IsDA40() && !_isMsfs2024)
+                    {
+                        // DA-40 (2020): l'avió real només té UN interruptor d'avionics — el de la dreta
+                        // queda totalment inactiu (ni comanda ni feedback, veure exclusió de lectura més
+                        // avall).
+                        return;
+                    }
                     if (IsC172() && _isMsfs2024)
                     {
                         // MSFS2020: cau a AVIONICS_MASTER_2_ON/OFF de més avall (K:AVIONICS_MASTER_2_SET).
@@ -2841,19 +2851,29 @@ namespace SimConnect3
                     }
                     if (IsDA40())
                     {
-                        // DA-40: "ALT/GEN 2" real és L:ELECTRICAL_EssentialBus_2 (bus interconnect), no
-                        // GENERAL ENG MASTER ALTERNATOR:2. RPN complet transcrit del Behavior viewer
-                        // (tanca la connexió bus principal/essencial si cal, redirigeix el relè segons
-                        // l'estat actual de BUS CONNECTION ON:3, i escriu l'estat final), enviat pel
-                        // missatger genèric perquè K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE necessita
-                        // 2 paràmetres (no enviable amb un TransmitClientEvent normal).
-                        int target = altGen2Off ? 1 : 0;
-                        string rpn =
-                            "1 (A:1:BUS CONNECTION ON:2, Bool) == if{ 2 1 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) } " +
-                            $"{target} if{{ 1 (A:1:BUS CONNECTION ON:3, Bool) if{{ 1 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} 2 (A:1:BUS CONNECTION ON:3, Bool) ! if{{ 2 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} }} " +
-                            $"els{{ 1 (A:1:BUS CONNECTION ON:3, Bool) ! if{{ 1 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} 2 (A:1:BUS CONNECTION ON:3, Bool) if{{ 2 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} }} " +
-                            $"{target} (>L:ELECTRICAL_EssentialBus_2)";
-                        SendGenericRpn(rpn);
+                        if (_isMsfs2024)
+                        {
+                            // 2024: intacte, no tocat. "ALT/GEN 2" real és L:ELECTRICAL_EssentialBus_2 (bus
+                            // interconnect), no GENERAL ENG MASTER ALTERNATOR:2. RPN complet transcrit del
+                            // Behavior viewer (tanca la connexió bus principal/essencial si cal, redirigeix
+                            // el relè segons l'estat actual de BUS CONNECTION ON:3, i escriu l'estat final).
+                            int target = altGen2Off ? 1 : 0;
+                            string rpn =
+                                "1 (A:1:BUS CONNECTION ON:2, Bool) == if{ 2 1 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) } " +
+                                $"{target} if{{ 1 (A:1:BUS CONNECTION ON:3, Bool) if{{ 1 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} 2 (A:1:BUS CONNECTION ON:3, Bool) ! if{{ 2 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} }} " +
+                                $"els{{ 1 (A:1:BUS CONNECTION ON:3, Bool) ! if{{ 1 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} 2 (A:1:BUS CONNECTION ON:3, Bool) if{{ 2 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} }} " +
+                                $"{target} (>L:ELECTRICAL_EssentialBus_2)";
+                            SendGenericRpn(rpn);
+                        }
+                        else
+                        {
+                            // 2020 (2026-08-28): confirmat via Pinned Events (Execute manual de Pere) que
+                            // ELECTRICAL_EssentialBus_2_Set (Float, 0/1) mou l'interruptor de debò a la VC
+                            // — a diferència de K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE, que sí fa
+                            // l'efecte elèctric real (confirmat als sistemes G1000) però mai anima el switch.
+                            int target = altGen2Off ? 1 : 0;
+                            SendGenericRpn($"{target} (>B:ELECTRICAL_EssentialBus_2_Set)");
+                        }
                         pbMain.Invalidate();
                         return;
                     }
@@ -3142,12 +3162,21 @@ namespace SimConnect3
                         return;
                     }
                     if (IsDA40()) {
-                        // DA-40: "Engine Master" real és B:ENGINE_Master_1 (InputEvent, no accessible amb
-                        // TransmitClientEvent normal) — transcrit del Behavior viewer. El Mouserect només
-                        // fa el toggle si la tapa de seguretat (B:ENGINE_Master_1_Cover) està oberta, així
-                        // que forcem la tapa oberta abans de fer el toggle perquè el botó físic sempre faci
-                        // efecte. Enviat pel missatger genèric.
-                        SendGenericRpn("1 (>B:ENGINE_Master_1_Cover) (>B:ENGINE_Master_1_Toggle)");
+                        if (_isMsfs2024)
+                        {
+                            // 2024: intacte, no tocat (no confirmat en directe si calia el mateix fix que 2020).
+                            // "Engine Master" real és B:ENGINE_Master_1 (InputEvent) — el Mouserect només fa
+                            // el toggle si la tapa de seguretat (B:ENGINE_Master_1_Cover) està oberta.
+                            SendGenericRpn("1 (>B:ENGINE_Master_1_Cover) (>B:ENGINE_Master_1_Toggle)");
+                        }
+                        else
+                        {
+                            // 2020 (2026-08-28): ni el Toggle ni els triggers B: directes feien res.
+                            // Confirmat via revòlver SEND: el K: natiu ENGINE_MASTER_1_SET (el mateix event
+                            // ja usat per la DA-62, mateix fabricant) SÍ funciona.
+                            uint target = da40EngineMaster1On ? 0u : 1u;
+                            simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.ENGINE_MASTER_1_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        }
                         return;
                     }
                     if (IsC408()) {
@@ -7152,10 +7181,11 @@ namespace SimConnect3
                         needsRepaint = true;
                     }
                 }
-                // Cirrus SR22 (2020): l'avió només té UN interruptor d'avionics físic, però MSFS reflecteix
-                // el mateix estat a AVIONICS MASTER SWITCH:1 i :2 — exclosa la lectura del 2 perquè no
-                // mogui l'interruptor dret, que aquí no existeix.
-                if (!(IsC172() && _isMsfs2024) && !(IsCaravan() && _isMsfs2024) && !(IsCirrusSR22() && !_isMsfs2024))
+                // Cirrus SR22 / DA-40 (2020): l'avió només té UN interruptor d'avionics físic, però MSFS
+                // reflecteix el mateix estat a AVIONICS MASTER SWITCH:1 i :2 — exclosa la lectura del 2
+                // perquè no mogui l'interruptor dret, que aquí no existeix (a la DA-40 també queda
+                // inactiu del tot al clic, veure OnClickEnabled a AVIONICS2-TOGGLE).
+                if (!(IsC172() && _isMsfs2024) && !(IsCaravan() && _isMsfs2024) && !(IsCirrusSR22() && !_isMsfs2024) && !(IsDA40() && !_isMsfs2024))
                 {
                     bool newAvionics2Off = s1.avionics_master_2 == 0;
                     if (newAvionics2Off != avionics2Off)
