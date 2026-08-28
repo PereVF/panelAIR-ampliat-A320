@@ -223,7 +223,7 @@ namespace SimConnect3
             if (IsCirrusSR22())
                 return slot switch { 1 => "OFF", 2 => "LEFT", _ => "RIGHT" };
             if (IsDA40())
-                return slot switch { 1 => "NORMAL", 2 => "EMERGENCY", _ => "OFF" };
+                return slot switch { 1 => "OFF", 2 => "LEFT", _ => "RIGHT" };
             if (IsC408())
                 return slot switch { 1 => "L TANK", 2 => "TRANSF OFF", _ => "R TANK" };
             return "";
@@ -280,6 +280,7 @@ namespace SimConnect3
         double _daFuelTankSelector4 = double.MinValue; // A:FUELSYSTEM VALVE SWITCH:4 — hipòtesi: vàlvula dreta de la Caravan
         int _bonanzaFuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la Bonanza (veure Output/Debug de VS)
         int _cirrusFuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la Cirrus SR22T (veure Output/Debug de VS)
+        int _da40FuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la DA-40 (2020, veure Output/Debug de VS)
         double _da62AvionicsLineConn = double.MinValue; // A:LINE CONNECTION ON:rh_main_bustoavionics_bus — estat real del bus d'avionics de la DA-62
         double _c172Avionics1LineConn = double.MinValue; // A:LINE CONNECTION ON:BUS_1_To_AVIONICS_BUS_1
         double _c172Avionics2LineConn = double.MinValue; // A:LINE CONNECTION ON:BUS_2_To_AVIONICS_BUS_2
@@ -290,6 +291,8 @@ namespace SimConnect3
         double _da62EngineMaster1 = double.MinValue; // A:RECIP ENG ENGINE MASTER SWITCH:1 — feedback real DA-62, motor esquerre
         double _da62EngineMaster2 = double.MinValue; // A:RECIP ENG ENGINE MASTER SWITCH:2 — feedback real DA-62, motor dret
         double _da40EssentialBus2 = double.MinValue; // L:ELECTRICAL_EssentialBus_2 — feedback real ALT/GEN 2 DA-40
+        double _da40BusConnOn3 = double.MinValue; // A:BUS CONNECTION ON:3 — estat viu del relè, per calcular la comanda ESS BUS 2020 sense endevinar
+        double _da40CircuitSwitchOn7 = double.MinValue; // A:CIRCUIT SWITCH ON:7 — feedback real del FUEL TRANSFER switch (DA-40 2020)
         double _da40EngineMaster1 = double.MinValue; // RECIP ENG ENGINE MASTER SWITCH:1 — feedback real Engine Master DA-40
         double _cirrusDeiceMaster = double.MinValue; // L:XMLVAR_DEICE_MASTER — feedback real deice airframe Cirrus SR22T
         int _c408Idx3 = int.MinValue; // FUELSYSTEM PUMP SWITCH:3 (via Struct1/read_fuelpump_idx3_2024) — feedback real selector C408
@@ -313,6 +316,7 @@ namespace SimConnect3
         // (com la resta de switches), es mouria sol cada cop que STARTER canvia, cosa que Pere ha
         // confirmat que NO passa al VC real — per això aquí, excepcionalment, cal estat local.
         bool _caravanIgnitionOn;
+        bool _da40FuelTransferOn; // estat local (sense lectura real encara) del FUEL TRANSFER switch — DA-40 2020
         // Debounce: quan IGNITION escriu al mateix K:TURBINE_IGNITION_SWITCH_SET1 que fa servir
         // StepCaravanStarter1, el propi MSFS actualitza L:XMLVAR_Starter1 com a efecte colateral
         // (electrico, real) — però Pere ha confirmat que al VC físic això MAI mou visualment el
@@ -692,6 +696,8 @@ namespace SimConnect3
             DA62EngineMaster1Read,
             DA62EngineMaster2Read,
             DA40EssentialBus2Read,
+            DA40BusConnOn3Read,
+            DA40CircuitSwitch7Read,
             DA40EngineMaster1Read,
             CirrusDeiceMasterRead,
             C408FuelPump4Read,
@@ -784,6 +790,10 @@ namespace SimConnect3
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct DA40EssentialBus2Struct { public double value; } // L:ELECTRICAL_EssentialBus_2 — interruptor "ALT/GEN 2" real de la DA-40 (no fa res via GENERAL ENG MASTER ALTERNATOR:2)
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct DA40BusConnOn3Struct { public double value; } // A:BUS CONNECTION ON:3,Bool — relè del ESS BUS, valor viu 1 o 2
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct DA40CircuitSwitch7Struct { public double value; } // A:CIRCUIT SWITCH ON:7,Bool — feedback real del FUEL TRANSFER switch (DA-40 2020)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct DA40EngineMaster1Struct { public double value; } // A:RECIP ENG ENGINE MASTER SWITCH:1,Bool — feedback real del master engine de la DA-40 (monomotor)
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct CirrusDeiceMasterStruct { public double value; } // L:XMLVAR_DEICE_MASTER,Bool — variable real del deice airframe de la Cirrus SR22T (confirmada al Behavior viewer, secció "Variable(s)")
@@ -827,6 +837,8 @@ namespace SimConnect3
             RequestDA62EngineMaster1,
             RequestDA62EngineMaster2,
             RequestDA40EssentialBus2,
+            RequestDA40BusConnOn3,
+            RequestDA40CircuitSwitch7,
             RequestDA40EngineMaster1,
             RequestCirrusDeiceMaster,
             RequestC408FuelPump4,
@@ -1456,20 +1468,21 @@ namespace SimConnect3
         // XMLVAR_DeiceWindshield_1 (valor vist 1.000) confirmats REALS al Behavior Debug LocalVariables
         // (no invents, com el vell L:XMLVAR_DEICE_MASTER que mai es va confirmar per la Caravan).
         // DA-40 MASTER — RESOLT 2026-08-28: K:ENGINE_MASTER_1_SET (mateix event que la DA-62).
-        // DA-40 ESSENTIAL BUS / ALT-GEN2 (2026-08-28, MSFS2020) — Ronda 2: Pere ha confirmat MANUALMENT
-        // (Execute del Behavior Debug) que ELECTRICAL_EssentialBus_2_Inc/_Dec/_Set MOUEN l'interruptor
-        // de debò a la VC (Set amb 0/1 al paràmetre). Però enviant "1/0 (>B:ELECTRICAL_EssentialBus_2_Set)"
-        // pel nostre missatger NO fa res — ni amunt ni avall. Provem Inc/Dec (sense paràmetre, com un
-        // rocker) i variants de sintaxi del Set per si el problema és de format del RPN.
+        // DA-40 FUEL TRANSFER (2026-08-28, MSFS2020) — B:FUEL_Transfer_1/_Toggle/_On/_Off i
+        // DA-40 FUEL TANK SELECTOR (2026-08-28, MSFS2020) — Ronda 2: Pere ha trobat el preset real de
+        // MobiFlight/HubHop (Jaime Leon, DA40NG, "Fuel Tank Selector Left/Right/Off"):
+        // "2 s0 (A:FUEL TANK SELECTOR:1, Enum) != if{ 10 (>K:FUEL_SELECTOR_SET) }" (Left; Right=3 s0,
+        // Off=0 s0 — Pere confirma que NOMÉS canvia el primer número). Sospitós que el valor del K: es
+        // quedi fix a "10" per les 3 — provem tant l'enum propi (2/3/0) com el "10" fix, amb guarda i sense.
         private readonly string[] _testAltGen1ResetCandidates = new[] {
-            "1 (>B:ELECTRICAL_EssentialBus_2_Inc)",
-            "1 (>B:ELECTRICAL_EssentialBus_2_Dec)",
-            "0 (>B:ELECTRICAL_EssentialBus_2_Set)",
-            "1 (>B:ELECTRICAL_EssentialBus_2_Set)",
-            "1.0 (>B:ELECTRICAL_EssentialBus_2_Set)",
-            "0.0 (>B:ELECTRICAL_EssentialBus_2_Set)",
-            "1 (>B:ELECTRICAL_EssentialBus_2_Inc) 1 (>B:ELECTRICAL_EssentialBus_2_Inc) 1 (>B:ELECTRICAL_EssentialBus_2_Inc)",
-            "1 (>B:ELECTRICAL_EssentialBus_2_Dec) 1 (>B:ELECTRICAL_EssentialBus_2_Dec) 1 (>B:ELECTRICAL_EssentialBus_2_Dec)",
+            "2 (>K:FUEL_SELECTOR_SET)",
+            "3 (>K:FUEL_SELECTOR_SET)",
+            "0 (>K:FUEL_SELECTOR_SET)",
+            "2 s0 (A:FUEL TANK SELECTOR:1, Enum) != if{ 10 (>K:FUEL_SELECTOR_SET) }",
+            "3 s0 (A:FUEL TANK SELECTOR:1, Enum) != if{ 10 (>K:FUEL_SELECTOR_SET) }",
+            "0 s0 (A:FUEL TANK SELECTOR:1, Enum) != if{ 10 (>K:FUEL_SELECTOR_SET) }",
+            "10 (>K:FUEL_SELECTOR_SET)",
+            "1 (>K:FUEL_SELECTOR_SET)",
         };
 
         private System.Windows.Forms.Button _g3000Btn = null!;
@@ -2531,9 +2544,9 @@ namespace SimConnect3
             _testJunctionSendBtn.Location = new Point(3210, 230);
             _testJunctionSendBtn.Click += (s, e) => {
                 if (calibrationMode) return;
-                // DA-40 ESSENTIAL BUS — revòlver de candidats (un per clic).
+                // DA-40 FUEL TANK SELECTOR — revòlver de candidats, ronda 2 (un per clic).
                 string rpn = _testAltGen1ResetCandidates[_testAltGen1ResetIdx % _testAltGen1ResetCandidates.Length];
-                Debug.WriteLine($">>> SEND: DA40 ESSBUS TEST #{_testAltGen1ResetIdx} de {_testAltGen1ResetCandidates.Length}: {rpn}");
+                Debug.WriteLine($">>> SEND: DA40 FUELSEL2 TEST #{_testAltGen1ResetIdx} de {_testAltGen1ResetCandidates.Length}: {rpn}");
                 SendGenericRpn(rpn);
                 _testAltGen1ResetIdx++;
             };
@@ -2867,12 +2880,23 @@ namespace SimConnect3
                         }
                         else
                         {
-                            // 2020 (2026-08-28): confirmat via Pinned Events (Execute manual de Pere) que
-                            // ELECTRICAL_EssentialBus_2_Set (Float, 0/1) mou l'interruptor de debò a la VC
-                            // — a diferència de K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE, que sí fa
-                            // l'efecte elèctric real (confirmat als sistemes G1000) però mai anima el switch.
+                            // 2020 — mitja solució (2026-08-28), seqüència de 4 temps confirmada per Pere
+                            // (un clic = una crida, alternant "2 3"/"1 3"; el cicle real complet és:
+                            // 2 actives -> sense canvi -> esquerra activa/dreta apagada -> les 2 apagades ->
+                            // 2 actives). Comanda "real" (només la dreta, sense passar per la resta del
+                            // RESOLT DE VERITAT (2026-08-28): Pere ha trobat el preset real de MobiFlight/
+                            // HubHop ("Electrical Essential Bus On/Off", Jaime Leon, DA40NG). La peça que
+                            // faltava: cal escriure (>A:BUS LOOKUP INDEX, Number) ABANS de cada lectura o
+                            // toggle de BUS CONNECTION ON:2/3 — és el que fèiem servir malament com un
+                            // prefix "A:1:..." inline (que no fa res de veritat); ara escrivim l'índex de
+                            // debò abans de cada comprovació, igual que el preset.
                             int target = altGen2Off ? 1 : 0;
-                            SendGenericRpn($"{target} (>B:ELECTRICAL_EssentialBus_2_Set)");
+                            string rpn =
+                                $"{target} 1 (>A:BUS LOOKUP INDEX, Number) (A:BUS CONNECTION ON:2, Bool) == if{{ 2 1 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} " +
+                                $"{target} if{{ 1 (>A:BUS LOOKUP INDEX, Number) (A:BUS CONNECTION ON:3, Bool) if{{ 1 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} 2 (>A:BUS LOOKUP INDEX, Number) (A:BUS CONNECTION ON:3, Bool) ! if{{ 2 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} }} " +
+                                $"els{{ 1 (>A:BUS LOOKUP INDEX, Number) (A:BUS CONNECTION ON:3, Bool) ! if{{ 1 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} 2 (>A:BUS LOOKUP INDEX, Number) (A:BUS CONNECTION ON:3, Bool) if{{ 2 3 (>K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE) }} }} " +
+                                $"{target} (>L:ELECTRICAL_EssentialBus_2)";
+                            SendGenericRpn(rpn);
                         }
                         pbMain.Invalidate();
                         return;
@@ -3445,10 +3469,22 @@ namespace SimConnect3
                                 simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_FUELPUMP1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         } },
                 new() { Name="SW_DN_FUELPUMP2", TypeKey="SW DN blue",  BasePos=new Point(1864, 1653), ZoomWidth=75, Img=swBlueImg,
-                        ShowWhen = () => (IsBaronG58() && _isMsfs2024) ? _fuelPump2State3 == 2 : (UsesCaravanPumpScheme() || IsBonanzaG36()) ? true : !fuelpump2Active,
+                        ShowWhen = () => (IsBaronG58() && _isMsfs2024) ? _fuelPump2State3 == 2 : (UsesCaravanPumpScheme() || IsBonanzaG36()) ? true : (IsDA40() && !_isMsfs2024) ? !_da40FuelTransferOn : !fuelpump2Active,
                         OnClickEnabled = () => !((IsBaronG58() && _isMsfs2024) || UsesCaravanPumpScheme() || IsBonanzaG36()),
                         OnClick  = () => {
-                            if (_isMsfs2024 && IsBaronG58())
+                            if (IsDA40() && !_isMsfs2024)
+                            {
+                                // DA-40 (2020): aquesta posició NO és una bomba, és el FUEL TRANSFER switch
+                                // (veure SW_DA40_FUELTRANSF_LBL). Confirmat via revòlver SEND (2026-08-28):
+                                // K:ELECTRICAL_CIRCUIT_TOGGLE amb índex 7 (vist a l'Update 0 de l'InputEvent,
+                                // "(A:CIRCUIT SWITCH ON:7, Bool) if{ 7 (>K:ELECTRICAL_CIRCUIT_TOGGLE) }") és
+                                // un toggle real que activa/desactiva correctament — ni FUEL_Transfer_1/
+                                // _Toggle/_On/_Off ni O:FUEL_Transfer_1_Position ni K:SET_FUEL_TRANSFER_CUSTOM
+                                // feien res. L'estat visual el porta ara la lectura real (A:CIRCUIT SWITCH
+                                // ON:7, veure RequestDA40CircuitSwitch7) — el clic només envia la comanda.
+                                SendGenericRpn("7 (>K:ELECTRICAL_CIRCUIT_TOGGLE)");
+                            }
+                            else if (_isMsfs2024 && IsBaronG58())
                             {
                                 // Baron: la interacció es fa amb les 2 àrees dedicades SW_FUELPUMP2_UP/DN, no amb aquest switch.
                             }
@@ -3551,7 +3587,10 @@ namespace SimConnect3
                 // DA-40 — tapa amb relleu independent (Pere l'ha posicionat al damunt dels selectors de
                 // combustible via F12, veure calibration_export.txt). Mateix efecte que SW_DA62_COVER_RELIEF.
                 new() { Name="SW_DA40_COVER_RELIEF", TypeKey="DA40_COVER_RELIEF", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
-                        ShowWhen = () => IsDA40() },
+                        // Calibrada (1283,1767,713,334) just a sobre del selector de combustible únic
+                        // (SE_SELECTOR) — igual que SW_SE_SELECTOR_COVER, treta per la DA-40 a 2020 ara que
+                        // el selector ja és funcional. 2024 conserva la tapa.
+                        ShowWhen = () => (IsDA40() && !_isMsfs2024) ? false : IsDA40() },
                 // 2 tapes més amb el mateix efecte de relleu — posició/mida per defecte provisionals,
                 // Pere les col·locarà amb F12. ShowWhen = DA-40 per defecte (context actual); demanar-li
                 // si en vol una altra en veure-les.
@@ -3680,6 +3719,9 @@ namespace SimConnect3
                 // preparem el selector únic de 3 posicions. Arrossegable/redimensionable amb F12.
                 // De moment només actiu a la DA-40; s'anirà activant per altres monomotors més endavant.
                 new() { Name="SW_SE_SELECTOR_COVER", TypeKey="SE_COVER", BasePos=new Point(1280, 1757), ZoomWidth=753, ZoomHeight=350, Img=null,
+                        // Revertit (2026-08-28): aquesta tapa NO calia treure-la — s'amaga l'art de fons
+                        // (les 2 manetes velles fotografiades) i es dibuixa ABANS del selector nou (mateix
+                        // patró que la Cirrus). El problema real era SW_DA40_COVER_RELIEF (a sota).
                         ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() || IsCirrusSR22() || IsC408() },
                 // Selector únic de 3 posicions, centrat sobre el rectangle de tapa. Reutilitza la mateixa
                 // gràfica que els selectors twin-engine (mateix estil de pom vermell). Posició provisional,
@@ -6044,6 +6086,18 @@ namespace SimConnect3
                 simconnect.RegisterDataDefineStruct<DA40EssentialBus2Struct>(DEFINITIONS.DA40EssentialBus2Read);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestDA40EssentialBus2, DEFINITIONS.DA40EssentialBus2Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
+                // DA-40 (2020) — estat viu del relè (BUS CONNECTION ON:3), per calcular en C# (no a cegues
+                // per RPN) quina crida de K:2:ELECTRICAL_BUS_TO_BUS_CONNECTION_TOGGLE cal per l'ESS BUS.
+                simconnect.AddToDataDefinition(DEFINITIONS.DA40BusConnOn3Read, "BUS CONNECTION ON:3", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<DA40BusConnOn3Struct>(DEFINITIONS.DA40BusConnOn3Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestDA40BusConnOn3, DEFINITIONS.DA40BusConnOn3Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // DA-40 (2020) — feedback real del FUEL TRANSFER switch: A:CIRCUIT SWITCH ON:7 (el mateix
+                // que commuta K:ELECTRICAL_CIRCUIT_TOGGLE amb índex 7).
+                simconnect.AddToDataDefinition(DEFINITIONS.DA40CircuitSwitch7Read, "CIRCUIT SWITCH ON:7", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<DA40CircuitSwitch7Struct>(DEFINITIONS.DA40CircuitSwitch7Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestDA40CircuitSwitch7, DEFINITIONS.DA40CircuitSwitch7Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
                 // DA-40 — "Engine Master" real: al Behavior viewer l'InputEvent escriu/llegeix B:ENGINE_Master_1
                 // (privat del template, no llegible per SimConnect fora d'un WASM). Per feedback fem servir el
                 // mateix simvar real que ja funciona per aquest concepte a la DA-62 (RECIP ENG ENGINE MASTER
@@ -6733,6 +6787,30 @@ namespace SimConnect3
                 }
                 return;
             }
+            if (data.dwRequestID == (uint)REQUESTS.RequestDA40BusConnOn3)
+            {
+                _da40BusConnOn3 = ((DA40BusConnOn3Struct)data.dwData[0]).value;
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestDA40CircuitSwitch7)
+            {
+                double newVal = ((DA40CircuitSwitch7Struct)data.dwData[0]).value;
+                if (newVal != _da40CircuitSwitchOn7)
+                {
+                    Debug.WriteLine($"[DA40 A:CIRCUIT SWITCH ON:7] {_da40CircuitSwitchOn7} -> {newVal}");
+                    _da40CircuitSwitchOn7 = newVal;
+                }
+                if (IsDA40() && !_isMsfs2024)
+                {
+                    bool newFuelTransferOn = newVal >= 0.5;
+                    if (newFuelTransferOn != _da40FuelTransferOn)
+                    {
+                        _da40FuelTransferOn = newFuelTransferOn;
+                        pbMain.Invalidate();
+                    }
+                }
+                return;
+            }
             if (data.dwRequestID == (uint)REQUESTS.RequestDA40EngineMaster1)
             {
                 double newVal = ((DA40EngineMaster1Struct)data.dwData[0]).value;
@@ -7263,6 +7341,26 @@ namespace SimConnect3
                     {
                         Debug.WriteLine($"[CIRRUS FUEL TANK SELECTOR:1] {_cirrusFuelSelectorRawLast} -> {s1.fuel_selector_1}");
                         _cirrusFuelSelectorRawLast = s1.fuel_selector_1;
+                    }
+                    int newPosFromRead = s1.fuel_selector_1 switch { 0 => 0, 2 => 1, 3 => 2, _ => seSelectorPos };
+                    if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
+                    {
+                        seSelectorPos = newPosFromRead;
+                        needsRepaint = true;
+                    }
+                    newFuel1Pos = fuel1Pos;
+                    newFuel2Pos = fuel2Pos;
+                }
+                else if (IsDA40() && !_isMsfs2024)
+                {
+                    // DA-40 (2020 NOMÉS) — mateix patró que Bonanza/Cirrus: selector únic (SW_SE_SELECTOR),
+                    // reutilitza "FUEL TANK SELECTOR:1" ja present a Struct1. A diferència de la Bonanza,
+                    // aquí escriptura (K:FUEL_SELECTOR_SET) i lectura fan servir la MATEIXA codificació
+                    // (0=OFF, 2=LEFT, 3=RIGHT), confirmada via revòlver SEND (2026-08-28).
+                    if (s1.fuel_selector_1 != _da40FuelSelectorRawLast)
+                    {
+                        Debug.WriteLine($"[DA40 FUEL TANK SELECTOR:1] {_da40FuelSelectorRawLast} -> {s1.fuel_selector_1}");
+                        _da40FuelSelectorRawLast = s1.fuel_selector_1;
                     }
                     int newPosFromRead = s1.fuel_selector_1 switch { 0 => 0, 2 => 1, 3 => 2, _ => seSelectorPos };
                     if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
@@ -10187,9 +10285,20 @@ namespace SimConnect3
                 TransmitC408FuelTransfer(pos);
                 return;
             }
-            // DA-40/Cirrus SR22T: cap combinació de junction (0-8) ni cap mecanisme (event legacy, vàlvula
-            // directa, Input Events API) mou res — el sistema de combustible d'aquests 2 avions no respon
-            // NI TAN SOLS movent el selector a mà al VC (comprovat: el motor no s'atura mai a OFF). Abandonat.
+            // DA-40 (2020 NOMÉS, 2026-08-28) — RESOLT: K:FUEL_SELECTOR_SET pel missatger genèric, valors
+            // directes 0=OFF, 2=LEFT, 3=RIGHT (mateixa codificació que la Cirrus, confirmada via revòlver
+            // SEND — sense guarda, sense WASM). 2024 continua amb el mecanisme de sota (no tocat).
+            if (IsDA40() && !_isMsfs2024)
+            {
+                uint val = pos switch { 0 => 0u, 1 => 2u, _ => 3u };
+                SendGenericRpn($"{val} (>K:FUEL_SELECTOR_SET)");
+                _seSelectorIgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                return;
+            }
+            // DA-40 (2024, encara pendent): cap combinació de junction (0-8) ni cap mecanisme (event legacy,
+            // vàlvula directa, Input Events API) mou res — no responia NI TAN SOLS movent el selector a mà
+            // al VC (el motor no s'atura mai a OFF). Abandonat només per DA-40 2024; la Cirrus SR22T té la
+            // seva pròpia branca RESOLTA més avall (K:FUEL_SELECTOR_SET), i la DA-40 2020 té la de dalt.
             //
             // C400 Corvalis (TTx): CONFIRMAT que junction=1 sí funciona (moviment real verificat al VC).
             // Options REALS del junction (confirmades una a una, NO coincideixen amb els valors dels
