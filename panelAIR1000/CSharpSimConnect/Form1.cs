@@ -716,6 +716,9 @@ namespace SimConnect3
             TbmElecGenerator2024Read,
             TbmFuelSelection2024Read,
             TbmApTrim2024Read,
+            TbmDeiceCycle1_2024Read,
+            TbmDeiceCycle2_2024Read,
+            TbmInertSep2024Read,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -815,6 +818,12 @@ namespace SimConnect3
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct TbmApTrim2024Struct { public double value; } // L:1:TBM_AP_Trim_Switch_Position,Number (0=ON/UP, 1=AP OFF/CTR, 2=OFF/DN) — feedback real de l'AP Trim (TBM930 2024, Inspector Init)
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct TbmDeiceCycle1_2024Struct { public double value; } // L:1:TBM_Airframe_Deice_Cycle_1_Active,Bool — LED esquerra del cicle de deice (TBM930 2024, Updates de DEICE_SYSTEM)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct TbmDeiceCycle2_2024Struct { public double value; } // L:1:TBM_Airframe_Deice_Cycle_2_Active,Bool — LED dreta del cicle de deice (TBM930 2024, Updates de DEICE_SYSTEM)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct TbmInertSep2024Struct { public double value; } // L:1:TBM_Inert_Sep_Switch_Position,Bool — feedback real de l'Inert Sep (TBM930 2024, Inspector Init)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct CirrusDeiceMasterStruct { public double value; } // L:XMLVAR_DEICE_MASTER,Bool — variable real del deice airframe de la Cirrus SR22T (confirmada al Behavior viewer, secció "Variable(s)")
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct C408FuelPump4Struct { public double value; } // A:FUELSYSTEM PUMP SWITCH:4,Bool — bomba de transferència dreta de la C408 (l'esquerra, índex 3, ja es llegeix via Struct1/read_fuelpump_idx3_2024)
@@ -872,6 +881,9 @@ namespace SimConnect3
             RequestTbmElecGenerator2024,
             RequestTbmFuelSelection2024,
             RequestTbmApTrim2024,
+            RequestTbmDeiceCycle1_2024,
+            RequestTbmDeiceCycle2_2024,
+            RequestTbmInertSep2024,
         }
         // Missatger genèric RPN — Client Data Area compartida amb el WASM (SFS_Link/Module.cpp).
         // Permet enviar qualsevol text RPN (K:, H:, B:, índexs, 'nom'_n, etc.) sense recompilar el
@@ -4596,6 +4608,12 @@ namespace SimConnect3
         private void SendPropDeiceOn()
         {
             if (simconnect == null) return;
+            if (_isMsfs2024 && IsTBM930())
+            {
+                // TBM930 (2024) — B:DEICE_PROPELLER_1_Set: 1=ON, 0=OFF.
+                SendGenericRpn("1 (>B:DEICE_PROPELLER_1_Set)");
+                return;
+            }
             if (!propDeiceActive)
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROPDEICE_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             simconnect.SetDataOnSimObject(DEFINITIONS.PropDeiceWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new PropDeiceWriteStruct { value = 1 });
@@ -4604,6 +4622,12 @@ namespace SimConnect3
         private void SendPropDeiceOff()
         {
             if (simconnect == null) return;
+            if (_isMsfs2024 && IsTBM930())
+            {
+                // TBM930 (2024) — B:DEICE_PROPELLER_1_Set: 1=ON, 0=OFF.
+                SendGenericRpn("0 (>B:DEICE_PROPELLER_1_Set)");
+                return;
+            }
             if (propDeiceActive)
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROPDEICE_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             simconnect.SetDataOnSimObject(DEFINITIONS.PropDeiceWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new PropDeiceWriteStruct { value = 0 });
@@ -4612,6 +4636,12 @@ namespace SimConnect3
         private void SendInertSepOn()
         {
             if (simconnect == null) return;
+            if (_isMsfs2024 && IsTBM930())
+            {
+                // TBM930 (2024) — B:TBM930_DEICE_INERT_SEP_SWITCH_Set: 1=ON, 0=OFF.
+                SendGenericRpn("1 (>B:TBM930_DEICE_INERT_SEP_SWITCH_Set)");
+                return;
+            }
             if (!antiIceEng1Active)
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.INERT_SEP_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
         }
@@ -4619,6 +4649,12 @@ namespace SimConnect3
         private void SendInertSepOff()
         {
             if (simconnect == null) return;
+            if (_isMsfs2024 && IsTBM930())
+            {
+                // TBM930 (2024) — B:TBM930_DEICE_INERT_SEP_SWITCH_Set: 1=ON, 0=OFF.
+                SendGenericRpn("0 (>B:TBM930_DEICE_INERT_SEP_SWITCH_Set)");
+                return;
+            }
             if (antiIceEng1Active)
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.INERT_SEP_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
         }
@@ -4653,6 +4689,12 @@ namespace SimConnect3
         {
             if (simconnect == null) return;
             uint newState = windshieldDeiceActive ? 0u : 1u;
+            if (_isMsfs2024 && IsTBM930())
+            {
+                // TBM930 (2024) — B:TBM930_DEICE_WINDSHIELD_SWITCH_Set: 1=ON, 0=OFF.
+                SendGenericRpn($"{newState} (>B:TBM930_DEICE_WINDSHIELD_SWITCH_Set)");
+                return;
+            }
             simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.WINDSHIELD_DEICE_SET, newState, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
         }
 
@@ -6295,6 +6337,21 @@ namespace SimConnect3
                 simconnect.RegisterDataDefineStruct<TbmApTrim2024Struct>(DEFINITIONS.TbmApTrim2024Read);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestTbmApTrim2024, DEFINITIONS.TbmApTrim2024Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
+                // TBM930 (2024) Airframe Deice LEDs — feedback real (Updates de DEICE_SYSTEM:
+                // L:1:TBM_Airframe_Deice_Cycle_1_Active / _2_Active, substitueixen el genèric
+                // L:XMLVAR_IsDeiceAirFrame/_2 que aquest avió ja no actualitza correctament).
+                simconnect.AddToDataDefinition(DEFINITIONS.TbmDeiceCycle1_2024Read, "L:1:TBM_Airframe_Deice_Cycle_1_Active", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<TbmDeiceCycle1_2024Struct>(DEFINITIONS.TbmDeiceCycle1_2024Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestTbmDeiceCycle1_2024, DEFINITIONS.TbmDeiceCycle1_2024Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+                simconnect.AddToDataDefinition(DEFINITIONS.TbmDeiceCycle2_2024Read, "L:1:TBM_Airframe_Deice_Cycle_2_Active", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<TbmDeiceCycle2_2024Struct>(DEFINITIONS.TbmDeiceCycle2_2024Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestTbmDeiceCycle2_2024, DEFINITIONS.TbmDeiceCycle2_2024Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // TBM930 (2024) Inert Sep — feedback real (Inspector Init: L:1:TBM_Inert_Sep_Switch_Position).
+                simconnect.AddToDataDefinition(DEFINITIONS.TbmInertSep2024Read, "L:1:TBM_Inert_Sep_Switch_Position", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<TbmInertSep2024Struct>(DEFINITIONS.TbmInertSep2024Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestTbmInertSep2024, DEFINITIONS.TbmInertSep2024Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
                 // Missatger genèric RPN — Client Data Area compartida amb el WASM (SFS_Link). El WASM ja
                 // ha cridat CreateClientData; aquí només ens hi enganxem amb el mateix nom i definició.
                 simconnect.MapClientDataNameToID("SFS_LINK.GENERIC_RPN", CLIENT_DATA_ID.GenericRpnData);
@@ -6984,6 +7041,36 @@ namespace SimConnect3
                 }
                 return;
             }
+            if (data.dwRequestID == (uint)REQUESTS.RequestTbmDeiceCycle1_2024)
+            {
+                double newVal = ((TbmDeiceCycle1_2024Struct)data.dwData[0]).value >= 0.5 ? 1.0 : 0.0;
+                if (newVal != _isDeiceAirframe)
+                {
+                    _isDeiceAirframe = newVal;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestTbmDeiceCycle2_2024)
+            {
+                double newVal = ((TbmDeiceCycle2_2024Struct)data.dwData[0]).value >= 0.5 ? 1.0 : 0.0;
+                if (newVal != _isDeiceAirframe2)
+                {
+                    _isDeiceAirframe2 = newVal;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestTbmInertSep2024)
+            {
+                bool newVal = ((TbmInertSep2024Struct)data.dwData[0]).value >= 0.5;
+                if (newVal != antiIceEng1Active)
+                {
+                    antiIceEng1Active = newVal;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
             if (data.dwRequestID == (uint)REQUESTS.RequestDA40CircuitSwitch7)
             {
                 double newVal = ((DA40CircuitSwitch7Struct)data.dwData[0]).value;
@@ -7392,13 +7479,18 @@ namespace SimConnect3
                     needsRepaint = true;
                 }
                 bool newAntiIce1 = (s1.read_antiice1 & 1) != 0;
-                if (newAntiIce1 != antiIceEng1Active)
+                // TBM930 (2024): antiIceEng1Active (Inert Sep) el porta RequestTbmInertSep2024 (L:1: real).
+                if (!(IsTBM930() && _isMsfs2024) && newAntiIce1 != antiIceEng1Active)
                 {
                     antiIceEng1Active = newAntiIce1;
                     needsRepaint = true;
                 }
-                _isDeiceAirframe = s1.read_isDeiceAirframe;
-                _isDeiceAirframe2 = s1.read_isDeiceAirframe2;
+                // TBM930 (2024): els LEDs els porten RequestTbmDeiceCycle1_2024/_2 (L:1:TBM_Airframe_Deice_Cycle_x_Active).
+                if (!(IsTBM930() && _isMsfs2024))
+                {
+                    _isDeiceAirframe = s1.read_isDeiceAirframe;
+                    _isDeiceAirframe2 = s1.read_isDeiceAirframe2;
+                }
                 bool newWindshieldDeice = (s1.read_windshielddeice & 1) != 0;
                 if (newWindshieldDeice != windshieldDeiceActive)
                 {
