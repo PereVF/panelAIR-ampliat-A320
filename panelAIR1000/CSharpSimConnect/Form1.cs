@@ -264,6 +264,10 @@ namespace SimConnect3
             _currentAircraftTitle.IndexOf("C408", StringComparison.OrdinalIgnoreCase) >= 0 ||
             _currentAircraftTitle.IndexOf("SkyCourier", StringComparison.OrdinalIgnoreCase) >= 0;
 
+        bool IsTBM930() =>
+            _currentAircraftTitle.IndexOf("TBM930", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            _currentAircraftTitle.IndexOf("TBM 930", StringComparison.OrdinalIgnoreCase) >= 0;
+
         // Estat de 3 posicions (0=HIGH, 1=LOW, 2=OFF) per bombes que ho necessiten (Baron G58)
         int _fuelPump1State3 = 0;
         int _fuelPump2State3 = 0;
@@ -707,6 +711,11 @@ namespace SimConnect3
             CaravanStarter1Read,
             CaravanDeiceRead,
             BonanzaAntiIcePosRead,
+            TbmCrashbar2024Read,
+            TbmElecSource2024Read,
+            TbmElecGenerator2024Read,
+            TbmFuelSelection2024Read,
+            TbmApTrim2024Read,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -796,6 +805,16 @@ namespace SimConnect3
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct DA40EngineMaster1Struct { public double value; } // A:RECIP ENG ENGINE MASTER SWITCH:1,Bool — feedback real del master engine de la DA-40 (monomotor)
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct TbmCrashbar2024Struct { public double value; } // L:1:TBM_Elec_CrashBar_State,Bool — feedback real del crashbar (TBM930 2024, Inspector Init)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct TbmElecSource2024Struct { public double value; } // L:1:TBM_Elec_Source_Switch_State,Number (0/1/2) — feedback real de l'Elec Source (TBM930 2024, Inspector Init)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct TbmElecGenerator2024Struct { public double value; } // L:1:TBM_Elec_Generator_Switch_State,Number (0/1/2) — feedback real de l'Elec Generator (TBM930 2024, Inspector Init)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct TbmFuelSelection2024Struct { public double value; } // L:1:TBM_Fuel_Selection_Switch_Position,Bool (1=AUTO, 0=MANUAL) — feedback real del Fuel Selection (TBM930 2024, Inspector Init)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct TbmApTrim2024Struct { public double value; } // L:1:TBM_AP_Trim_Switch_Position,Number (0=ON/UP, 1=AP OFF/CTR, 2=OFF/DN) — feedback real de l'AP Trim (TBM930 2024, Inspector Init)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct CirrusDeiceMasterStruct { public double value; } // L:XMLVAR_DEICE_MASTER,Bool — variable real del deice airframe de la Cirrus SR22T (confirmada al Behavior viewer, secció "Variable(s)")
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct C408FuelPump4Struct { public double value; } // A:FUELSYSTEM PUMP SWITCH:4,Bool — bomba de transferència dreta de la C408 (l'esquerra, índex 3, ja es llegeix via Struct1/read_fuelpump_idx3_2024)
@@ -848,6 +867,11 @@ namespace SimConnect3
             RequestCaravanStarter1,
             RequestCaravanDeice,
             RequestBonanzaAntiIcePos,
+            RequestTbmCrashbar2024,
+            RequestTbmElecSource2024,
+            RequestTbmElecGenerator2024,
+            RequestTbmFuelSelection2024,
+            RequestTbmApTrim2024,
         }
         // Missatger genèric RPN — Client Data Area compartida amb el WASM (SFS_Link/Module.cpp).
         // Permet enviar qualsevol text RPN (K:, H:, B:, índexs, 'nom'_n, etc.) sense recompilar el
@@ -1360,6 +1384,7 @@ namespace SimConnect3
         private int _rudderTrimDisabled = 0;
         private int _aileronTrimDisabled = 0;
         private double _lightingLogo1 = 0;
+        private bool _tbmPulseLight2024On = false;
         private double _lightingWing1 = 0;
         private int _lightLogo = 0;
         private int _circuitConn17 = 0;
@@ -1436,21 +1461,6 @@ namespace SimConnect3
         private System.Windows.Forms.Button _testAvionicsToggleBtn = null!;
         private bool  _testAvionicsToggleBtnDragging;
         private Point _testAvionicsToggleBtnDragOffset;
-        private System.Windows.Forms.Button _testStarterRpnBtn = null!;
-        private bool  _testStarterRpnBtnDragging;
-        private Point _testStarterRpnBtnDragOffset;
-        private int _testStarterRpnIdx = 0;
-        // Caravan STARTER (2020) — revòlver de candidats RPN cap a MOTOR (valor 2), un per clic, per
-        // provar-los d'1 en 1 sense cicle d'edició/build. Quan un funcioni, es transcriu a StepCaravanStarter1.
-        private readonly string[] _testStarterRpnCandidates = new[] {
-            "2 (>L:XMLVAR_Starter1)",
-            "2 (>B:ENGINE_Starter_Ignition_1_Motor)",
-            "2 (>B:ENGINE_Starter_Ignition_1_Motor, Number)",
-            "1 (>B:ENGINE_Starter_Ignition_1_Motor)",
-            "2.0 (>L:XMLVAR_Starter1)",
-            "2 (>L:XMLVAR_Starter1) 2 (>B:ENGINE_Starter_Ignition_1_Motor)",
-            "2 (>B:ENGINE_Starter_Ignition_1_Motor) 2 (>L:XMLVAR_Starter1)",
-        };
         // Caravan ALTGEN1 (2026-08-26) — revòlver de candidats RPN pel moviment visual de RESET,
         // reutilitzant el botó "SEND" de la pantalla AUX (un clic = un candidat nou). Fer-ho amb
         // l'alternador ja en TRIP/OFF abans de clicar (RESET normalment només té sentit des d'apagat).
@@ -1468,21 +1478,20 @@ namespace SimConnect3
         // XMLVAR_DeiceWindshield_1 (valor vist 1.000) confirmats REALS al Behavior Debug LocalVariables
         // (no invents, com el vell L:XMLVAR_DEICE_MASTER que mai es va confirmar per la Caravan).
         // DA-40 MASTER — RESOLT 2026-08-28: K:ENGINE_MASTER_1_SET (mateix event que la DA-62).
-        // DA-40 FUEL TRANSFER (2026-08-28, MSFS2020) — B:FUEL_Transfer_1/_Toggle/_On/_Off i
-        // DA-40 FUEL TANK SELECTOR (2026-08-28, MSFS2020) — Ronda 2: Pere ha trobat el preset real de
-        // MobiFlight/HubHop (Jaime Leon, DA40NG, "Fuel Tank Selector Left/Right/Off"):
-        // "2 s0 (A:FUEL TANK SELECTOR:1, Enum) != if{ 10 (>K:FUEL_SELECTOR_SET) }" (Left; Right=3 s0,
-        // Off=0 s0 — Pere confirma que NOMÉS canvia el primer número). Sospitós que el valor del K: es
-        // quedi fix a "10" per les 3 — provem tant l'enum propi (2/3/0) com el "10" fix, amb guarda i sense.
+        // DA-62 PANEL LIGHT (2026-08-28, MSFS2020) — Ronda 2: "1 (>K:PANEL_LIGHTS_SET)" fa pujar la
+        // llum una mica (efecte real i persistent, sembla un INCREMENT no un SET absolut, com el pom de
+        // la C172). "3 0 (>K:2:LIGHT_POTENTIOMETER_SET)" l'apaga 1s però torna sol — coincideix amb el
+        // patró de pom físic ja vist (valor reafirmat des d'una posició real, no controlable des de
+        // fora). Provem repetir K:PANEL_LIGHTS_SET moltes vegades per veure si arriba a plena brillantor.
         private readonly string[] _testAltGen1ResetCandidates = new[] {
-            "2 (>K:FUEL_SELECTOR_SET)",
-            "3 (>K:FUEL_SELECTOR_SET)",
-            "0 (>K:FUEL_SELECTOR_SET)",
-            "2 s0 (A:FUEL TANK SELECTOR:1, Enum) != if{ 10 (>K:FUEL_SELECTOR_SET) }",
-            "3 s0 (A:FUEL TANK SELECTOR:1, Enum) != if{ 10 (>K:FUEL_SELECTOR_SET) }",
-            "0 s0 (A:FUEL TANK SELECTOR:1, Enum) != if{ 10 (>K:FUEL_SELECTOR_SET) }",
-            "10 (>K:FUEL_SELECTOR_SET)",
-            "1 (>K:FUEL_SELECTOR_SET)",
+            "1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET)",
+            "1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET)",
+            "100 (>K:PANEL_LIGHTS_SET)",
+            "0 (>K:PANEL_LIGHTS_SET)",
+            "1 (>K:PANEL_LIGHTS_SET) 100 (>L:LIGHTING_PANEL_1)",
+            "1 (>K:2:PANEL_LIGHTS_SET)",
+            "3 1 (>K:2:PANEL_LIGHTS_SET)",
+            "1 3 (>K:2:PANEL_LIGHTS_SET)",
         };
 
         private System.Windows.Forms.Button _g3000Btn = null!;
@@ -1842,7 +1851,7 @@ namespace SimConnect3
                 StartPosition = FormStartPosition.Manual,
                 BackColor = Color.FromArgb(40, 40, 40),
                 ShowInTaskbar = false,
-                Size = new Size(3440, 330),
+                Size = new Size(3440, 280),
                 Location = new Point(this.Left + 200, this.Top + 1160)
             };
             _overlayPanel.KeyPreview = true;
@@ -1983,94 +1992,7 @@ namespace SimConnect3
 
             _g3000Btn = MakeGroupBtn("TBM 930 cockpit", 363, 63);
             _g3000Btn.Location = new Point(3100, 100);
-            _g3000Btn.Click += (s, e) =>
-            {
-                if (calibrationMode) return;
-                _g3000Active = !_g3000Active;
-                _g3000Btn.Text = _g3000Active ? "G1000 cockpit" : "TBM 930 cockpit";
-                _panelVisible = false;
-                _gearBtn.BackColor = Color.FromArgb(40, 40, 40);
-                _gearBtn.Text = "⚙";
-                _overlayPanel!.Hide();
-                _thrQuadrantBtn.Visible = _g3000Active;
-                if (!_g3000Active) { _thrQuadrantVisible = false; }
-                if (_g3000Active)
-                {
-                    _thrQuadrantVisible = true;
-                    ApplyG3000Region();
-                    SetAPTrimPos(0);
-                    _thrHandleLeftRail = false;
-                    _lastThrLeverPos = double.NaN;
-                    _thrIgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
-                    var thrH = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
-                    if (thrH != null)
-                    {
-                        thrH.BasePos = new Point(3734, _thrHandleDefaultY >= 0 ? _thrHandleDefaultY : thrH.BasePos.Y);
-                        int cx = thrH.BasePos.X + thrH.Bounds.Width / 2;
-                        int cy = thrH.BasePos.Y + thrH.Bounds.Height / 2;
-                    }
-                    if (simconnect != null)
-                    {
-                        simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_FUELSEL_AUTO, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); _fuelSelectionSet = 2;
-                        //simconnect.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 1 }); // DISABLED — causa HIGH IDLE si MSFS a CUTOFF
-                        //simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); // DISABLED — idem
-                        //simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-16383)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        //simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        Task.Run(async () => { await Task.Delay(500); this.BeginInvoke(new Action(() => {
-                            //simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 1 }); // DISABLED — idem
-                            //simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); // DISABLED — idem
-                            //simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-16383)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                            //simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                            SyncThrHandleFromMsfs();
-                        })); });
-                    }
-                    CheckTBM930Mod();
-                }
-                else
-                {
-                    ApplyPfdRegion();
-                    if (_tipLbl != null) { this.Controls.Remove(_tipLbl); _tipLbl.Dispose(); _tipLbl = null; }
-                    Task.Run(async () =>
-                    {
-                        await Task.Delay(1000);
-                        this.BeginInvoke(new Action(() =>
-                        {
-                            _tipLbl = new Label
-                            {
-                                Text = "If you no longer need G3000 mode, close the MSFS G3000 pop‑out windows to restore full panel functionality.  [10]",
-                                AutoSize = false,
-                                Size = new Size(1440, 120),
-                                Location = new Point((3840 - 1440) / 2, (2160 - 120) / 2 + 50),
-                                TextAlign = ContentAlignment.MiddleCenter,
-                                Font = new Font("Segoe UI", 26f),
-                                ForeColor = Color.White,
-                                BackColor = Color.DarkRed
-                            };
-                            this.Controls.Add(_tipLbl);
-                            _tipLbl.BringToFront();
-                        }));
-                        for (int i = 9; i >= 0; i--)
-                        {
-                            await Task.Delay(1000);
-                            this.BeginInvoke(new Action(() =>
-                            {
-                                if (_tipLbl == null) return;
-                                if (i <= 0)
-                                {
-                                    this.Controls.Remove(_tipLbl);
-                                    _tipLbl.Dispose();
-                                    _tipLbl = null;
-                                }
-                                else
-                                {
-                                    _tipLbl.Text = "If you no longer need G3000 mode, close the MSFS G3000 pop‑out windows to restore full G1000 panel functionality.  [" + i + "]";
-                                }
-                            }));
-                        }
-                    });
-                }
-                pbMain.Invalidate();
-            };
+            _g3000Btn.Click += (s, e) => SetG3000Active(!_g3000Active);
             _g3000Btn.MouseDown += (s, e) =>
             {
                 if (!calibrationMode) return;
@@ -2544,9 +2466,9 @@ namespace SimConnect3
             _testJunctionSendBtn.Location = new Point(3210, 230);
             _testJunctionSendBtn.Click += (s, e) => {
                 if (calibrationMode) return;
-                // DA-40 FUEL TANK SELECTOR — revòlver de candidats, ronda 2 (un per clic).
+                // DA-62 PANEL LIGHT — revòlver de candidats, ronda 2 (un per clic).
                 string rpn = _testAltGen1ResetCandidates[_testAltGen1ResetIdx % _testAltGen1ResetCandidates.Length];
-                Debug.WriteLine($">>> SEND: DA40 FUELSEL2 TEST #{_testAltGen1ResetIdx} de {_testAltGen1ResetCandidates.Length}: {rpn}");
+                Debug.WriteLine($">>> SEND: DA62 PANELLIGHT2 TEST #{_testAltGen1ResetIdx} de {_testAltGen1ResetCandidates.Length}: {rpn}");
                 SendGenericRpn(rpn);
                 _testAltGen1ResetIdx++;
             };
@@ -2598,26 +2520,6 @@ namespace SimConnect3
             };
             _testAvionicsToggleBtn.MouseUp += (s, e) => { _testAvionicsToggleBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             _overlayPanel.Controls.Add(_testAvionicsToggleBtn);
-
-            // ── Caravan STARTER (2020) — revòlver de candidats RPN cap a MOTOR, un per clic ──
-            _testStarterRpnBtn = MakeGroupBtn("STARTER RPN", 140, 40);
-            _testStarterRpnBtn.Location = new Point(3100, 280);
-            _testStarterRpnBtn.Click += (s, e) => {
-                if (calibrationMode) return;
-                string rpn = _testStarterRpnCandidates[_testStarterRpnIdx % _testStarterRpnCandidates.Length];
-                Debug.WriteLine($">>> STARTER RPN TEST #{_testStarterRpnIdx} de {_testStarterRpnCandidates.Length}: {rpn}");
-                SendGenericRpn(rpn);
-                _testStarterRpnIdx++;
-            };
-            _testStarterRpnBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testStarterRpnBtnDragging = true; _testStarterRpnBtnDragOffset = e.Location; };
-            _testStarterRpnBtn.MouseMove += (s, e) => {
-                if (!_testStarterRpnBtnDragging) return;
-                var sp = _testStarterRpnBtn.PointToScreen(e.Location);
-                var fp = _overlayPanel!.PointToClient(sp);
-                _testStarterRpnBtn.Location = new Point(fp.X - _testStarterRpnBtnDragOffset.X, fp.Y - _testStarterRpnBtnDragOffset.Y);
-            };
-            _testStarterRpnBtn.MouseUp += (s, e) => { _testStarterRpnBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
-            _overlayPanel.Controls.Add(_testStarterRpnBtn);
 
             //this.TopMost = true;
             this.Load += frmMain_Load;
@@ -2743,10 +2645,21 @@ namespace SimConnect3
             // Avionics switches — single toggle area each
             cockpitRight.Buttons.Add(new UiButton { Name="AVIONICS1-TOGGLE", BasePos=new Point(1770, 1220), W=100, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
+                    if (IsDA62() && !_isMsfs2024)
+                    {
+                        // DA-62 (2020, 2026-08-28): el WASM 'rh_main_bustoavionics_bus'_n (confirmat pel
+                        // 2024) no fa res aquí. Confirmat via revòlver SEND: K:AVIONICS_MASTER_1_SET natiu
+                        // (1=ON, 0=OFF), sense WASM.
+                        uint target = avionics1Off ? 1u : 0u;
+                        SendGenericRpn($"{target} (>K:AVIONICS_MASTER_1_SET)");
+                        pbMain.Invalidate();
+                        return;
+                    }
                     if (IsDA62())
                     {
-                        // DA-62: sistema elèctric modular, K:ELECTRICAL_LINE_CONNECTION_TOGGLE (nom de bus,
-                        // no índex numèric) via WASM — és un TOGGLE real, no ON/OFF, per això no cal triar event.
+                        // DA-62 (2024): sistema elèctric modular, K:ELECTRICAL_LINE_CONNECTION_TOGGLE (nom
+                        // de bus, no índex numèric) via WASM — és un TOGGLE real, no ON/OFF, per això no
+                        // cal triar event.
                         Debug.WriteLine($">>> DA62 AVIONICS TOGGLE premut, simconnect null? {simconnect == null}");
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA62_AVIONICS_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         pbMain.Invalidate();
@@ -2966,6 +2879,14 @@ namespace SimConnect3
                         simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         fuel1Pos = newPos;
                         _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (IsDA62() && !_isMsfs2024) {
+                        // DA-62 (2020, 2026-08-28) — preset MobiFlight/HubHop real (Imadunatic): K: events
+                        // natius sense paràmetres, sense WASM. FUEL_SELECTOR_OFF/_LEFT_MAIN(=ON)/_RIGHT_MAIN
+                        // (=CROSSFEED per la palanca esquerra).
+                        string da62Rpn = newPos switch { 0 => "1 (>K:FUEL_SELECTOR_OFF)", 1 => "1 (>K:FUEL_SELECTOR_LEFT_MAIN)", _ => "1 (>K:FUEL_SELECTOR_RIGHT_MAIN)" };
+                        SendGenericRpn(da62Rpn);
+                        fuel1Pos = newPos;
+                        _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                     } else if (_isMsfs2024 && numEngines >= 2) {
                         var evt = newPos switch { 0 => SIMCONNECT_EVENTS.SFS_FUELSEL_LEFT_OFF, 1 => SIMCONNECT_EVENTS.SFS_FUELSEL_LEFT_ON, _ => SIMCONNECT_EVENTS.SFS_FUELSEL_LEFT_XFEED };
                         simconnect?.TransmitClientEvent(0, evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
@@ -3007,6 +2928,12 @@ namespace SimConnect3
                     } else if (_isMsfs2024 && IsDA62()) {
                         var da62Evt = newPos switch { 0 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_CROSS };
                         simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        fuel1Pos = newPos;
+                        _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (IsDA62() && !_isMsfs2024) {
+                        // DA-62 (2020) — veure comentari a FUEL1-LEFT.
+                        string da62Rpn = newPos switch { 0 => "1 (>K:FUEL_SELECTOR_OFF)", 1 => "1 (>K:FUEL_SELECTOR_LEFT_MAIN)", _ => "1 (>K:FUEL_SELECTOR_RIGHT_MAIN)" };
+                        SendGenericRpn(da62Rpn);
                         fuel1Pos = newPos;
                         _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                     } else if (_isMsfs2024 && numEngines >= 2) {
@@ -3057,6 +2984,14 @@ namespace SimConnect3
                         simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         fuel2Pos = newPos;
                         _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (IsDA62() && !_isMsfs2024) {
+                        // DA-62 (2020, 2026-08-28) — preset MobiFlight/HubHop real (Imadunatic), palanca
+                        // dreta (A:FUEL TANK SELECTOR:2): 0=OFF, 20=ON(Right Main, confirmat), 19=CROSSFEED
+                        // (Left Main, inferit per simetria amb l'esquerra — pendent de confirmar).
+                        string da62Rpn = newPos switch { 2 => "1 (>K:FUEL_SELECTOR_2_OFF)", 1 => "1 (>K:FUEL_SELECTOR_2_RIGHT_MAIN)", _ => "1 (>K:FUEL_SELECTOR_2_LEFT_MAIN)" };
+                        SendGenericRpn(da62Rpn);
+                        fuel2Pos = newPos;
+                        _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                     } else if (_isMsfs2024 && numEngines >= 2) {
                         // pos: 0=Xfeed, 1=On, 2=Off (ordre invertit respecte al selector esquerre)
                         var evt = newPos switch { 2 => SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_OFF, 1 => SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_ON, _ => SIMCONNECT_EVENTS.SFS_FUELSEL_RIGHT_XFEED };
@@ -3100,6 +3035,12 @@ namespace SimConnect3
                     if (_isMsfs2024 && IsDA62()) {
                         var da62Evt = newPos switch { 2 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_CROSS };
                         simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        fuel2Pos = newPos;
+                        _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                    } else if (IsDA62() && !_isMsfs2024) {
+                        // DA-62 (2020) — veure comentari a FUEL2-LEFT.
+                        string da62Rpn = newPos switch { 2 => "1 (>K:FUEL_SELECTOR_2_OFF)", 1 => "1 (>K:FUEL_SELECTOR_2_RIGHT_MAIN)", _ => "1 (>K:FUEL_SELECTOR_2_LEFT_MAIN)" };
+                        SendGenericRpn(da62Rpn);
                         fuel2Pos = newPos;
                         _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                     } else if (_isMsfs2024 && IsBaronG58()) {
@@ -3834,11 +3775,24 @@ namespace SimConnect3
                         ShowWhen = () => !landActive && !taxiActive },
                 new() { Name="G3K_LIGHT_UP",     TypeKey="G3K light click", BasePos=new Point(20, 80), ZoomWidth=97, ZoomHeight=97,
                         OnClick = () => {
+                            if (_isMsfs2024) {
+                                // TBM930 (2024, 2026-08-29) — preset MobiFlight/HubHop real (Dylan):
+                                // B:TBM930_LIGHTING_TAXI_LANDING_LIGHT_SWITCH_Set, 0=OFF/1=TAXI/2=LDG.
+                                if (!landActive && !taxiActive) SendGenericRpn("1 (>B:TBM930_LIGHTING_TAXI_LANDING_LIGHT_SWITCH_Set)");
+                                else if (taxiActive && !landActive) SendGenericRpn("2 (>B:TBM930_LIGHTING_TAXI_LANDING_LIGHT_SWITCH_Set)");
+                                return;
+                            }
                             if (!landActive && !taxiActive) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_LIGHT_TAXI, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                             else if (taxiActive && !landActive) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_LIGHT_LDG, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         } },
                 new() { Name="G3K_LIGHT_DN",     TypeKey="G3K light click", BasePos=new Point(30, 200), ZoomWidth=97, ZoomHeight=97,
                         OnClick = () => {
+                            if (_isMsfs2024) {
+                                // TBM930 (2024) — veure comentari a G3K_LIGHT_UP.
+                                if (landActive) SendGenericRpn("1 (>B:TBM930_LIGHTING_TAXI_LANDING_LIGHT_SWITCH_Set)");
+                                else if (taxiActive) SendGenericRpn("0 (>B:TBM930_LIGHTING_TAXI_LANDING_LIGHT_SWITCH_Set)");
+                                return;
+                            }
                             if (landActive) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_LIGHT_TAXI, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                             else if (taxiActive) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_LIGHT_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         } },
@@ -3851,7 +3805,8 @@ namespace SimConnect3
                 new() { Name="G3K_STARTER_CK_UP", TypeKey="G3K starter click", BasePos=new Point(1894, 38), ZoomWidth=119, ZoomHeight=112,
                         OnClick = () => { SetElecStarter(0); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Run(async () => { await Task.Delay(4000); this.BeginInvoke(new Action(() => { SetElecStarter(1); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); })); }); } },
                 new() { Name="G3K_STARTER_CK_DN", TypeKey="G3K starter click", BasePos=new Point(1893, 193), ZoomWidth=119, ZoomHeight=112,
-                        OnClick = () => { SetElecStarter(2); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.STARTER1_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Run(async () => { await Task.Delay(1500); SetElecStarter(1); }); } },
+                        OnClick = () => { SetElecStarter(2); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_STARTER1_HELD, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.STARTER1_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Run(async () => { await Task.Delay(1500); SetElecStarter(1); });
+                        } },
                 new() { Name="G3K_IGNITION_DN",    TypeKey="G3K ignition sw", BasePos=new Point(2000, 123), ZoomWidth=105, Img=swDownBlackImg,
                         ShowWhen = () => _elecIgnition >= 1.5 },
                 new() { Name="G3K_IGNITION_CTR",   TypeKey="G3K ignition sw", BasePos=new Point(2000, 122), ZoomWidth=105, Img=swCenterBlackImg,
@@ -3883,7 +3838,7 @@ namespace SimConnect3
                 new() { Name="G3K_APTRIM_CK_DN", TypeKey="G3K aptrim click", BasePos=new Point(2018, 193), ZoomWidth=119, ZoomHeight=112,
                         OnClick = () => SetAPTrimPos((int)Math.Min(2, Math.Round(_apTrim) + 1)) },
                 new() { Name="G3K_PULSELIGHT_ON", TypeKey="G3K pulselight", BasePos=new Point(200, 113), ZoomWidth=105, Img=LoadOverlayImage("rocker_black_sw_OFF.png"),
-                        ShowWhen = () => _lightingLogo1 < 0.5 },
+                        ShowWhen = () => _isMsfs2024 ? !_tbmPulseLight2024On : _lightingLogo1 < 0.5 },
                 new() { Name="G3K_PULSELIGHT_TOG", TypeKey="G3K pulselight click", BasePos=new Point(200, 113), ZoomWidth=105, ZoomHeight=105,
                         OnClick = () => TogglePulseLight() },
                 new() { Name="G3K_NAV_ON", TypeKey="G3K nav", BasePos=new Point(250, 113), ZoomWidth=105, Img=LoadOverlayImage("rocker_black_sw_OFF.png"),
@@ -3899,6 +3854,14 @@ namespace SimConnect3
                 new() { Name="G3K_FUELSEL_TOG", TypeKey="G3K fuelsel click", BasePos=new Point(1902, 101), ZoomWidth=71, ZoomHeight=113,
                         OnClick = () => {
                             if (simconnect == null) return;
+                            if (_isMsfs2024)
+                            {
+                                // TBM930 (2024) — Behaviors: Mouserect crida (>B:TBM930_FUEL_Selection_Toggle)
+                                // directament (sense valor, és un toggle real). Feedback real via
+                                // L:1:TBM_Fuel_Selection_Switch_Position (RequestTbmFuelSelection2024).
+                                SendGenericRpn("(>B:TBM930_FUEL_Selection_Toggle)");
+                                return;
+                            }
                             if (_fuelSelectionSet >= 1.5) { simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_FUELSEL_MAN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); _fuelSelectionSet = 1; }
                             else { simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_FUELSEL_AUTO, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); _fuelSelectionSet = 2; }
                             pbMain.Invalidate();
@@ -4340,7 +4303,6 @@ namespace SimConnect3
                 if (simReconnectPending) { TryReconnectSim(); }
             };
 
-
             ConnectToSimConnect();
 
             // SFSmonitor detection
@@ -4421,6 +4383,13 @@ namespace SimConnect3
         private void SetElecSourceSwitch(double value)
         {
             if (simconnect == null) return;
+            if (_isMsfs2024)
+            {
+                // TBM930 (2024) — B:ELECTRICAL_SOURCE_SWITCH_Set (0=OFF, 1=BATT, 2=GPU).
+                // Feedback real via L:1:TBM_Elec_Source_Switch_State (RequestTbmElecSource2024).
+                SendGenericRpn($"{(int)Math.Round(value)} (>B:ELECTRICAL_SOURCE_SWITCH_Set)");
+                return;
+            }
             simconnect.SetDataOnSimObject(DEFINITIONS.ElecSrcWrite,
                 SimConnect.SIMCONNECT_OBJECT_ID_USER,
                 SIMCONNECT_DATA_SET_FLAG.DEFAULT,
@@ -4431,10 +4400,19 @@ namespace SimConnect3
         {
             if (simconnect == null) return;
             double newVal = _elecCrashbar < 0.5 ? 1.0 : 0.0;
-            simconnect.SetDataOnSimObject(DEFINITIONS.ElecCrashbarWrite,
-                SimConnect.SIMCONNECT_OBJECT_ID_USER,
-                SIMCONNECT_DATA_SET_FLAG.DEFAULT,
-                new ElecCrashbarStruct { value = newVal });
+            if (_isMsfs2024)
+            {
+                // TBM930 (2024) — B:ELECTRICAL_CRASHBAR_Set (0=tapat/visible, 1=tret/amagat, confirmat
+                // per Pere). Feedback real via L:1:TBM_Elec_CrashBar_State (RequestTbmCrashbar2024).
+                SendGenericRpn($"{(newVal >= 0.5 ? 1 : 0)} (>B:ELECTRICAL_CRASHBAR_Set)");
+            }
+            else
+            {
+                simconnect.SetDataOnSimObject(DEFINITIONS.ElecCrashbarWrite,
+                    SimConnect.SIMCONNECT_OBJECT_ID_USER,
+                    SIMCONNECT_DATA_SET_FLAG.DEFAULT,
+                    new ElecCrashbarStruct { value = newVal });
+            }
             if (newVal < 0.5)
             {
                 SetElecSourceSwitch(0);
@@ -4490,6 +4468,12 @@ namespace SimConnect3
         {
             if (simconnect == null) return;
             // pos: 0=UP=AUTO(L:1), 1=CENTER=ON(L:2), 2=DN=OFF(L:3)
+            if (_isMsfs2024)
+            {
+                // TBM930 (2024) — B:ENGINE_IGNITION_1_Set: 0=AUTO, 1=ON, 2=OFF (coincideix amb pos directament).
+                SendGenericRpn($"{pos} (>B:ENGINE_IGNITION_1_Set)");
+                return;
+            }
             double lval = pos + 1;
             simconnect.SetDataOnSimObject(DEFINITIONS.ElecIgnitionWrite,
                 SimConnect.SIMCONNECT_OBJECT_ID_USER,
@@ -4500,6 +4484,15 @@ namespace SimConnect3
         private void SetAPTrimPos(int pos)
         {
             if (simconnect == null) return;
+            if (_isMsfs2024)
+            {
+                // TBM930 (2024) — Behaviors: B:TBM930_HANDLING_AP_Trim_Set (0=ON/UP, 1=AP OFF/CTR,
+                // 2=OFF/DN, mateixa codificació que L:XMLVAR_APTrim a 2020). L'avió gestiona sol
+                // l'AUTOPILOT_DISENGAGE_SET des del seu propi Init — no cal replicar la resta de la
+                // lògica de 2020. Feedback real via L:1:TBM_AP_Trim_Switch_Position (RequestTbmApTrim2024).
+                SendGenericRpn($"{pos} (>B:TBM930_HANDLING_AP_Trim_Set)");
+                return;
+            }
             _apTrim = pos;
             simconnect.SetDataOnSimObject(DEFINITIONS.APTrimWrite,
                 SimConnect.SIMCONNECT_OBJECT_ID_USER,
@@ -4579,6 +4572,17 @@ namespace SimConnect3
         private void TogglePulseLight()
         {
             if (simconnect == null) return;
+            if (_isMsfs2024)
+            {
+                // TBM930 (2024) — Behaviors: B:TBM930_LIGHTING_Pulse_Light_Switch_Set (0=OFF/1=ON).
+                // No es pot llegir per SimConnect (ni el B: ni la L: companya) — patró "sense lectura":
+                // ForceTbmPulseLightOff() sincronitza a OFF quan es detecta l'avió, i des d'aquí el
+                // toggle local es manté fiable perquè sempre partim d'un estat real conegut.
+                _tbmPulseLight2024On = !_tbmPulseLight2024On;
+                uint target = _tbmPulseLight2024On ? 1u : 0u;
+                SendGenericRpn($"{target} (>B:TBM930_LIGHTING_PULSE_LIGHT_SWITCH_Set)");
+                return;
+            }
             simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_PULSELIGHT_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
         }
 
@@ -4851,6 +4855,102 @@ namespace SimConnect3
             }
         }
 
+        // TBM930 (2024) — Pulse Light: B:TBM930_LIGHTING_Pulse_Light_Switch no es pot llegir per
+        // SimConnect (ni directament ni via L:TBM_PULSE_LIGHT_SWITCH_POSITION, provat i no funciona).
+        // Mateix patró que les bombes de combustible sense lectura: en detectar l'avió, forcem OFF
+        // real + animació local a joc, i a partir d'aquí el toggle local es manté sincronitzat sol.
+        // Canvi de panell TBM930/G1000 — extret del Click del _g3000Btn perquè es pugui invocar també
+        // des de la detecció automàtica d'avió sense passar per PerformClick() (el botó viu a la
+        // pantalla AUX, que sempre està amagada — CanSelect pot ser false i fer que PerformClick no faci res).
+        private void SetG3000Active(bool active)
+        {
+            if (calibrationMode) return;
+            _g3000Active = active;
+            _g3000Btn.Text = _g3000Active ? "G1000 cockpit" : "TBM 930 cockpit";
+            _panelVisible = false;
+            _gearBtn.BackColor = Color.FromArgb(40, 40, 40);
+            _gearBtn.Text = "⚙";
+            _overlayPanel!.Hide();
+            _thrQuadrantBtn.Visible = _g3000Active;
+            if (!_g3000Active) { _thrQuadrantVisible = false; }
+            if (_g3000Active)
+            {
+                _thrQuadrantVisible = true;
+                ApplyG3000Region();
+                SetAPTrimPos(0);
+                _thrHandleLeftRail = false;
+                _lastThrLeverPos = double.NaN;
+                _thrIgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                var thrH = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
+                if (thrH != null)
+                {
+                    thrH.BasePos = new Point(3734, _thrHandleDefaultY >= 0 ? _thrHandleDefaultY : thrH.BasePos.Y);
+                    int cx = thrH.BasePos.X + thrH.Bounds.Width / 2;
+                    int cy = thrH.BasePos.Y + thrH.Bounds.Height / 2;
+                }
+                if (simconnect != null)
+                {
+                    simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.TBM930_FUELSEL_AUTO, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); _fuelSelectionSet = 2;
+                    Task.Run(async () => { await Task.Delay(500); this.BeginInvoke(new Action(() => {
+                        SyncThrHandleFromMsfs();
+                    })); });
+                }
+                CheckTBM930Mod();
+            }
+            else
+            {
+                ApplyPfdRegion();
+                if (_tipLbl != null) { this.Controls.Remove(_tipLbl); _tipLbl.Dispose(); _tipLbl = null; }
+                Task.Run(async () =>
+                {
+                    await Task.Delay(1000);
+                    this.BeginInvoke(new Action(() =>
+                    {
+                        _tipLbl = new Label
+                        {
+                            Text = "If you no longer need G3000 mode, close the MSFS G3000 pop‑out windows to restore full panel functionality.  [10]",
+                            AutoSize = false,
+                            Size = new Size(1440, 120),
+                            Location = new Point((3840 - 1440) / 2, (2160 - 120) / 2 + 50),
+                            TextAlign = ContentAlignment.MiddleCenter,
+                            Font = new Font("Segoe UI", 26f),
+                            ForeColor = Color.White,
+                            BackColor = Color.DarkRed
+                        };
+                        this.Controls.Add(_tipLbl);
+                        _tipLbl.BringToFront();
+                    }));
+                    for (int i = 9; i >= 0; i--)
+                    {
+                        await Task.Delay(1000);
+                        this.BeginInvoke(new Action(() =>
+                        {
+                            if (_tipLbl == null) return;
+                            if (i <= 0)
+                            {
+                                this.Controls.Remove(_tipLbl);
+                                _tipLbl.Dispose();
+                                _tipLbl = null;
+                            }
+                            else
+                            {
+                                _tipLbl.Text = "If you no longer need G3000 mode, close the MSFS G3000 pop‑out windows to restore full G1000 panel functionality.  [" + i + "]";
+                            }
+                        }));
+                    }
+                });
+            }
+            pbMain.Invalidate();
+        }
+
+        private void ForceTbmPulseLightOff()
+        {
+            if (simconnect == null) return;
+            SendGenericRpn("0 (>B:TBM930_LIGHTING_PULSE_LIGHT_SWITCH_Set)");
+            _tbmPulseLight2024On = false;
+            pbMain.Invalidate();
+        }
+
         private void ForceBaronFuelPumpsOff()
         {
             if (simconnect == null) return;
@@ -4895,6 +4995,13 @@ namespace SimConnect3
         private void SetElecGeneratorSwitch(double value)
         {
             if (simconnect == null) return;
+            if (_isMsfs2024)
+            {
+                // TBM930 (2024) — B:ELECTRICAL_GENERATOR_SWITCH_Set (0=OFF, 1=MAIN, 2=STBY).
+                // Feedback real via L:1:TBM_Elec_Generator_Switch_State (RequestTbmElecGenerator2024).
+                SendGenericRpn($"{(int)Math.Round(value)} (>B:ELECTRICAL_GENERATOR_SWITCH_Set)");
+                return;
+            }
             simconnect.SetDataOnSimObject(DEFINITIONS.ElecGenWrite,
                 SimConnect.SIMCONNECT_OBJECT_ID_USER,
                 SIMCONNECT_DATA_SET_FLAG.DEFAULT,
@@ -6163,6 +6270,31 @@ namespace SimConnect3
                 simconnect.RegisterDataDefineStruct<BonanzaAntiIcePosStruct>(DEFINITIONS.BonanzaAntiIcePosRead);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestBonanzaAntiIcePos, DEFINITIONS.BonanzaAntiIcePosRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
+                // TBM930 (2024) Crashbar — feedback real (Inspector Init: L:1:TBM_Elec_CrashBar_State).
+                simconnect.AddToDataDefinition(DEFINITIONS.TbmCrashbar2024Read, "L:1:TBM_Elec_CrashBar_State", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<TbmCrashbar2024Struct>(DEFINITIONS.TbmCrashbar2024Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestTbmCrashbar2024, DEFINITIONS.TbmCrashbar2024Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // TBM930 (2024) Elec Source — feedback real (Inspector Init: L:1:TBM_Elec_Source_Switch_State).
+                simconnect.AddToDataDefinition(DEFINITIONS.TbmElecSource2024Read, "L:1:TBM_Elec_Source_Switch_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<TbmElecSource2024Struct>(DEFINITIONS.TbmElecSource2024Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestTbmElecSource2024, DEFINITIONS.TbmElecSource2024Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // TBM930 (2024) Elec Generator — feedback real (Inspector Init: L:1:TBM_Elec_Generator_Switch_State).
+                simconnect.AddToDataDefinition(DEFINITIONS.TbmElecGenerator2024Read, "L:1:TBM_Elec_Generator_Switch_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<TbmElecGenerator2024Struct>(DEFINITIONS.TbmElecGenerator2024Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestTbmElecGenerator2024, DEFINITIONS.TbmElecGenerator2024Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // TBM930 (2024) Fuel Selection — feedback real (Inspector Init: L:1:TBM_Fuel_Selection_Switch_Position).
+                simconnect.AddToDataDefinition(DEFINITIONS.TbmFuelSelection2024Read, "L:1:TBM_Fuel_Selection_Switch_Position", "Bool", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<TbmFuelSelection2024Struct>(DEFINITIONS.TbmFuelSelection2024Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestTbmFuelSelection2024, DEFINITIONS.TbmFuelSelection2024Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // TBM930 (2024) AP Trim — feedback real (Inspector Init: L:1:TBM_AP_Trim_Switch_Position).
+                simconnect.AddToDataDefinition(DEFINITIONS.TbmApTrim2024Read, "L:1:TBM_AP_Trim_Switch_Position", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<TbmApTrim2024Struct>(DEFINITIONS.TbmApTrim2024Read);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestTbmApTrim2024, DEFINITIONS.TbmApTrim2024Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SIM_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
                 // Missatger genèric RPN — Client Data Area compartida amb el WASM (SFS_Link). El WASM ja
                 // ha cridat CreateClientData; aquí només ens hi enganxem amb el mateix nom i definició.
                 simconnect.MapClientDataNameToID("SFS_LINK.GENERIC_RPN", CLIENT_DATA_ID.GenericRpnData);
@@ -6407,6 +6539,7 @@ namespace SimConnect3
                 bool wasBonanza = IsBonanzaG36();
                 bool wasDA62 = IsDA62();
                 bool wasC408 = IsC408();
+                bool wasTBM930 = IsTBM930();
                 _currentAircraftTitle = newTitle;
                 if (_aircraftTitleLbl != null && _aircraftTitleLbl.Text != newTitle)
                     _aircraftTitleLbl.Text = newTitle;
@@ -6420,6 +6553,15 @@ namespace SimConnect3
                     SyncDA62FuelValvesFromRpm();
                 else if (IsC408() && !wasC408)
                     ForceC408FuelTransferOff();
+                else if (IsTBM930() && !wasTBM930 && _isMsfs2024)
+                    ForceTbmPulseLightOff();
+                // Selecció automàtica panell TBM/G1000 segons l'avió detectat — el selector manual
+                // (_g3000Btn) es manté intacte, però ara truquem SetG3000Active() directament (no
+                // PerformClick — el botó viu a la pantalla AUX, sempre amagada, i CanSelect hi pot ser
+                // false, fent que PerformClick no faci res).
+                bool isTBM930Now = IsTBM930();
+                if (isTBM930Now != wasTBM930 && _g3000Active != isTBM930Now && !calibrationMode)
+                    SetG3000Active(isTBM930Now);
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestParkingBrake)
@@ -6616,7 +6758,7 @@ namespace SimConnect3
                     Debug.WriteLine($"[DA62 LINE CONNECTION ON:rh_main_bustoavionics_bus] {_da62AvionicsLineConn} -> {newVal}");
                     _da62AvionicsLineConn = newVal;
                 }
-                if (IsDA62())
+                if (IsDA62() && _isMsfs2024)
                 {
                     bool newAvionics1OffFromRead = newVal < 0.5;
                     if (newAvionics1OffFromRead != avionics1Off)
@@ -6790,6 +6932,56 @@ namespace SimConnect3
             if (data.dwRequestID == (uint)REQUESTS.RequestDA40BusConnOn3)
             {
                 _da40BusConnOn3 = ((DA40BusConnOn3Struct)data.dwData[0]).value;
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestTbmCrashbar2024)
+            {
+                double newVal = ((TbmCrashbar2024Struct)data.dwData[0]).value >= 0.5 ? 1.0 : 0.0;
+                if (newVal != _elecCrashbar)
+                {
+                    _elecCrashbar = newVal;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestTbmElecSource2024)
+            {
+                double newVal = Math.Round(((TbmElecSource2024Struct)data.dwData[0]).value);
+                if (newVal != _elecSourceSwitch)
+                {
+                    _elecSourceSwitch = newVal;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestTbmElecGenerator2024)
+            {
+                double newVal = Math.Round(((TbmElecGenerator2024Struct)data.dwData[0]).value);
+                if (newVal != _elecGeneratorSwitch)
+                {
+                    _elecGeneratorSwitch = newVal;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestTbmFuelSelection2024)
+            {
+                double newVal = ((TbmFuelSelection2024Struct)data.dwData[0]).value >= 0.5 ? 2.0 : 1.0;
+                if (newVal != _fuelSelectionSet)
+                {
+                    _fuelSelectionSet = newVal;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestTbmApTrim2024)
+            {
+                double newVal = Math.Round(((TbmApTrim2024Struct)data.dwData[0]).value);
+                if (newVal != _apTrim)
+                {
+                    _apTrim = newVal;
+                    pbMain.Invalidate();
+                }
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestDA40CircuitSwitch7)
@@ -7248,9 +7440,9 @@ namespace SimConnect3
                 // DA-62/C172/Caravan (MSFS2024): exclosos — "AVIONICS MASTER SWITCH:1/2" no reflecteix el
                 // seu sistema elèctric modular (LINE CONNECTION); cadascun té la seva pròpia lectura
                 // dedicada de dalt (mateix bug recurrent que ja ha passat amb els selectors de combustible
-                // — veure memòria). La Caravan i la C172 a MSFS2020 no tenen aquesta lectura dedicada (és
-                // un mecanisme 2024 que no existia abans), així que aquí sí que s'ha de fer servir.
-                if (!IsDA62() && !(IsC172() && _isMsfs2024) && !(IsCaravan() && _isMsfs2024))
+                // — veure memòria). La Caravan, la C172 i la DA-62 a MSFS2020 no tenen aquesta lectura
+                // dedicada (és un mecanisme 2024 que no existia abans), així que aquí sí que s'ha de fer servir.
+                if (!(IsDA62() && _isMsfs2024) && !(IsC172() && _isMsfs2024) && !(IsCaravan() && _isMsfs2024))
                 {
                     bool newAvionics1Off = s1.avionics_master_1 == 0;
                     if (newAvionics1Off != avionics1Off)
@@ -7388,6 +7580,22 @@ namespace SimConnect3
                     newFuel1Pos = fuel1Pos;
                     newFuel2Pos = fuel2Pos;
                 }
+                else if (IsDA62() && !_isMsfs2024)
+                {
+                    // DA-62 (2020, 2026-08-28) — preset MobiFlight/HubHop real (Imadunatic) confirma que
+                    // l'enum de A:FUEL TANK SELECTOR:1/2 per aquestes palanques NO és el 0/2/3 genèric
+                    // d'altres bimotors. Esquerra (selector:1): 0=OFF, 19=ON(Left Main), 20=CROSSFEED
+                    // (Right Main). Dreta (selector:2): 20=ON(Right Main, confirmat), 0=OFF i 19=CROSSFEED
+                    // (Left Main) inferits per simetria — pendent de confirmar del tot.
+                    if (s1.fuel_selector_1 == 0)       newFuel1Pos = 0; // OFF
+                    else if (s1.fuel_selector_1 == 19) newFuel1Pos = 1; // ON (Left Main)
+                    else if (s1.fuel_selector_1 == 20) newFuel1Pos = 2; // CROSSFEED (Right Main)
+                    else                                newFuel1Pos = fuel1Pos;
+                    if (s1.fuel_selector_2 == 19)       newFuel2Pos = 0; // CROSSFEED (Left Main)
+                    else if (s1.fuel_selector_2 == 20)  newFuel2Pos = 1; // ON (Right Main)
+                    else if (s1.fuel_selector_2 == 0)   newFuel2Pos = 2; // OFF
+                    else                                 newFuel2Pos = fuel2Pos;
+                }
                 else if (_isMsfs2024 && numEngines >= 2)
                 {
                     // Bimotors MSFS2024: estat actualitzat pels handlers dedicats RequestFuelSelLeft/Right
@@ -7459,9 +7667,14 @@ namespace SimConnect3
                 //Debug.WriteLine($"COM TX raw: c1={s1.com_transmit_1} c2={s1.com_transmit_2} -> b1={com1Tx} b2={com2Tx}");
 
                 displayBackupActive_bool = s1.displayBackupActive > 0.5;
-                if (_elecSourceSwitch != s1.elecSourceSwitch) { _elecSourceSwitch = s1.elecSourceSwitch; needsRepaint = true; }
-                if (_elecGeneratorSwitch != s1.elecGeneratorSwitch) { _elecGeneratorSwitch = s1.elecGeneratorSwitch; needsRepaint = true; }
-                if (_elecCrashbar != s1.elecCrashbarState) { _elecCrashbar = s1.elecCrashbarState; needsRepaint = true; }
+                // TBM930 (2024): igual que el crashbar, _elecSourceSwitch el porta SetElecSourceSwitch()
+                // fins que tinguem la L: real de lectura.
+                if (!(IsTBM930() && _isMsfs2024) && _elecSourceSwitch != s1.elecSourceSwitch) { _elecSourceSwitch = s1.elecSourceSwitch; needsRepaint = true; }
+                // TBM930 (2024): _elecGeneratorSwitch el porta RequestTbmElecGenerator2024 (L: real).
+                if (!(IsTBM930() && _isMsfs2024) && _elecGeneratorSwitch != s1.elecGeneratorSwitch) { _elecGeneratorSwitch = s1.elecGeneratorSwitch; needsRepaint = true; }
+                // TBM930 (2024): no llegim L:XMLVAR_Elec_CrashBar_State (pot no aplicar-se), _elecCrashbar
+                // el porta el toggle local de ToggleElecCrashbar().
+                if (!(IsTBM930() && _isMsfs2024) && _elecCrashbar != s1.elecCrashbarState) { _elecCrashbar = s1.elecCrashbarState; needsRepaint = true; }
                 if (_elecStarter != s1.elecStarter) { _elecStarter = s1.elecStarter; needsRepaint = true; }
                 if (_elecIgnition != s1.elecIgnition) { _elecIgnition = s1.elecIgnition; needsRepaint = true; }
                 if (_elecFuelPump != s1.elecFuelPump) { _elecFuelPump = s1.elecFuelPump; needsRepaint = true; }
