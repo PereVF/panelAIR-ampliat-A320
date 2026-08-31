@@ -1,6 +1,5 @@
 {
   "permissions": {
-    "defaultMode": "dontAsk",
     "allow": [
       "Bash(dotnet build *)",
       "Bash(mkdir \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\.vscode\")",
@@ -31,8 +30,11 @@
       "Write",
       "Read",
       "Glob",
-      "Grep"
+      "Grep",
+      "PowerShell(powershell -NoProfile -ExecutionPolicy Bypass -File \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\xlsx_check.ps1\")",
+      "PowerShell(powershell -NoProfile -ExecutionPolicy Bypass -File \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\xlsx_tool.ps1\")"
     ],
+    "defaultMode": "dontAsk",
     "additionalDirectories": [
       "c:\\Users\\usuario\\Desktop\\panelAIR1000-j"
     ]

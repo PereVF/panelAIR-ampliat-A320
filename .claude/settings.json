@@ -1,11 +1,14 @@
 {
   "permissions": {
-    "defaultMode": "dontAsk",
     "allow": [
       "Read",
       "Glob",
       "Grep",
-      "Bash(tasklist*)"
-    ]
+      "Bash(tasklist*)",
+      "PowerShell(powershell -NoProfile -ExecutionPolicy Bypass -File \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\read_f48.ps1\")",
+      "PowerShell(powershell -NoProfile -ExecutionPolicy Bypass -File \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\update_note.ps1\")",
+      "PowerShell(powershell -NoProfile -ExecutionPolicy Bypass -File \"c:\\\\Users\\\\usuario\\\\Desktop\\\\panelAIR1000-j\\\\xlsx_tool.ps1\")"
+    ],
+    "defaultMode": "dontAsk"
   }
 }

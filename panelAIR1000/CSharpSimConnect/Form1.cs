@@ -223,7 +223,10 @@ namespace SimConnect3
             if (IsCirrusSR22())
                 return slot switch { 1 => "OFF", 2 => "LEFT", _ => "RIGHT" };
             if (IsDA40())
-                return slot switch { 1 => "OFF", 2 => "LEFT", _ => "RIGHT" };
+                // 2024 confirmat per Pere (2026-08-30): etiquetes reals NORMAL/EMERGENCY, no LEFT/RIGHT com a 2020.
+                return _isMsfs2024
+                    ? slot switch { 1 => "OFF", 2 => "NORMAL", _ => "EMERGENCY" }
+                    : slot switch { 1 => "OFF", 2 => "LEFT", _ => "RIGHT" };
             if (IsC408())
                 return slot switch { 1 => "L TANK", 2 => "TRANSF OFF", _ => "R TANK" };
             return "";
@@ -1495,15 +1498,12 @@ namespace SimConnect3
         // la C172). "3 0 (>K:2:LIGHT_POTENTIOMETER_SET)" l'apaga 1s però torna sol — coincideix amb el
         // patró de pom físic ja vist (valor reafirmat des d'una posició real, no controlable des de
         // fora). Provem repetir K:PANEL_LIGHTS_SET moltes vegades per veure si arriba a plena brillantor.
+        // DA-62 DE-ICE AIRFRAME (2026-08-31, MSFS2024 NOMÉS) — interruptor físic de Pere és de 2 posicions
+        // (OFF/HIGH), no calen els 3 estats. Mateixa forma d'events B: parametritzats sense valor que ja
+        // ha funcionat 2 cops (selector DA-40, blockers DA-62): B:DEICE_AIRFRAME_OFF / _HIGH.
         private readonly string[] _testAltGen1ResetCandidates = new[] {
-            "1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET)",
-            "1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET) 1 (>K:PANEL_LIGHTS_SET)",
-            "100 (>K:PANEL_LIGHTS_SET)",
-            "0 (>K:PANEL_LIGHTS_SET)",
-            "1 (>K:PANEL_LIGHTS_SET) 100 (>L:LIGHTING_PANEL_1)",
-            "1 (>K:2:PANEL_LIGHTS_SET)",
-            "3 1 (>K:2:PANEL_LIGHTS_SET)",
-            "1 3 (>K:2:PANEL_LIGHTS_SET)",
+            "(>B:DEICE_AIRFRAME_OFF)",
+            "(>B:DEICE_AIRFRAME_HIGH)",
         };
 
         private System.Windows.Forms.Button _g3000Btn = null!;
@@ -2478,9 +2478,9 @@ namespace SimConnect3
             _testJunctionSendBtn.Location = new Point(3210, 230);
             _testJunctionSendBtn.Click += (s, e) => {
                 if (calibrationMode) return;
-                // DA-62 PANEL LIGHT — revòlver de candidats, ronda 2 (un per clic).
+                // DA-62 DE-ICE AIRFRAME 2024 — revòlver de candidats, un per clic.
                 string rpn = _testAltGen1ResetCandidates[_testAltGen1ResetIdx % _testAltGen1ResetCandidates.Length];
-                Debug.WriteLine($">>> SEND: DA62 PANELLIGHT2 TEST #{_testAltGen1ResetIdx} de {_testAltGen1ResetCandidates.Length}: {rpn}");
+                Debug.WriteLine($">>> SEND: DA62 DEICE AIRFRAME 2024 TEST #{_testAltGen1ResetIdx} de {_testAltGen1ResetCandidates.Length}: {rpn}");
                 SendGenericRpn(rpn);
                 _testAltGen1ResetIdx++;
             };
@@ -2887,10 +2887,27 @@ namespace SimConnect3
                     } else if (_isMsfs2024 && IsDA62()) {
                         // DA-62: confirmat amb "Execute" a Behaviors — K:2:FUELSYSTEM_VALVE_SET +
                         // K:2:FUELSYSTEM_TRIGGER_SET (índex 1), NO junctions ni B:FUEL_VALVE_LEFT directe.
-                        var da62Evt = newPos switch { 0 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_CROSS };
-                        simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        fuel1Pos = newPos;
-                        _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                        // Bloquejador del guard (2026-08-31, NOMÉS 2024): a OFF cal desbloquejar ABANS de
+                        // moure la vàlvula (el guard físic tancat impedeix el moviment) — per això aquí
+                        // esperem 250ms després de desbloquejar abans d'enviar da62Evt. Sortint d'OFF no cal
+                        // esperar, es bloqueja després de moure. Per revertir: veure historial git d'aquest bloc.
+                        if (newPos == 0) {
+                            SendGenericRpn("(>B:FUEL_BLOCKER_LEFT_ON)");
+                            Task.Run(async () => {
+                                await Task.Delay(250);
+                                this.BeginInvoke(new Action(() => {
+                                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                                    fuel1Pos = 0;
+                                    _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                                }));
+                            });
+                        } else {
+                            var da62Evt = newPos == 1 ? SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_ON : SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_CROSS;
+                            simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            fuel1Pos = newPos;
+                            _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                            SendGenericRpn("(>B:FUEL_BLOCKER_LEFT_OFF)");
+                        }
                     } else if (IsDA62() && !_isMsfs2024) {
                         // DA-62 (2020, 2026-08-28) — preset MobiFlight/HubHop real (Imadunatic): K: events
                         // natius sense paràmetres, sense WASM. FUEL_SELECTOR_OFF/_LEFT_MAIN(=ON)/_RIGHT_MAIN
@@ -2938,10 +2955,24 @@ namespace SimConnect3
                         var evt = newPos == 1 ? SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON : SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF;
                         simconnect?.TransmitClientEvent(0, evt, 3, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     } else if (_isMsfs2024 && IsDA62()) {
-                        var da62Evt = newPos switch { 0 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_CROSS };
-                        simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        fuel1Pos = newPos;
-                        _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                        // Bloquejador del guard (2026-08-31) — veure comentari a FUEL1-LEFT.
+                        if (newPos == 0) {
+                            SendGenericRpn("(>B:FUEL_BLOCKER_LEFT_ON)");
+                            Task.Run(async () => {
+                                await Task.Delay(250);
+                                this.BeginInvoke(new Action(() => {
+                                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                                    fuel1Pos = 0;
+                                    _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                                }));
+                            });
+                        } else {
+                            var da62Evt = newPos == 1 ? SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_ON : SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_LEFT_CROSS;
+                            simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            fuel1Pos = newPos;
+                            _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                            SendGenericRpn("(>B:FUEL_BLOCKER_LEFT_OFF)");
+                        }
                     } else if (IsDA62() && !_isMsfs2024) {
                         // DA-62 (2020) — veure comentari a FUEL1-LEFT.
                         string da62Rpn = newPos switch { 0 => "1 (>K:FUEL_SELECTOR_OFF)", 1 => "1 (>K:FUEL_SELECTOR_LEFT_MAIN)", _ => "1 (>K:FUEL_SELECTOR_RIGHT_MAIN)" };
@@ -2992,10 +3023,25 @@ namespace SimConnect3
                     int newPos = fuel2Pos - 1;
                     if (_isMsfs2024 && IsDA62()) {
                         // DA-62: mateix mecanisme que l'esquerra, índex 2 (K:2:FUELSYSTEM_TRIGGER_SET/VALVE_SET). Confirmat.
-                        var da62Evt = newPos switch { 2 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_CROSS };
-                        simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        fuel2Pos = newPos;
-                        _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                        // Bloquejador del guard (2026-08-31) — veure comentari a FUEL1-LEFT. Aquí OFF és
+                        // newPos==2 (encoding invertit de la palanca dreta, igual que da62Evt de sobre).
+                        if (newPos == 2) {
+                            SendGenericRpn("(>B:FUEL_BLOCKER_RIGHT_ON)");
+                            Task.Run(async () => {
+                                await Task.Delay(250);
+                                this.BeginInvoke(new Action(() => {
+                                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                                    fuel2Pos = 2;
+                                    _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                                }));
+                            });
+                        } else {
+                            var da62Evt = newPos == 1 ? SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_ON : SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_CROSS;
+                            simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            fuel2Pos = newPos;
+                            _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                            SendGenericRpn("(>B:FUEL_BLOCKER_RIGHT_OFF)");
+                        }
                     } else if (IsDA62() && !_isMsfs2024) {
                         // DA-62 (2020, 2026-08-28) — preset MobiFlight/HubHop real (Imadunatic), palanca
                         // dreta (A:FUEL TANK SELECTOR:2): 0=OFF, 20=ON(Right Main, confirmat), 19=CROSSFEED
@@ -3045,10 +3091,24 @@ namespace SimConnect3
                     if (fuel2Pos >= 2) return;
                     int newPos = fuel2Pos + 1;
                     if (_isMsfs2024 && IsDA62()) {
-                        var da62Evt = newPos switch { 2 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, 1 => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_ON, _ => SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_CROSS };
-                        simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        fuel2Pos = newPos;
-                        _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                        // Bloquejador del guard (2026-08-31) — veure comentari a FUEL1-LEFT / FUEL2-LEFT.
+                        if (newPos == 2) {
+                            SendGenericRpn("(>B:FUEL_BLOCKER_RIGHT_ON)");
+                            Task.Run(async () => {
+                                await Task.Delay(250);
+                                this.BeginInvoke(new Action(() => {
+                                    simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                                    fuel2Pos = 2;
+                                    _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                                }));
+                            });
+                        } else {
+                            var da62Evt = newPos == 1 ? SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_ON : SIMCONNECT_EVENTS.SFS_DA62_FUELVALVE_RIGHT_CROSS;
+                            simconnect?.TransmitClientEvent(0, da62Evt, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            fuel2Pos = newPos;
+                            _fuelSel2IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                            SendGenericRpn("(>B:FUEL_BLOCKER_RIGHT_OFF)");
+                        }
                     } else if (IsDA62() && !_isMsfs2024) {
                         // DA-62 (2020) — veure comentari a FUEL2-LEFT.
                         string da62Rpn = newPos switch { 2 => "1 (>K:FUEL_SELECTOR_2_OFF)", 1 => "1 (>K:FUEL_SELECTOR_2_RIGHT_MAIN)", _ => "1 (>K:FUEL_SELECTOR_2_LEFT_MAIN)" };
@@ -3293,6 +3353,12 @@ namespace SimConnect3
                         pbMain.Invalidate();
                         return;
                     }
+                    // DA-62 (2024): ABANDONAT (2026-08-31) — cap dels mecanismes provats
+                    // (B:DEICE_AIRFRAME_OFF/_HIGH en les dues direccions, repeticions, ni el toggle pla
+                    // K:TOGGLE_STRUCTURAL_DEICE) ha donat un comportament fiable 1 clic = 1 moviment. Es
+                    // marca "X / not supported" a l'Excel de compatibilitat. No reprendre sense que Pere ho
+                    // demani explícitament. Cau al fallback genèric de sota (mateix event pla que abans de
+                    // qualsevol intervenció d'aquesta sessió).
                     // Resta d'avions: fallback genèric.
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_DEICE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                 } });
@@ -3541,9 +3607,9 @@ namespace SimConnect3
                 // combustible via F12, veure calibration_export.txt). Mateix efecte que SW_DA62_COVER_RELIEF.
                 new() { Name="SW_DA40_COVER_RELIEF", TypeKey="DA40_COVER_RELIEF", BasePos=new Point(1424, 1450), ZoomWidth=150, ZoomHeight=80, Img=null,
                         // Calibrada (1283,1767,713,334) just a sobre del selector de combustible únic
-                        // (SE_SELECTOR) — igual que SW_SE_SELECTOR_COVER, treta per la DA-40 a 2020 ara que
-                        // el selector ja és funcional. 2024 conserva la tapa.
-                        ShowWhen = () => (IsDA40() && !_isMsfs2024) ? false : IsDA40() },
+                        // (SE_SELECTOR) — treta per la DA-40 a 2020 (2026-08-28) i ara també a 2024
+                        // (2026-08-30, selector resolt via B:FUEL_Selector_1_Left/_Right/_Off).
+                        ShowWhen = () => false },
                 // 2 tapes més amb el mateix efecte de relleu — posició/mida per defecte provisionals,
                 // Pere les col·locarà amb F12. ShowWhen = DA-40 per defecte (context actual); demanar-li
                 // si en vol una altra en veure-les.
@@ -4267,8 +4333,10 @@ namespace SimConnect3
                 hasPanel = searcher.Get().Count > 0;
             }
             bool hasMonitor = false;
+            // Model original (RTK1B1A) + nou model exclusiu Xiaomi (XMI3446, 2026-08-31) — tots dos
+            // vàlids, cap client amb el monitor antic queda desconnectat.
             using (var searcher = new System.Management.ManagementObjectSearcher(
-                @"SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%RTK1B1A%' AND ConfigManagerErrorCode = 0"))
+                @"SELECT * FROM Win32_PnPEntity WHERE (DeviceID LIKE '%RTK1B1A%' OR DeviceID LIKE '%XMI3446%') AND ConfigManagerErrorCode = 0"))
             {
                 hasMonitor = searcher.Get().Count > 0;
             }
@@ -7685,6 +7753,20 @@ namespace SimConnect3
                     newFuel1Pos = fuel1Pos;
                     newFuel2Pos = fuel2Pos;
                 }
+                else if (IsDA40() && _isMsfs2024)
+                {
+                    // DA-40 (2024 NOMÉS, 2026-08-30) — feedback real: FUELSYSTEM VALVE SWITCH:1 (=1 quan
+                    // NORMAL/Left actiu) i SWITCH:2 (=1 quan EMERGENCY/Right actiu), ja llegits per
+                    // RequestDA40FuelTankSelector/2 (registrats a Simconnect_OnRecvOpen). Ambdós a 0 = OFF.
+                    int newPosFromRead = _daFuelTankSelector2 >= 0.5 ? 2 : (_daFuelTankSelector >= 0.5 ? 1 : 0);
+                    if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
+                    {
+                        seSelectorPos = newPosFromRead;
+                        needsRepaint = true;
+                    }
+                    newFuel1Pos = fuel1Pos;
+                    newFuel2Pos = fuel2Pos;
+                }
                 else if (IsCaravan() && _isMsfs2024)
                 {
                     // Caravan (MSFS2024 NOMÉS): monomotor (numEngines==1), per això cauria al bloc "SINGLE
@@ -10630,10 +10712,18 @@ namespace SimConnect3
                 _seSelectorIgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                 return;
             }
-            // DA-40 (2024, encara pendent): cap combinació de junction (0-8) ni cap mecanisme (event legacy,
-            // vàlvula directa, Input Events API) mou res — no responia NI TAN SOLS movent el selector a mà
-            // al VC (el motor no s'atura mai a OFF). Abandonat només per DA-40 2024; la Cirrus SR22T té la
-            // seva pròpia branca RESOLTA més avall (K:FUEL_SELECTOR_SET), i la DA-40 2020 té la de dalt.
+            // DA-40 (2024 NOMÉS, 2026-08-30) — RESOLT: el Mouserect real (clic al VC) NO fa servir
+            // K:FUEL_SELECTOR_SET (aquest és nomes per l'Input Events API moderna, sense efecte des de
+            // fora, confirmat via revòlver) — crida 3 events B: sense valor, confirmats via revòlver +
+            // Debug Output (FUELSYSTEM VALVE SWITCH:1/2 canvien de veritat). Etiquetes reals per Pere:
+            // OFF / NORMAL(Left) / EMERGENCY(Right) — diferents de les de 2020 (OFF/LEFT/RIGHT).
+            if (IsDA40() && _isMsfs2024)
+            {
+                string da40Rpn = pos switch { 0 => "(>B:FUEL_Selector_1_Off)", 1 => "(>B:FUEL_Selector_1_Left)", _ => "(>B:FUEL_Selector_1_Right)" };
+                SendGenericRpn(da40Rpn);
+                _seSelectorIgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                return;
+            }
             //
             // C400 Corvalis (TTx): CONFIRMAT que junction=1 sí funciona (moviment real verificat al VC).
             // Options REALS del junction (confirmades una a una, NO coincideixen amb els valors dels
