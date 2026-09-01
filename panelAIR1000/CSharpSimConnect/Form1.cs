@@ -223,10 +223,8 @@ namespace SimConnect3
             if (IsCirrusSR22())
                 return slot switch { 1 => "OFF", 2 => "LEFT", _ => "RIGHT" };
             if (IsDA40())
-                // 2024 confirmat per Pere (2026-08-30): etiquetes reals NORMAL/EMERGENCY, no LEFT/RIGHT com a 2020.
-                return _isMsfs2024
-                    ? slot switch { 1 => "OFF", 2 => "NORMAL", _ => "EMERGENCY" }
-                    : slot switch { 1 => "OFF", 2 => "LEFT", _ => "RIGHT" };
+                // Etiquetes reals NORMAL/EMERGENCY (2026-09-01: també aplicat a 2020, abans deia LEFT/RIGHT).
+                return slot switch { 1 => "OFF", 2 => "NORMAL", _ => "EMERGENCY" };
             if (IsC408())
                 return slot switch { 1 => "L TANK", 2 => "TRANSF OFF", _ => "R TANK" };
             return "";
@@ -10331,6 +10329,29 @@ namespace SimConnect3
             // F12 és gestionat per la lambda a InitializeComponent; ProcessCmdKey gestiona fletxes i Escape
         }
 
+        // Ubicació estable, independent de si s'executa des de bin\Debug o bin\Release (2026-09-01):
+        // abans es guardava al costat de l'exe (Application.StartupPath), fent que Debug i Release
+        // tinguessin cadascun el seu propi fitxer desincronitzat. Migració automàtica un sol cop des
+        // de la ubicació antiga si la nova encara no existeix.
+        private static string GetCalibrationFilePath()
+        {
+            string dir = System.IO.Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "panelAIR1000");
+            System.IO.Directory.CreateDirectory(dir);
+            string path = System.IO.Path.Combine(dir, "calibration_export.txt");
+
+            if (!System.IO.File.Exists(path))
+            {
+                string legacyPath = System.IO.Path.Combine(Application.StartupPath, "calibration_export.txt");
+                if (System.IO.File.Exists(legacyPath))
+                {
+                    try { System.IO.File.Copy(legacyPath, path); } catch { }
+                }
+            }
+            return path;
+        }
+
         private void ExportCalibrationPositions(bool silent = false)
         {
             var sb = new System.Text.StringBuilder();
@@ -10387,7 +10408,7 @@ namespace SimConnect3
             sb.AppendLine($"G3KBTN:g3k:{_g3000Btn.Location.X}:{_g3000Btn.Location.Y}");
             sb.AppendLine($"THRQBTN:tq:{_thrQuadrantBtn.Location.X}:{_thrQuadrantBtn.Location.Y}:0:0");
             if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
-            string path = System.IO.Path.Combine(Application.StartupPath, "calibration_export.txt");
+            string path = GetCalibrationFilePath();
             System.IO.File.WriteAllText(path, sb.ToString());
             if (!silent)
                 MessageBox.Show($"Exportat a:\n{path}", "Calibratge", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -10395,7 +10416,7 @@ namespace SimConnect3
 
         private void LoadCalibrationPositions()
         {
-            string path = System.IO.Path.Combine(Application.StartupPath, "calibration_export.txt");
+            string path = GetCalibrationFilePath();
             if (!System.IO.File.Exists(path)) return;
             foreach (var line in System.IO.File.ReadAllLines(path))
             {

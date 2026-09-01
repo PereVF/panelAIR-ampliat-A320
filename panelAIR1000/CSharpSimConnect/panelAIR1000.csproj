@@ -131,10 +131,18 @@
     <None Update="SimConnect.dll">
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
     </None>
-    <None Include="..\calibration_export.txt" Link="calibration_export.txt">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
   </ItemGroup>
 
+  <!-- Copia el calibratge F12 més recent (%LOCALAPPDATA%\panelAIR1000\calibration_export.txt) cap a
+       la carpeta distribuïble sempre que es compili en Release, sense dependre de cap fitxer versionat
+       manualment (2026-09-01). -->
+  <Target Name="CopyLiveCalibrationOnRelease" AfterTargets="Build" Condition="'$(Configuration)'=='Release'">
+    <PropertyGroup>
+      <LiveCalibrationFile>$(LocalAppData)\panelAIR1000\calibration_export.txt</LiveCalibrationFile>
+    </PropertyGroup>
+    <Copy SourceFiles="$(LiveCalibrationFile)"
+          DestinationFolder="$(OutDir)"
+          Condition="Exists('$(LiveCalibrationFile)')" />
+  </Target>
 
 </Project>
