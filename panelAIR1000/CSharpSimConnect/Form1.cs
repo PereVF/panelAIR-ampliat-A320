@@ -1505,14 +1505,16 @@ namespace SimConnect3
         // la C172). "3 0 (>K:2:LIGHT_POTENTIOMETER_SET)" l'apaga 1s però torna sol — coincideix amb el
         // patró de pom físic ja vist (valor reafirmat des d'una posició real, no controlable des de
         // fora). Provem repetir K:PANEL_LIGHTS_SET moltes vegades per veure si arriba a plena brillantor.
-        // CARAVAN 208B FUEL PUMP 1 (2026-09-01, MSFS2020 NOMÉS) — ronda 2. Els B: sense paràmetre no
-        // fan res (confirmat per Pere). El "Set" complet mostra que qui mou de veritat l'interruptor és
-        // K:ELECT_FUEL_PUMP1_SET amb valor directe (0=OFF,1=ON,2=AUTO/NORM) — el mateix event ja
-        // confirmat funcional per la Baron/Bonanza 2020 en aquest mateix fitxer.
+        // CARAVAN 208B FUEL PUMP 1 (2026-09-01, MSFS2020 NOMÉS) — confirmat K:ELECT_FUEL_PUMP1_SET amb
+        // valor directe (0=OFF,1=ON,2=AUTO/NORM), mateix event que Baron/Bonanza 2020.
+        // TBM930 INERT SEP (2026-09-02, MSFS2020 NOMÉS) — ni K:ANTI_ICE_TOGGLE_ENG1 sol, ni combinat amb
+        // L:MF_TBM930_DEICE_Engine_1_Set, ni el L: sol van bé. Provem el B: directe (sense passar pel
+        // relay del pedaç XML) i el toggle natiu via el missatger genèric per descartar diferències.
         private readonly string[] _testAltGen1ResetCandidates = new[] {
-            "0 (>K:ELECT_FUEL_PUMP1_SET)",
-            "1 (>K:ELECT_FUEL_PUMP1_SET)",
-            "2 (>K:ELECT_FUEL_PUMP1_SET)",
+            "(>B:DEICE_Engine_1_Set)",
+            "1 (>B:DEICE_Engine_1_Set)",
+            "0 (>B:DEICE_Engine_1_Set)",
+            "(>K:ANTI_ICE_TOGGLE_ENG1)",
         };
 
         private System.Windows.Forms.Button _g3000Btn = null!;
@@ -2487,9 +2489,9 @@ namespace SimConnect3
             _testJunctionSendBtn.Location = new Point(3210, 230);
             _testJunctionSendBtn.Click += (s, e) => {
                 if (calibrationMode) return;
-                // CARAVAN 208B FUEL PUMP 1 2020 R2 — revòlver de candidats, un per clic.
+                // TBM930 INERT SEP 2020 — revòlver de candidats, un per clic.
                 string rpn = _testAltGen1ResetCandidates[_testAltGen1ResetIdx % _testAltGen1ResetCandidates.Length];
-                Debug.WriteLine($">>> SEND: CARAVAN FUELPUMP1 2020 R2 TEST #{_testAltGen1ResetIdx} de {_testAltGen1ResetCandidates.Length}: {rpn}");
+                Debug.WriteLine($">>> SEND: TBM930 INERTSEP 2020 TEST #{_testAltGen1ResetIdx} de {_testAltGen1ResetCandidates.Length}: {rpn}");
                 SendGenericRpn(rpn);
                 _testAltGen1ResetIdx++;
             };
@@ -4749,6 +4751,9 @@ namespace SimConnect3
                 SendGenericRpn("1 (>B:TBM930_DEICE_INERT_SEP_SWITCH_Set)");
                 return;
             }
+            // TBM930 (2020) — mecanisme original, exacte a la comissió "acabada TBM 930 per a MSFS2020"
+            // (2026-09-02: restaurat després que les proves d'avui amb l'XML i amb B:DEICE_Engine_1_Toggle
+            // ho empitjoressin — Pere confirma que això és el que anava perfecte).
             if (!antiIceEng1Active)
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.INERT_SEP_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
         }
@@ -4762,6 +4767,7 @@ namespace SimConnect3
                 SendGenericRpn("0 (>B:TBM930_DEICE_INERT_SEP_SWITCH_Set)");
                 return;
             }
+            // TBM930 (2020) — veure comentari a SendInertSepOn: mecanisme original restaurat.
             if (antiIceEng1Active)
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.INERT_SEP_TOGGLE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
         }
@@ -7124,81 +7130,114 @@ namespace SimConnect3
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestTbmCrashbar2024)
             {
-                double newVal = ((TbmCrashbar2024Struct)data.dwData[0]).value >= 0.5 ? 1.0 : 0.0;
-                if (newVal != _elecCrashbar)
+                // Guarda afegida (2026-09-02): faltava aquí, feia que aquest handler sobreescrivís
+                // _elecCrashbar sempre (cada frame, independent d'avió/versió), competint amb la lectura
+                // genèrica de la línia ~7934 i provocant rebots quan es volava amb la TBM 2020.
+                if (IsTBM930() && _isMsfs2024)
                 {
-                    _elecCrashbar = newVal;
-                    pbMain.Invalidate();
+                    double newVal = ((TbmCrashbar2024Struct)data.dwData[0]).value >= 0.5 ? 1.0 : 0.0;
+                    if (newVal != _elecCrashbar)
+                    {
+                        _elecCrashbar = newVal;
+                        pbMain.Invalidate();
+                    }
                 }
                 return;
             }
+            // Guardes IsTBM930() && _isMsfs2024 afegides a tots els handlers TBM 2024 d'aquí avall
+            // (2026-09-02) — el mateix oblit que al crashbar: la petició es registra sense condició
+            // d'avió/versió a Simconnect_OnRecvOpen, així que sense guarda aquí sobreescrivien la
+            // variable compartida sempre, competint amb la lectura genèrica de 2020 (rebots a Source,
+            // Generator, De-ice Cycle 1/2 i Inert Sep confirmats per Pere; Fuel Selection i AP Trim no
+            // tenen font competidora coneguda per 2020, però es corregeixen igual per consistència).
             if (data.dwRequestID == (uint)REQUESTS.RequestTbmElecSource2024)
             {
-                double newVal = Math.Round(((TbmElecSource2024Struct)data.dwData[0]).value);
-                if (newVal != _elecSourceSwitch)
+                if (IsTBM930() && _isMsfs2024)
                 {
-                    _elecSourceSwitch = newVal;
-                    pbMain.Invalidate();
+                    double newVal = Math.Round(((TbmElecSource2024Struct)data.dwData[0]).value);
+                    if (newVal != _elecSourceSwitch)
+                    {
+                        _elecSourceSwitch = newVal;
+                        pbMain.Invalidate();
+                    }
                 }
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestTbmElecGenerator2024)
             {
-                double newVal = Math.Round(((TbmElecGenerator2024Struct)data.dwData[0]).value);
-                if (newVal != _elecGeneratorSwitch)
+                if (IsTBM930() && _isMsfs2024)
                 {
-                    _elecGeneratorSwitch = newVal;
-                    pbMain.Invalidate();
+                    double newVal = Math.Round(((TbmElecGenerator2024Struct)data.dwData[0]).value);
+                    if (newVal != _elecGeneratorSwitch)
+                    {
+                        _elecGeneratorSwitch = newVal;
+                        pbMain.Invalidate();
+                    }
                 }
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestTbmFuelSelection2024)
             {
-                double newVal = ((TbmFuelSelection2024Struct)data.dwData[0]).value >= 0.5 ? 2.0 : 1.0;
-                if (newVal != _fuelSelectionSet)
+                if (IsTBM930() && _isMsfs2024)
                 {
-                    _fuelSelectionSet = newVal;
-                    pbMain.Invalidate();
+                    double newVal = ((TbmFuelSelection2024Struct)data.dwData[0]).value >= 0.5 ? 2.0 : 1.0;
+                    if (newVal != _fuelSelectionSet)
+                    {
+                        _fuelSelectionSet = newVal;
+                        pbMain.Invalidate();
+                    }
                 }
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestTbmApTrim2024)
             {
-                double newVal = Math.Round(((TbmApTrim2024Struct)data.dwData[0]).value);
-                if (newVal != _apTrim)
+                if (IsTBM930() && _isMsfs2024)
                 {
-                    _apTrim = newVal;
-                    pbMain.Invalidate();
+                    double newVal = Math.Round(((TbmApTrim2024Struct)data.dwData[0]).value);
+                    if (newVal != _apTrim)
+                    {
+                        _apTrim = newVal;
+                        pbMain.Invalidate();
+                    }
                 }
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestTbmDeiceCycle1_2024)
             {
-                double newVal = ((TbmDeiceCycle1_2024Struct)data.dwData[0]).value >= 0.5 ? 1.0 : 0.0;
-                if (newVal != _isDeiceAirframe)
+                if (IsTBM930() && _isMsfs2024)
                 {
-                    _isDeiceAirframe = newVal;
-                    pbMain.Invalidate();
+                    double newVal = ((TbmDeiceCycle1_2024Struct)data.dwData[0]).value >= 0.5 ? 1.0 : 0.0;
+                    if (newVal != _isDeiceAirframe)
+                    {
+                        _isDeiceAirframe = newVal;
+                        pbMain.Invalidate();
+                    }
                 }
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestTbmDeiceCycle2_2024)
             {
-                double newVal = ((TbmDeiceCycle2_2024Struct)data.dwData[0]).value >= 0.5 ? 1.0 : 0.0;
-                if (newVal != _isDeiceAirframe2)
+                if (IsTBM930() && _isMsfs2024)
                 {
-                    _isDeiceAirframe2 = newVal;
-                    pbMain.Invalidate();
+                    double newVal = ((TbmDeiceCycle2_2024Struct)data.dwData[0]).value >= 0.5 ? 1.0 : 0.0;
+                    if (newVal != _isDeiceAirframe2)
+                    {
+                        _isDeiceAirframe2 = newVal;
+                        pbMain.Invalidate();
+                    }
                 }
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestTbmInertSep2024)
             {
-                bool newVal = ((TbmInertSep2024Struct)data.dwData[0]).value >= 0.5;
-                if (newVal != antiIceEng1Active)
+                if (IsTBM930() && _isMsfs2024)
                 {
-                    antiIceEng1Active = newVal;
-                    pbMain.Invalidate();
+                    bool newVal = ((TbmInertSep2024Struct)data.dwData[0]).value >= 0.5;
+                    if (newVal != antiIceEng1Active)
+                    {
+                        antiIceEng1Active = newVal;
+                        pbMain.Invalidate();
+                    }
                 }
                 return;
             }
