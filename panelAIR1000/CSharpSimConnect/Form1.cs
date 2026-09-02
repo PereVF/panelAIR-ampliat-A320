@@ -209,7 +209,10 @@ namespace SimConnect3
         // K:2:FUELSYSTEM_JUNCTION_SET amb junction=1 (opcions: 1=Left, 2=Both, 3=Right).
         bool IsC172() =>
             _currentAircraftTitle.IndexOf("C172", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            _currentAircraftTitle.IndexOf("172", StringComparison.OrdinalIgnoreCase) >= 0;
+            _currentAircraftTitle.IndexOf("172", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            // Títol real del C172 per defecte a MSFS2020: "Cessna Skyhawk G1000 Asobo" — sense "172"
+            // enlloc (confirmat per Pere, 2026-09-01), per això no es detectava cap element propi.
+            _currentAircraftTitle.IndexOf("Skyhawk", StringComparison.OrdinalIgnoreCase) >= 0;
 
         // Text de les 3 etiquetes del selector únic (SW_SE_LBL_1/2/3), segons l'avió monomotor actiu.
         string SeSelectorLabelText(int slot)
@@ -246,6 +249,11 @@ namespace SimConnect3
         // Caravan només fa servir l'esquema WASM propi (SFS.FuelPump1_On/Auto/Off) sota MSFS2024 —
         // sota MSFS2020 cau a l'esquema genèric (SWITCH_FUELPUMP1 natiu) ja existent per defecte.
         bool UsesCaravanPumpScheme() => (IsCaravan() && _isMsfs2024) || IsCirrusSR22();
+
+        // Avions amb bomba de 3 posicions (HIGH/LOW/OFF) gestionada 100% localment via StepFuelPumpBaron,
+        // sense dependre de cap lectura del simulador per l'estat visual (2026-09-01, Caravan 2020 afegida
+        // després de confirmar K:ELECT_FUEL_PUMP1_SET via revòlver — mateix event que Baron/Bonanza 2020).
+        bool UsesPump1_3StateUi() => (IsBaronG58() && _isMsfs2024) || UsesCaravanPumpScheme() || (IsBonanzaG36() && _isMsfs2024) || (IsCaravan() && !_isMsfs2024);
 
         // Monomotor — bomba única (pump 1), mateix esquema HIGH/LOW/OFF que la Baron (B:FUEL_Pump_1_High/_Low/_Off,
         // confirmat a Behaviors, idèntic al de la Baron — reutilitza els mateixos events WASM, no en calen de nous).
@@ -286,6 +294,7 @@ namespace SimConnect3
         int _bonanzaFuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la Bonanza (veure Output/Debug de VS)
         int _cirrusFuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la Cirrus SR22T (veure Output/Debug de VS)
         int _da40FuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la DA-40 (2020, veure Output/Debug de VS)
+        int _c172FuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la C172 Skyhawk (2020, veure Output/Debug de VS)
         double _da62AvionicsLineConn = double.MinValue; // A:LINE CONNECTION ON:rh_main_bustoavionics_bus — estat real del bus d'avionics de la DA-62
         double _c172Avionics1LineConn = double.MinValue; // A:LINE CONNECTION ON:BUS_1_To_AVIONICS_BUS_1
         double _c172Avionics2LineConn = double.MinValue; // A:LINE CONNECTION ON:BUS_2_To_AVIONICS_BUS_2
@@ -1496,12 +1505,14 @@ namespace SimConnect3
         // la C172). "3 0 (>K:2:LIGHT_POTENTIOMETER_SET)" l'apaga 1s però torna sol — coincideix amb el
         // patró de pom físic ja vist (valor reafirmat des d'una posició real, no controlable des de
         // fora). Provem repetir K:PANEL_LIGHTS_SET moltes vegades per veure si arriba a plena brillantor.
-        // DA-62 DE-ICE AIRFRAME (2026-08-31, MSFS2024 NOMÉS) — interruptor físic de Pere és de 2 posicions
-        // (OFF/HIGH), no calen els 3 estats. Mateixa forma d'events B: parametritzats sense valor que ja
-        // ha funcionat 2 cops (selector DA-40, blockers DA-62): B:DEICE_AIRFRAME_OFF / _HIGH.
+        // CARAVAN 208B FUEL PUMP 1 (2026-09-01, MSFS2020 NOMÉS) — ronda 2. Els B: sense paràmetre no
+        // fan res (confirmat per Pere). El "Set" complet mostra que qui mou de veritat l'interruptor és
+        // K:ELECT_FUEL_PUMP1_SET amb valor directe (0=OFF,1=ON,2=AUTO/NORM) — el mateix event ja
+        // confirmat funcional per la Baron/Bonanza 2020 en aquest mateix fitxer.
         private readonly string[] _testAltGen1ResetCandidates = new[] {
-            "(>B:DEICE_AIRFRAME_OFF)",
-            "(>B:DEICE_AIRFRAME_HIGH)",
+            "0 (>K:ELECT_FUEL_PUMP1_SET)",
+            "1 (>K:ELECT_FUEL_PUMP1_SET)",
+            "2 (>K:ELECT_FUEL_PUMP1_SET)",
         };
 
         private System.Windows.Forms.Button _g3000Btn = null!;
@@ -2476,9 +2487,9 @@ namespace SimConnect3
             _testJunctionSendBtn.Location = new Point(3210, 230);
             _testJunctionSendBtn.Click += (s, e) => {
                 if (calibrationMode) return;
-                // DA-62 DE-ICE AIRFRAME 2024 — revòlver de candidats, un per clic.
+                // CARAVAN 208B FUEL PUMP 1 2020 R2 — revòlver de candidats, un per clic.
                 string rpn = _testAltGen1ResetCandidates[_testAltGen1ResetIdx % _testAltGen1ResetCandidates.Length];
-                Debug.WriteLine($">>> SEND: DA62 DEICE AIRFRAME 2024 TEST #{_testAltGen1ResetIdx} de {_testAltGen1ResetCandidates.Length}: {rpn}");
+                Debug.WriteLine($">>> SEND: CARAVAN FUELPUMP1 2020 R2 TEST #{_testAltGen1ResetIdx} de {_testAltGen1ResetCandidates.Length}: {rpn}");
                 SendGenericRpn(rpn);
                 _testAltGen1ResetIdx++;
             };
@@ -3458,10 +3469,10 @@ namespace SimConnect3
                         OnClick  = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PITOTHEAT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
                 // Blau — pumps sota de strobe i recognition (Y+100)
                 new() { Name="SW_DN_FUELPUMP1", TypeKey="SW DN blue",  BasePos=new Point(1804, 1653), ZoomWidth=75, Img=swBlueImg,
-                        ShowWhen = () => ((IsBaronG58() && _isMsfs2024) || UsesCaravanPumpScheme() || (IsBonanzaG36() && _isMsfs2024)) ? _fuelPump1State3 == 2 : !fuelpump1Active,
-                        OnClickEnabled = () => !((IsBaronG58() && _isMsfs2024) || UsesCaravanPumpScheme() || (IsBonanzaG36() && _isMsfs2024)),
+                        ShowWhen = () => UsesPump1_3StateUi() ? _fuelPump1State3 == 2 : !fuelpump1Active,
+                        OnClickEnabled = () => !UsesPump1_3StateUi(),
                         OnClick  = () => {
-                            if (_isMsfs2024 && (IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()))
+                            if (UsesPump1_3StateUi())
                             {
                                 // Baron/Caravan/Cirrus/Bonanza: la interacció es fa amb les 2 àrees dedicades SW_FUELPUMP1_UP/DN, no amb aquest switch.
                             }
@@ -3519,15 +3530,15 @@ namespace SimConnect3
                         } },
                 // Baron G58 / Cessna Caravan / Cirrus SR22 / Bonanza G36 — posició LOW/AUTO (centre) de les bombes de 3 posicions
                 new() { Name="SW_CN_FUELPUMP1", TypeKey="SW CN blue", BasePos=new Point(1804, 1653), ZoomWidth=75, Img=swCenterBlueImg,
-                        ShowWhen = () => ((IsBaronG58() && _isMsfs2024) || UsesCaravanPumpScheme() || (IsBonanzaG36() && _isMsfs2024)) && _fuelPump1State3 == 1, OnClick=null },
+                        ShowWhen = () => UsesPump1_3StateUi() && _fuelPump1State3 == 1, OnClick=null },
                 new() { Name="SW_CN_FUELPUMP2", TypeKey="SW CN blue", BasePos=new Point(1864, 1653), ZoomWidth=75, Img=swCenterBlueImg,
                         ShowWhen = () => IsBaronG58() && _fuelPump2State3 == 1, OnClick=null },
                 // Baron G58 / Cessna Caravan / Cirrus SR22 / Bonanza G36 — 2 àrees clicables per bomba (pujar cap a HIGH/ON / baixar cap a OFF),
                 // redimensionables i movibles amb F12. No depenen de cap lectura: cada clic avança un pas l'estat local.
                 new() { Name="SW_FUELPUMP1_UP", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1804, 1720), ZoomWidth=75, ZoomHeight=40, Img=null,
-                        OnClick = () => { if ((IsBaronG58() && _isMsfs2024) || UsesCaravanPumpScheme() || (IsBonanzaG36() && _isMsfs2024)) StepFuelPumpBaron(1, -1); } },
+                        OnClick = () => { if (UsesPump1_3StateUi()) StepFuelPumpBaron(1, -1); } },
                 new() { Name="SW_FUELPUMP1_DN", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1804, 1770), ZoomWidth=75, ZoomHeight=40, Img=null,
-                        OnClick = () => { if ((IsBaronG58() && _isMsfs2024) || UsesCaravanPumpScheme() || (IsBonanzaG36() && _isMsfs2024)) StepFuelPumpBaron(1, 1); } },
+                        OnClick = () => { if (UsesPump1_3StateUi()) StepFuelPumpBaron(1, 1); } },
                 new() { Name="SW_FUELPUMP2_UP", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1864, 1720), ZoomWidth=75, ZoomHeight=40, Img=null,
                         OnClick = () => { if (IsBaronG58()) StepFuelPumpBaron(2, -1); } },
                 new() { Name="SW_FUELPUMP2_DN", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1864, 1770), ZoomWidth=75, ZoomHeight=40, Img=null,
@@ -3703,13 +3714,13 @@ namespace SimConnect3
                 // Caravan — etiquetes ON/OFF/NORM pel fuel boost pump. Mateix estil/mida que les RESET/ON/TRIP.
                 new() { Name="SW_CARAVAN_FUELBOOST_LBL_ON", TypeKey="CARAVAN_FUELBOOST_POS_LBL", BasePos=new Point(1950, 1170), ZoomWidth=77, ZoomHeight=41, Img=null,
                         NoResize = true,
-                        ShowWhen = () => IsCaravan() && _isMsfs2024 },
+                        ShowWhen = () => IsCaravan() },
                 new() { Name="SW_CARAVAN_FUELBOOST_LBL_OFF", TypeKey="CARAVAN_FUELBOOST_POS_LBL", BasePos=new Point(1950, 1220), ZoomWidth=77, ZoomHeight=41, Img=null,
                         NoResize = true,
-                        ShowWhen = () => IsCaravan() && _isMsfs2024 },
+                        ShowWhen = () => IsCaravan() },
                 new() { Name="SW_CARAVAN_FUELBOOST_LBL_NORM", TypeKey="CARAVAN_FUELBOOST_POS_LBL", BasePos=new Point(1950, 1280), ZoomWidth=77, ZoomHeight=41, Img=null,
                         NoResize = true,
-                        ShowWhen = () => IsCaravan() && _isMsfs2024 },
+                        ShowWhen = () => IsCaravan() },
                 // Caravan (2020 i 2024) — etiquetes MOTOR/OFF/START pel STARTER (3 posicions), mateixes mida i
                 // offset relatius al seu switch (BTN_STARTER1, centre real 704,1676) que ja té FUEL BOOST
                 // respecte al seu propi switch (SW_DN_FUELPUMP1, 2074,1828): START (dalt, com ON) offset
@@ -4835,6 +4846,19 @@ namespace SimConnect3
                 pbMain.Invalidate();
                 return;
             }
+            if (IsCaravan() && !_isMsfs2024 && pumpNum == 1)
+            {
+                // Caravan 208B (MSFS2020 NOMÉS, 2026-09-01) — confirmat via revòlver SEND: el "Set" complet
+                // de l'InputEvent FUEL_SWITCH_PUMP_1 mostra que SET_STATE_ON/AUTO/OFF criden totes
+                // K:ELECT_FUEL_PUMP1_SET amb un valor directe sobre (A:GENERAL ENG FUEL PUMP SWITCH
+                // EX1:1, Enum) — mateix event ja confirmat per Baron/Bonanza 2020, aquí amb els seus propis
+                // valors: 1=ON, 2=AUTO(NORM), 0=OFF. A diferència de Baron/Bonanza, aquí SÍ distingim els 3
+                // estats (no cal simplificar a ON/OFF).
+                int val = next switch { 0 => 1, 1 => 2, _ => 0 };
+                SendGenericRpn($"{val} (>K:ELECT_FUEL_PUMP1_SET)");
+                pbMain.Invalidate();
+                return;
+            }
             if (UsesCaravanPumpScheme() && pumpNum == 1)
             {
                 // WASM propi: SFS.FuelPump1_On/Auto/Off (B:FUEL_PUMP_1_ON/_AUTO/_OFF) — confirmats via MobiFlight.
@@ -5110,6 +5134,15 @@ namespace SimConnect3
                 // baix — confirmat per Pere: dalt=BOOST, mig=OFF, baix=PRIME.
                 SendGenericRpn("0 (>K:ELECT_FUEL_PUMP1_SET)");
                 _fuelPump1State3 = 1;
+                pbMain.Invalidate();
+                return;
+            }
+            if (IsCaravan() && !_isMsfs2024)
+            {
+                // Caravan 208B (MSFS2020 NOMÉS, 2026-09-01) — mateix K:ELECT_FUEL_PUMP1_SET confirmat via
+                // revòlver (veure StepFuelPumpBaron): valor 0=OFF.
+                SendGenericRpn("0 (>K:ELECT_FUEL_PUMP1_SET)");
+                _fuelPump1State3 = 2;
                 pbMain.Invalidate();
                 return;
             }
@@ -6688,7 +6721,7 @@ namespace SimConnect3
                 var info = (AircraftInfoStruct)data.dwData[0];
                 string newTitle = info.title ?? "";
                 bool wasBaron = IsBaronG58();
-                bool wasCaravanScheme = UsesCaravanPumpScheme();
+                bool wasCaravanScheme = IsCaravan() || IsCirrusSR22();
                 bool wasBonanza = IsBonanzaG36();
                 bool wasDA62 = IsDA62();
                 bool wasC408 = IsC408();
@@ -6698,7 +6731,7 @@ namespace SimConnect3
                     _aircraftTitleLbl.Text = newTitle;
                 if (IsBaronG58() && !wasBaron)
                     ForceBaronFuelPumpsOff();
-                else if (UsesCaravanPumpScheme() && !wasCaravanScheme)
+                else if ((IsCaravan() || IsCirrusSR22()) && !wasCaravanScheme)
                     ForceCaravanFuelPumpOff();
                 else if (IsBonanzaG36() && !wasBonanza && _isMsfs2024)
                     ForceBonanzaFuelPumpOff();
@@ -6891,7 +6924,9 @@ namespace SimConnect3
                     }
                 }
                 // C172 (mateix junction=1): 1=Left,2=Both,3=Right, sense Off -> seSelectorPos 0/1/2.
-                else if (IsC172())
+                // NOMÉS 2024 — el Skyhawk per defecte de 2020 no fa servir el sistema de junction, té la
+                // seva pròpia lectura clàssica més avall (bloc "SINGLE ENGINE" amb s1.fuel_selector_1).
+                else if (IsC172() && _isMsfs2024)
                 {
                     int rounded = (int)Math.Round(newVal);
                     int newPosFromRead = rounded switch { 1 => 0, 3 => 2, _ => 1 }; // 2 (i qualsevol altre) = Both
@@ -7355,7 +7390,7 @@ namespace SimConnect3
                 bool newPitotheat = (s1.read_pitotheat & 1) != 0;
                 bool newFuelpump1;
                 bool newFuelpump2;
-                if (_isMsfs2024 && (IsBaronG58() || UsesCaravanPumpScheme() || IsBonanzaG36()))
+                if (UsesPump1_3StateUi())
                 {
                     // Estat gestionat localment pels clics (StepFuelPumpBaron), no per lectura del simulador.
                     newFuelpump1 = _fuelPump1State3 != 2; // != OFF
@@ -7743,6 +7778,26 @@ namespace SimConnect3
                         _da40FuelSelectorRawLast = s1.fuel_selector_1;
                     }
                     int newPosFromRead = s1.fuel_selector_1 switch { 0 => 0, 2 => 1, 3 => 2, _ => seSelectorPos };
+                    if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
+                    {
+                        seSelectorPos = newPosFromRead;
+                        needsRepaint = true;
+                    }
+                    newFuel1Pos = fuel1Pos;
+                    newFuel2Pos = fuel2Pos;
+                }
+                else if (IsC172() && !_isMsfs2024)
+                {
+                    // C172 Skyhawk (2020 NOMÉS, 2026-09-01) — mateix patró que Bonanza/Cirrus/DA40-2020:
+                    // selector únic, reutilitza "FUEL TANK SELECTOR:1" ja present a Struct1. Enum clàssic
+                    // (0=Off, 1=All, 2=Left, 3=Right) — el Skyhawk no té Off, per això qualsevol valor que
+                    // no sigui 2(Left)/3(Right) es tracta com a BOTH.
+                    if (s1.fuel_selector_1 != _c172FuelSelectorRawLast)
+                    {
+                        Debug.WriteLine($"[C172 SKYHAWK 2020 FUEL TANK SELECTOR:1] {_c172FuelSelectorRawLast} -> {s1.fuel_selector_1}");
+                        _c172FuelSelectorRawLast = s1.fuel_selector_1;
+                    }
+                    int newPosFromRead = s1.fuel_selector_1 switch { 2 => 0, 3 => 2, _ => 1 };
                     if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
                     {
                         seSelectorPos = newPosFromRead;
@@ -10754,6 +10809,19 @@ namespace SimConnect3
             // no cal tocar el WASM més. Ordre físic real en sentit horari: Off-Left-Right(-Off, redundant,
             // no la fem servir). pos0=OFF(opt1), pos1=LEFT(opt2), pos2=RIGHT(opt3).
             //
+            // C172 Skyhawk (2020 NOMÉS, 2026-09-01): el mecanisme per junction de sota NO funciona al
+            // Skyhawk per defecte de 2020 (avió amb títol "Cessna Skyhawk G1000 Asobo", sense "172" —
+            // veure IsC172()). Confirmat per Pere via revòlver: events clàssics de SimConnect per
+            // selector d'un sol motor (SDK oficial, no trobats a Behaviors ni MobiFlight):
+            // K:FUEL_SELECTOR_LEFT / _ALL / _RIGHT. 2024 continua amb el mecanisme de junction de sota,
+            // no tocat.
+            if (IsC172() && !_isMsfs2024)
+            {
+                string c172Evt = pos switch { 0 => "FUEL_SELECTOR_LEFT", 1 => "FUEL_SELECTOR_ALL", _ => "FUEL_SELECTOR_RIGHT" };
+                SendGenericRpn($"(>K:{c172Evt})");
+                _seSelectorIgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
+                return;
+            }
             // C172: mateix junction=1, confirmat opcions 1=Left,2=Both,3=Right (sense Off) — mateixos
             // codis numèrics que el C400 (11/12/13), només canvia el significat/etiquetes.
             // Ordre físic real en sentit horari: Left-Both-Right. pos0=LEFT(opt1), pos1=BOTH(opt2), pos2=RIGHT(opt3).
