@@ -8,6 +8,7 @@ namespace SimConnect3
     {
         public WelcomeForm()
         {
+            AutoScaleMode = AutoScaleMode.None;
             Text = "panelAIR";
             Size = new Size(1200, 900);
             StartPosition = FormStartPosition.CenterScreen;
@@ -56,11 +57,11 @@ namespace SimConnect3
 
             var body2 = new Label
             {
-                Text = "This welcome screen will appear only once. You can open the Configuration screen again at any time from the CONFIGURATION button.",
+                Text = "The Configuration screen will open next. Please complete step 5, Touch Gestures, to prevent this touch screen from accidentally opening Windows menus. You can reopen Configuration at any time from the CONFIGURATION button.",
                 Font = new Font("Segoe UI", 22f),
                 ForeColor = Color.FromArgb(102, 114, 127),
                 Location = new Point(64, 430),
-                Size = new Size(860, 140)
+                Size = new Size(860, 170)
             };
             card.Controls.Add(body2);
 

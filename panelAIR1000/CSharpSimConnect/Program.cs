@@ -31,6 +31,7 @@ namespace SimConnect3
                 using var welcome = new WelcomeForm();
                 if (welcome.ShowDialog() != DialogResult.OK)
                     return;
+
                 AppSettings.Instance.WelcomeCompleted = true;
                 AppSettings.Instance.Save();
             }

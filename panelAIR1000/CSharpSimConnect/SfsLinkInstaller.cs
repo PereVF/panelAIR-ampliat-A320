@@ -74,7 +74,10 @@ namespace SimConnect3
             {
                 try
                 {
-                    CopyDirectory(tempExtractDir, install.CommunityPath);
+                    // El zip conté el paquet "solt" (modules/, manifest.json, layout.json) sense carpeta
+                    // pròpia; MSFS necessita que cada paquet visqui en la seva pròpia subcarpeta dins Community.
+                    string packageDir = Path.Combine(install.CommunityPath, "SFS-Link");
+                    CopyDirectory(tempExtractDir, packageDir);
                     installedInto.Add(install.Label);
                 }
                 catch
