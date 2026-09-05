@@ -1,5 +1,4 @@
 using System;
-using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -53,26 +52,6 @@ namespace SimConnect3
                 }
                 return false; // no consumir el missatge: ha de seguir el seu curs normal
             }
-        }
-
-        /// <summary>
-        /// Obre el menú de configuració tàctil de Windows i tanca panelAIR, ja que el diàleg
-        /// de calibratge apareix sobre la pantalla 4K i quedaria tapat pel panell (TopMost).
-        /// </summary>
-        public static void LaunchWindowsTouchSettingsAndExit(IWin32Window owner)
-        {
-            var result = MessageBox.Show(owner,
-                "panelAIR will now close. You'll see a Windows configuration menu on the main Windows screen. Configure your touch screen, then start panelAIR again.",
-                "Configure Touch Screen", MessageBoxButtons.OKCancel, MessageBoxIcon.Information);
-            if (result != DialogResult.OK) return;
-
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = "explorer.exe",
-                Arguments = "shell:::{80F3F1D5-FECA-45F3-BC32-752C152E456E}",
-                UseShellExecute = true
-            });
-            Application.Exit();
         }
     }
 }

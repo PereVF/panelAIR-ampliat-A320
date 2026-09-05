@@ -57,7 +57,7 @@ namespace SimConnect3
 
             var body2 = new Label
             {
-                Text = "The Configuration screen will open next. Please complete step 5, Touch Gestures, to prevent this touch screen from accidentally opening Windows menus. You can reopen Configuration at any time from the CONFIGURATION button.",
+                Text = "The Configuration screen will open next. Go through all 6 steps for a quick panelAIR setup on this Windows PC. You can reopen Configuration at any time from the CONFIGURATION button.",
                 Font = new Font("Segoe UI", 22f),
                 ForeColor = Color.FromArgb(102, 114, 127),
                 Location = new Point(64, 430),

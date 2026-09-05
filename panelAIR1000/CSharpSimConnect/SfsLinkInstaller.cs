@@ -4,38 +4,36 @@ using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
 using System.Threading.Tasks;
-using System.Windows.Forms;
 
 namespace SimConnect3
 {
     /// <summary>
     /// Descarrega SFS Link i l'instal·la a totes les carpetes Community de MSFS detectades al PC,
     /// demanant sempre el consentiment explícit de l'usuari abans d'escriure a cadascuna.
+    /// Els diàlegs es mostren com a overlay dins la mateixa finestra de Configuration (mai un
+    /// MessageBox/finestra nova, que pot quedar amagada darrere de MSFS en Full Screen).
     /// </summary>
     public static class SfsLinkInstaller
     {
         private const string DownloadUrl = "https://simflightservices.com/wp-content/uploads/sfs-downloads/SFS-link.zip";
         private static readonly HttpClient _http = new HttpClient();
 
-        public static async Task InstallAsync(IWin32Window owner)
+        public static async Task InstallAsync(ConfigurationForm owner)
         {
             var installs = MsfsInstallDetector.DetectAll();
             if (installs.Count == 0)
             {
-                MessageBox.Show(owner,
-                    "No Microsoft Flight Simulator installation was detected on this PC.",
-                    "SFS Link", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                await owner.ShowInfoDialogAsync("No Microsoft Flight Simulator installation was detected on this PC.");
                 return;
             }
 
             var consented = new List<MsfsInstall>();
             foreach (var install in installs)
             {
-                var result = MessageBox.Show(owner,
+                bool yes = await owner.ShowConfirmDialogAsync(
                     $"Install SFS Link into this Community folder?\n\n{install.Label}\n{install.CommunityPath}",
-                    "SFS Link — installation consent",
-                    MessageBoxButtons.YesNo, MessageBoxIcon.Question);
-                if (result == DialogResult.Yes)
+                    "Yes", "No");
+                if (yes)
                     consented.Add(install);
             }
 
@@ -58,9 +56,7 @@ namespace SimConnect3
             }
             catch (Exception ex)
             {
-                MessageBox.Show(owner,
-                    $"Could not download or extract SFS Link:\n{ex.Message}",
-                    "SFS Link", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                await owner.ShowInfoDialogAsync($"Could not download or extract SFS Link:\n{ex.Message}");
                 return;
             }
             finally
@@ -94,8 +90,7 @@ namespace SimConnect3
             if (failedInto.Count > 0)
                 summary += "\n\nFailed:\n" + string.Join("\n", failedInto);
 
-            MessageBox.Show(owner, summary, "SFS Link", MessageBoxButtons.OK,
-                failedInto.Count > 0 ? MessageBoxIcon.Warning : MessageBoxIcon.Information);
+            await owner.ShowInfoDialogAsync(summary);
         }
 
         private static void CopyDirectory(string sourceDir, string destDir)

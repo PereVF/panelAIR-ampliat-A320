@@ -1307,6 +1307,7 @@ namespace SimConnect3
             {
                 using var brush = new SolidBrush(Color.FromArgb(90, Color.White));
                 using var allAreasBrush = new SolidBrush(Color.FromArgb(60, Color.Orange));
+                using var allAreasPen = new Pen(Color.Orange, 2);
                 var now = DateTime.UtcNow;
                 foreach (var b in Buttons)
                 {
@@ -1314,9 +1315,15 @@ namespace SimConnect3
                     if (ShowAllAreas && !(HideAreasWhenActive?.Invoke() ?? false))
                     {
                         if (b.IsRound)
+                        {
                             e.Graphics.FillEllipse(allAreasBrush, b.ClickRect);
+                            e.Graphics.DrawEllipse(allAreasPen, b.ClickRect);
+                        }
                         else
+                        {
                             e.Graphics.FillRectangle(allAreasBrush, b.ClickRect);
+                            e.Graphics.DrawRectangle(allAreasPen, b.ClickRect);
+                        }
                     }
                     else if (b.IsVisuallyPressed(now))
                     {
@@ -1461,6 +1468,18 @@ namespace SimConnect3
 
         private Form? _popoutReminderForm;
         private Label? _popoutReminderMsgLbl;
+        private Form? _noAircraftMessageForm;
+        private string? _noAircraftMessageDismissedFor;
+
+        // Overlay genèric dins frmMain per a avisos que abans feien servir MessageBox.Show
+        // (p. ex. el recordatori del mod TBM930): un MessageBox modal pot quedar amagat darrere
+        // de MSFS en Full Screen i penjar en aparença l'app. Es col·loca sempre a la part de dalt
+        // de la pantalla, lluny de l'AUX (que viu a Y≈1160 en endavant) i del botó ⚙ (Y=1040).
+        private Panel _mainOverlayCard = null!;
+        private Label _mainOverlayMsgLbl = null!;
+        private Button _mainOverlayPrimaryBtn = null!;
+        private Button _mainOverlaySecondaryBtn = null!;
+        private Action? _mainOverlayOnPrimaryClick;
         private Form? _overlayPanel;
         private Panel? _fsConnPanel;
         private bool _taxiPropActive = false;
@@ -2093,6 +2112,64 @@ namespace SimConnect3
             _gearBtn.MouseUp += (s, e) => { _gearBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             this.Controls.Add(_gearBtn);
             _gearBtn.BringToFront();
+
+            // ── Overlay genèric d'avisos (substitueix MessageBox.Show per avisos que poden sortir
+            // en ple vol, com el recordatori del mod TBM930) ──
+            _mainOverlayCard = new Panel
+            {
+                BackColor = Color.White,
+                Size = new Size(2200, 420),
+                Location = new Point((this.ClientSize.Width - 2200) / 2, 80),
+                Visible = false
+            };
+            _mainOverlayCard.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(217, 223, 229), 1);
+                e.Graphics.DrawRectangle(pen, 0, 0, _mainOverlayCard.Width - 1, _mainOverlayCard.Height - 1);
+            };
+            this.Controls.Add(_mainOverlayCard);
+
+            _mainOverlayMsgLbl = new Label
+            {
+                Font = new Font("Segoe UI", 16f),
+                ForeColor = Color.FromArgb(22, 32, 42),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Location = new Point(40, 30),
+                Size = new Size(_mainOverlayCard.Width - 80, 300)
+            };
+            _mainOverlayCard.Controls.Add(_mainOverlayMsgLbl);
+
+            _mainOverlaySecondaryBtn = new Button
+            {
+                Text = "Close",
+                Size = new Size(220, 64),
+                Location = new Point(880, 340),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(230, 230, 230),
+                ForeColor = Color.FromArgb(22, 32, 42),
+                Font = new Font("Segoe UI", 15f, FontStyle.Bold)
+            };
+            _mainOverlaySecondaryBtn.FlatAppearance.BorderSize = 2;
+            _mainOverlaySecondaryBtn.FlatAppearance.BorderColor = Color.FromArgb(180, 186, 194);
+            _mainOverlaySecondaryBtn.Click += (s, e) => _mainOverlayCard.Visible = false;
+            _mainOverlayCard.Controls.Add(_mainOverlaySecondaryBtn);
+
+            _mainOverlayPrimaryBtn = new Button
+            {
+                Size = new Size(400, 64),
+                Location = new Point(1120, 340),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(235, 91, 37),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 15f, FontStyle.Bold)
+            };
+            _mainOverlayPrimaryBtn.FlatAppearance.BorderSize = 0;
+            _mainOverlayPrimaryBtn.Click += (s, e) =>
+            {
+                _mainOverlayCard.Visible = false;
+                _mainOverlayOnPrimaryClick?.Invoke();
+            };
+            _mainOverlayCard.Controls.Add(_mainOverlayPrimaryBtn);
 
             // ── "Botó" mostrar àrees clicables — dibuixat directament sobre pbMain (no Control, per
             // transparència real; els Button/Label de WinForms no la garanteixen de forma fiable
@@ -3993,6 +4070,7 @@ namespace SimConnect3
                 return;
             }
             _configForm = new ConfigurationForm();
+            _configForm.FormClosed += (cs, ce) => RefreshNoCompatibleAircraftMessage(forceRecheck: true);
             _configForm.Show(this);
         }
 
@@ -4865,6 +4943,96 @@ namespace SimConnect3
             form.Show(this);
         }
 
+        /// <summary>
+        /// Mostra/tanca el missatge "You're all set!" segons si l'avió actual és un dels suportats.
+        /// Es crida contínuament (cada segon, via Simconnect_OnRecvSimobjectData) i també en tancar
+        /// Configuration. Un cop l'usuari prem "Start Flying" per a un avió concret, no torna a sortir
+        /// per aquell mateix avió (evita parpelleig/repetició contínua) — només reapareix en un nou
+        /// event real: un avió diferent carregat, o tancar Configuration altre cop (forceRecheck).
+        /// </summary>
+        private void RefreshNoCompatibleAircraftMessage(bool forceRecheck = false)
+        {
+            if (string.IsNullOrEmpty(_currentAircraftTitle)) return; // encara no s'ha rebut cap títol real
+
+            bool compatible = IsC172() || IsDA40() || IsDA62() || IsCirrusSR22() || IsBonanzaG36()
+                || IsBaronG58() || IsCaravan() || IsC400() || IsC408() || IsTBM930();
+
+            if (compatible)
+            {
+                if (_noAircraftMessageForm != null && !_noAircraftMessageForm.IsDisposed)
+                    _noAircraftMessageForm.Close();
+                return;
+            }
+
+            if (forceRecheck) _noAircraftMessageDismissedFor = null;
+            if (_noAircraftMessageDismissedFor == _currentAircraftTitle) return; // ja descartat per aquest avió
+
+            if (_noAircraftMessageForm != null && !_noAircraftMessageForm.IsDisposed) return; // ja mostrat
+            ShowNoCompatibleAircraftMessage();
+        }
+
+        /// <summary>Finestra normal (no modal, sense TopMost) que explica que panelAIR s'adapta automàticament
+        /// a qualsevol avió equipat amb G1000 o la TBM 930. Un únic botó "Start Flying" per tancar-la.</summary>
+        private void ShowNoCompatibleAircraftMessage()
+        {
+            var form = new Form
+            {
+                AutoScaleMode = AutoScaleMode.None,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                ControlBox = false,
+                Text = "panelAIR",
+                Size = new Size(1500, 420),
+                BackColor = Color.White,
+                StartPosition = FormStartPosition.Manual
+            };
+            form.Location = this.PointToScreen(new Point((this.ClientSize.Width - form.Width) / 2, 400));
+
+            var titleLbl = new Label
+            {
+                Text = "You're all set!",
+                Font = new Font("Segoe UI", 32f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(22, 32, 42),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Location = new Point(40, 30),
+                Size = new Size(form.ClientSize.Width - 80, 70)
+            };
+            form.Controls.Add(titleLbl);
+
+            var msgLbl = new Label
+            {
+                Text = "panelAIR automatically adapts to any aircraft equipped with G1000, or the TBM 930. Choose one of those to get started.",
+                Font = new Font("Segoe UI", 16f),
+                ForeColor = Color.FromArgb(102, 114, 127),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Location = new Point(40, 110),
+                Size = new Size(form.ClientSize.Width - 80, 140)
+            };
+            form.Controls.Add(msgLbl);
+
+            var startButton = new Button
+            {
+                Text = "Start Flying",
+                Size = new Size(320, 64),
+                Location = new Point((form.ClientSize.Width - 320) / 2, 280),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(235, 91, 37),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 16f, FontStyle.Bold)
+            };
+            startButton.FlatAppearance.BorderSize = 0;
+            startButton.Click += (s, e) =>
+            {
+                _noAircraftMessageDismissedFor = _currentAircraftTitle;
+                form.Close();
+            };
+            form.Controls.Add(startButton);
+
+            _noAircraftMessageForm = form;
+            form.Show(this);
+        }
+
         private void ForceTbmPulseLightOff()
         {
             if (simconnect == null) return;
@@ -4990,23 +5158,23 @@ namespace SimConnect3
 
             if (!found)
             {
-                var result = MessageBox.Show(
+                _mainOverlayMsgLbl.Text =
                     "MSFS 2020 users: for full G3000 panel functionality, we recommend installing the free mod " +
                     "'TBM930 - LVars for Bleed Air, Inert Sep and Cabin Lights' by FlyingDutch.\n\n" +
                     "Download it at:\nhttps://flightsim.to/addon/57918/tbm930-lvars-for-bleed-inert-and-cabin-lights\n\n" +
                     "Once downloaded, copy the contents to your MSFS 2020 Community folder.\n\n" +
-                    "Would you like to open the download page?",
-                    "Recommended mod not detected",
-                    MessageBoxButtons.YesNo,
-                    MessageBoxIcon.Information);
-                if (result == DialogResult.Yes)
+                    "Would you like to open the download page?";
+                _mainOverlayPrimaryBtn.Text = "Open Download Page";
+                _mainOverlayOnPrimaryClick = () =>
                 {
                     try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
                     {
                         FileName = "https://flightsim.to/addon/57918/tbm930-lvars-for-bleed-inert-and-cabin-lights",
                         UseShellExecute = true
                     }); } catch { }
-                }
+                };
+                _mainOverlayCard.Visible = true;
+                _mainOverlayCard.BringToFront();
             }
         }
 
@@ -6508,6 +6676,7 @@ namespace SimConnect3
                 bool isTBM930Now = IsTBM930();
                 if (isTBM930Now != wasTBM930 && _g3000Active != isTBM930Now && !calibrationMode)
                     SetG3000Active(isTBM930Now);
+                RefreshNoCompatibleAircraftMessage();
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestParkingBrake)
@@ -8532,22 +8701,35 @@ namespace SimConnect3
                 if (mainSurface.ShowAllAreas)
                 {
                     using var overlayBrush = new SolidBrush(Color.FromArgb(60, Color.Orange));
+                    using var overlayPen = new Pen(Color.Orange, 2);
                     foreach (var ov in g3000OverlayImages)
                     {
                         if (ov.OnClick == null) continue;
                         if (ov.IsRound)
+                        {
                             e.Graphics.FillEllipse(overlayBrush, ov.Bounds);
+                            e.Graphics.DrawEllipse(overlayPen, ov.Bounds);
+                        }
                         else
+                        {
                             e.Graphics.FillRectangle(overlayBrush, ov.Bounds);
+                            e.Graphics.DrawRectangle(overlayPen, ov.Bounds);
+                        }
                     }
                     e.Graphics.FillRectangle(overlayBrush, g3kApSliderInputZone);
+                    e.Graphics.DrawRectangle(overlayPen, g3kApSliderInputZone);
 
                     // Zones arrossegables (throttle, trim vertical, trim de rudder)
                     var thrHandleOv = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
                     if (thrHandleOv != null && _thrQuadrantVisible)
+                    {
                         e.Graphics.FillRectangle(overlayBrush, thrHandleOv.Bounds);
+                        e.Graphics.DrawRectangle(overlayPen, thrHandleOv.Bounds);
+                    }
                     e.Graphics.FillRectangle(overlayBrush, _g3kTrimZone);
+                    e.Graphics.DrawRectangle(overlayPen, _g3kTrimZone);
                     e.Graphics.FillRectangle(overlayBrush, _g3kRudderTrimZone);
+                    e.Graphics.DrawRectangle(overlayPen, _g3kRudderTrimZone);
                 }
 
                 DrawShowAreasIcon(e.Graphics);
@@ -9256,19 +9438,25 @@ namespace SimConnect3
             if (mainSurface.ShowAllAreas)
             {
                 using var overlayBrush = new SolidBrush(Color.FromArgb(60, Color.Orange));
+                using var overlayPen = new Pen(Color.Orange, 2);
 
                 // OverlayImages amb OnClick (G1000 — el G3000 ja ha fet return abans d'arribar aquí)
                 foreach (var ov in overlayImages)
                 {
                     if (ov.OnClick != null)
+                    {
                         e.Graphics.FillRectangle(overlayBrush, ov.Bounds);
+                        e.Graphics.DrawRectangle(overlayPen, ov.Bounds);
+                    }
                 }
 
                 // Trim wheel vertical
                 e.Graphics.FillRectangle(overlayBrush, trimZone);
+                e.Graphics.DrawRectangle(overlayPen, trimZone);
 
                 // Rudder trim wheel horitzontal
                 e.Graphics.FillRectangle(overlayBrush, rudderTrimZone);
+                e.Graphics.DrawRectangle(overlayPen, rudderTrimZone);
             }
 
 

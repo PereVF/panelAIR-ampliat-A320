@@ -27,6 +27,24 @@ namespace SimConnect3
         private ToggleSwitch _edgeSwipeToggle = null!;
         private Label _edgeSwipeStatusLbl = null!;
         private bool _edgeSwipeUpdating = false;
+        private Panel _resetOverlayBackdrop = null!;
+        private Panel _resetOverlayCard = null!;
+        private Label _resetOverlayMsgLbl = null!;
+        private Button _resetOverlayPrimaryBtn = null!;
+        private Button _resetOverlaySecondaryBtn = null!;
+        private bool _resetAwaitingConfirm = false;
+
+        // Overlay genèric reutilitzable per a qualsevol confirmació/avís que abans feia servir
+        // MessageBox.Show (Touch Screen, SFS Link...): un MessageBox pot quedar amagat darrere
+        // de MSFS en Full Screen i penjar l'app en aparença; aquest overlay viu dins la mateixa
+        // finestra, igual que el de Reset, i sempre a la part de dalt perquè mai coincideixi amb
+        // l'AUX en coordenades de pantalla.
+        private Panel _dialogOverlayBackdrop = null!;
+        private Panel _dialogOverlayCard = null!;
+        private Label _dialogOverlayMsgLbl = null!;
+        private Button _dialogOverlayPrimaryBtn = null!;
+        private Button _dialogOverlaySecondaryBtn = null!;
+        private TaskCompletionSource<bool>? _dialogTcs;
 
         public ConfigurationForm()
         {
@@ -81,16 +99,177 @@ namespace SimConnect3
             resetButton.FlatAppearance.BorderSize = 0;
             resetButton.Click += (s, e) =>
             {
-                var confirm = MessageBox.Show(this,
-                    "This will erase all panelAIR setup preferences and bring back the first-run Welcome screen the next time the app starts. Continue?",
-                    "Reset Setup From Scratch", MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-                if (confirm != DialogResult.Yes) return;
-                AppSettings.Instance.ResetToDefaults();
-                RefreshFromSettings();
-                MessageBox.Show(this, "Setup has been reset. Restart panelAIR to see the first-run experience again.",
-                    "Reset Setup From Scratch", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                _resetAwaitingConfirm = true;
+                _resetOverlayMsgLbl.Text = "This will erase all setup preferences and show the Welcome screen again on next start. Continue?";
+                _resetOverlaySecondaryBtn.Visible = true;
+                _resetOverlayPrimaryBtn.Text = "Yes, Reset";
+                _resetOverlayBackdrop.Visible = true;
+                _resetOverlayBackdrop.BringToFront();
             };
             Controls.Add(resetButton);
+
+            // --- Overlay de confirmació del Reset, dins la mateixa finestra (mai un MessageBox/finestra
+            // nova: MSFS en mode Full Screen pot amagar diàlegs nous, però aquesta finestra ja se sap
+            // que es veu bé amb MSFS obert, així que hi integrem la confirmació directament). ---
+            _resetOverlayBackdrop = new Panel
+            {
+                BackColor = Color.FromArgb(242, 244, 246),
+                Dock = DockStyle.Fill,
+                Visible = false
+            };
+            Controls.Add(_resetOverlayBackdrop);
+
+            _resetOverlayCard = new Panel
+            {
+                BackColor = Color.White,
+                Size = new Size(760, 320)
+            };
+            _resetOverlayCard.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(217, 223, 229), 1);
+                e.Graphics.DrawRectangle(pen, 0, 0, _resetOverlayCard.Width - 1, _resetOverlayCard.Height - 1);
+            };
+            _resetOverlayBackdrop.Controls.Add(_resetOverlayCard);
+            // Situada a la part de dalt (no centrada verticalment) perquè mai coincideixi, en
+            // coordenades de pantalla, amb els botons de la pantalla AUX (que viu més avall).
+            void CenterResetCard()
+            {
+                _resetOverlayCard.Location = new Point(
+                    (_resetOverlayBackdrop.Width - _resetOverlayCard.Width) / 2,
+                    80);
+            }
+            CenterResetCard();
+            _resetOverlayBackdrop.Resize += (s, e) => CenterResetCard();
+
+            _resetOverlayMsgLbl = new Label
+            {
+                Font = new Font("Segoe UI", 20f),
+                ForeColor = Color.FromArgb(22, 32, 42),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Location = new Point(40, 40),
+                Size = new Size(_resetOverlayCard.Width - 80, 160)
+            };
+            _resetOverlayCard.Controls.Add(_resetOverlayMsgLbl);
+
+            _resetOverlaySecondaryBtn = new Button
+            {
+                Text = "No",
+                Size = new Size(200, 64),
+                Location = new Point(120, 220),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(230, 230, 230),
+                ForeColor = Color.FromArgb(22, 32, 42),
+                Font = new Font("Segoe UI", 15f, FontStyle.Bold)
+            };
+            _resetOverlaySecondaryBtn.FlatAppearance.BorderSize = 2;
+            _resetOverlaySecondaryBtn.FlatAppearance.BorderColor = Color.FromArgb(180, 186, 194);
+            _resetOverlaySecondaryBtn.Click += (s, e) => _resetOverlayBackdrop.Visible = false;
+            _resetOverlayCard.Controls.Add(_resetOverlaySecondaryBtn);
+
+            _resetOverlayPrimaryBtn = new Button
+            {
+                Text = "Yes, Reset",
+                Size = new Size(200, 64),
+                Location = new Point(440, 220),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(235, 91, 37),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 15f, FontStyle.Bold)
+            };
+            _resetOverlayPrimaryBtn.FlatAppearance.BorderSize = 0;
+            _resetOverlayPrimaryBtn.Click += (s, e) =>
+            {
+                if (_resetAwaitingConfirm)
+                {
+                    _resetAwaitingConfirm = false;
+                    AppSettings.Instance.ResetToDefaults();
+                    RefreshFromSettings();
+                    _resetOverlayMsgLbl.Text = "Setup reset. Restart panelAIR to see the first-run experience again.";
+                    _resetOverlaySecondaryBtn.Visible = false;
+                    _resetOverlayPrimaryBtn.Text = "OK";
+                    _resetOverlayPrimaryBtn.Location = new Point((_resetOverlayCard.Width - _resetOverlayPrimaryBtn.Width) / 2, 220);
+                }
+                else
+                {
+                    _resetOverlayBackdrop.Visible = false;
+                    _resetOverlayPrimaryBtn.Location = new Point(440, 220);
+                }
+            };
+            _resetOverlayCard.Controls.Add(_resetOverlayPrimaryBtn);
+
+            // --- Overlay genèric (Touch Screen, SFS Link...) — mateix disseny que el de Reset. ---
+            _dialogOverlayBackdrop = new Panel
+            {
+                BackColor = Color.FromArgb(242, 244, 246),
+                Dock = DockStyle.Fill,
+                Visible = false
+            };
+            Controls.Add(_dialogOverlayBackdrop);
+
+            _dialogOverlayCard = new Panel
+            {
+                BackColor = Color.White,
+                Size = new Size(1000, 420)
+            };
+            _dialogOverlayCard.Paint += (s, e) =>
+            {
+                using var pen = new Pen(Color.FromArgb(217, 223, 229), 1);
+                e.Graphics.DrawRectangle(pen, 0, 0, _dialogOverlayCard.Width - 1, _dialogOverlayCard.Height - 1);
+            };
+            _dialogOverlayBackdrop.Controls.Add(_dialogOverlayCard);
+            void CenterDialogCard()
+            {
+                _dialogOverlayCard.Location = new Point(
+                    (_dialogOverlayBackdrop.Width - _dialogOverlayCard.Width) / 2,
+                    80);
+            }
+            CenterDialogCard();
+            _dialogOverlayBackdrop.Resize += (s, e) => CenterDialogCard();
+
+            _dialogOverlayMsgLbl = new Label
+            {
+                Font = new Font("Segoe UI", 16f),
+                ForeColor = Color.FromArgb(22, 32, 42),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Location = new Point(40, 30),
+                Size = new Size(_dialogOverlayCard.Width - 80, 300)
+            };
+            _dialogOverlayCard.Controls.Add(_dialogOverlayMsgLbl);
+
+            _dialogOverlaySecondaryBtn = new Button
+            {
+                Size = new Size(220, 64),
+                Location = new Point(280, 340),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(230, 230, 230),
+                ForeColor = Color.FromArgb(22, 32, 42),
+                Font = new Font("Segoe UI", 15f, FontStyle.Bold)
+            };
+            _dialogOverlaySecondaryBtn.FlatAppearance.BorderSize = 2;
+            _dialogOverlaySecondaryBtn.FlatAppearance.BorderColor = Color.FromArgb(180, 186, 194);
+            _dialogOverlaySecondaryBtn.Click += (s, e) =>
+            {
+                _dialogOverlayBackdrop.Visible = false;
+                _dialogTcs?.TrySetResult(false);
+            };
+            _dialogOverlayCard.Controls.Add(_dialogOverlaySecondaryBtn);
+
+            _dialogOverlayPrimaryBtn = new Button
+            {
+                Size = new Size(220, 64),
+                Location = new Point(520, 340),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(235, 91, 37),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 15f, FontStyle.Bold)
+            };
+            _dialogOverlayPrimaryBtn.FlatAppearance.BorderSize = 0;
+            _dialogOverlayPrimaryBtn.Click += (s, e) =>
+            {
+                _dialogOverlayBackdrop.Visible = false;
+                _dialogTcs?.TrySetResult(true);
+            };
+            _dialogOverlayCard.Controls.Add(_dialogOverlayPrimaryBtn);
 
             TouchDetector.TouchDetected += OnTouchDetected;
             FormClosed += (s, e) => TouchDetector.TouchDetected -= OnTouchDetected;
@@ -117,6 +296,31 @@ namespace SimConnect3
             UpdateSfsMonitorCardState();
 
             RefreshEdgeSwipeState();
+        }
+
+        /// <summary>Mostra l'overlay genèric amb dos botons i espera que l'usuari en premi un.</summary>
+        internal Task<bool> ShowConfirmDialogAsync(string message, string yesText = "Yes", string noText = "No")
+        {
+            _dialogTcs = new TaskCompletionSource<bool>();
+            _dialogOverlayMsgLbl.Text = message;
+            _dialogOverlaySecondaryBtn.Text = noText;
+            _dialogOverlaySecondaryBtn.Visible = true;
+            _dialogOverlayPrimaryBtn.Text = yesText;
+            _dialogOverlayBackdrop.Visible = true;
+            _dialogOverlayBackdrop.BringToFront();
+            return _dialogTcs.Task;
+        }
+
+        /// <summary>Mostra l'overlay genèric amb un únic botó (equivalent a un MessageBox informatiu).</summary>
+        internal Task ShowInfoDialogAsync(string message, string okText = "OK")
+        {
+            _dialogTcs = new TaskCompletionSource<bool>();
+            _dialogOverlayMsgLbl.Text = message;
+            _dialogOverlaySecondaryBtn.Visible = false;
+            _dialogOverlayPrimaryBtn.Text = okText;
+            _dialogOverlayBackdrop.Visible = true;
+            _dialogOverlayBackdrop.BringToFront();
+            return _dialogTcs.Task;
         }
 
         private static Panel MakeCardShell(int number, string title, string description, out Panel content)
@@ -261,7 +465,21 @@ namespace SimConnect3
             };
             content.Controls.Add(_touchStatusLbl);
 
-            _touchButton.Click += (s, e) => TouchDetector.LaunchWindowsTouchSettingsAndExit(this);
+            _touchButton.Click += async (s, e) =>
+            {
+                bool ok = await ShowConfirmDialogAsync(
+                    "panelAIR will now close. You'll see a Windows configuration menu on the main Windows screen. Configure your touch screen, then start panelAIR again.",
+                    "Continue", "Cancel");
+                if (!ok) return;
+
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = "shell:::{80F3F1D5-FECA-45F3-BC32-752C152E456E}",
+                    UseShellExecute = true
+                });
+                Application.Exit();
+            };
 
             return card;
         }
