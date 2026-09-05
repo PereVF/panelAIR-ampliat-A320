@@ -1266,6 +1266,7 @@ namespace SimConnect3
             public List<UiButton> Buttons = new();
             public Func<bool>? SuppressInput;
             public Func<bool>? HideAreasWhenActive;
+            public Func<Rectangle, bool>? IsHiddenByCover;
             public bool ShowAllAreas = false;
 
             public UiSurface(PictureBox pb)
@@ -1312,7 +1313,8 @@ namespace SimConnect3
                 foreach (var b in Buttons)
                 {
                     if (!b.IsVisible()) continue;
-                    if (ShowAllAreas && !(HideAreasWhenActive?.Invoke() ?? false))
+                    if (ShowAllAreas && !(HideAreasWhenActive?.Invoke() ?? false)
+                        && !(IsHiddenByCover?.Invoke(b.ClickRect) ?? false))
                     {
                         if (b.IsRound)
                         {
@@ -1755,6 +1757,7 @@ namespace SimConnect3
 
             mainSurface = new UiSurface(pbMain);
             mainSurface.HideAreasWhenActive = () => _g3000Active;
+            mainSurface.IsHiddenByCover = IsHiddenByActiveCover;
             uiSurfaces.Add(mainSurface);
             mainSurface.SuppressInput = () => calibrationMode || _g3000Active;
 
@@ -2455,12 +2458,17 @@ namespace SimConnect3
             var cockpitRight = mainSurface;
             cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-UP",   BasePos = new Point(3450, 1646), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir = -1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
             cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-DN",   BasePos = new Point(3450, 1776), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir =  1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_DN,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
+            // DA-40 i Cirrus SR22 (2026-09-05, confirmat per Pere): tren fix, no retràctil — exclosos
+            // del ressaltat. Nota: el criteri general de "gear només per avions retràctils" queda
+            // pendent de repassar per a la resta d'avions (veure conversa sobre l gear).
             cockpitRight.Buttons.Add(new UiButton { Name="LGEAR-UP", BasePos=new Point(2843, 1590), W=110, H=115, Resizable=true, NoShadow=true,
+                ShowWhen = () => !IsDA40() && !IsCirrusSR22(),
                 OnClick = () => {
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_UP, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="LGEAR-DN", BasePos=new Point(2843, 1750), W=110, H=115, Resizable=true, NoShadow=true,
+                ShowWhen = () => !IsDA40() && !IsCirrusSR22(),
                 OnClick = () => {
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_DN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
@@ -2517,6 +2525,17 @@ namespace SimConnect3
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="AVIONICS2-TOGGLE", BasePos=new Point(1970, 1220), W=100, H=120, Resizable=true, NoShadow=true,
+                // Cirrus SR22 (2026-09-05, confirmat per Pere, 2020 i 2024): un sol interruptor
+                // d'avionics físic, el 2 no existeix — la branca de 2020 ja era exclosa de la lectura;
+                // la de 2024 cau al genèric sense cap codi propi, tampoc real.
+                // C408 (2026-09-05, confirmat per Pere): no fa res de rellevant en aquest avió (turboprop,
+                // no té aquest segon bus).
+                // DA-62 (2026-09-05, confirmat per Pere): sistema d'un sol bus combinat d'avionics — no hi
+                // ha "avionics 2" real, aquesta branca no té cap codi propi per la DA-62 (cau al genèric).
+                // DA-40 (2026-09-05, confirmat per Pere, 2020 i 2024): un sol interruptor d'avionics físic
+                // — la branca de 2020 ja era un no-op explícit; la de 2024 cau al genèric sense cap codi
+                // propi, tampoc real.
+                ShowWhen = () => !IsCirrusSR22() && !IsC408() && !IsDA62() && !IsDA40(),
                 OnClick = () => {
                     if (IsDA40() && !_isMsfs2024)
                     {
@@ -2956,7 +2975,7 @@ namespace SimConnect3
             // SW_SE_SELECTOR — selector únic de 3 posicions per monomotors (DA-40 de moment).
             // Comanda confirmada via Behaviors "Set" (FUEL_SWITCH_SELECTOR / FUEL_SELECTOR_1) — veure SeSelectorMsfsVal().
             // Posicions per defecte = últim calibratge F12 de Pere (calibration_export.txt), es carreguen igualment via LoadCalibrationPositions.
-            cockpitRight.Buttons.Add(new UiButton { Name="SE_SELECTOR-LEFT", BasePos=new Point(1529, 1967), W=186, H=253, Resizable=true, NoShadow=true,
+            cockpitRight.Buttons.Add(new UiButton { Name="SE_SELECTOR-LEFT", BasePos=new Point(1572, 1967), W=186, H=253, Resizable=true, NoShadow=true,
                 ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() || IsCirrusSR22() || IsC408(),
                 OnClick = () => {
                     if (seSelectorPos <= 0) return;
@@ -2964,7 +2983,7 @@ namespace SimConnect3
                     SendSeSelectorCommand(seSelectorPos);
                     pbMain.Invalidate();
                 }});
-            cockpitRight.Buttons.Add(new UiButton { Name="SE_SELECTOR-RIGHT", BasePos=new Point(1738, 1967), W=177, H=255, Resizable=true, NoShadow=true,
+            cockpitRight.Buttons.Add(new UiButton { Name="SE_SELECTOR-RIGHT", BasePos=new Point(1772, 1967), W=177, H=255, Resizable=true, NoShadow=true,
                 ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() || IsCirrusSR22() || IsC408(),
                 OnClick = () => {
                     if (seSelectorPos >= 2) return;
@@ -3117,6 +3136,9 @@ namespace SimConnect3
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PANELLIGHT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                 } });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_DEICE", BasePos=new Point(1984, 1653), W=75, H=75, Resizable=true, NoShadow=true,
+                // DA-62 (2024): confirmat "not supported" — veure comentari ABANDONAT més avall. DA-40
+                // (2026-09-05, confirmat per Pere, 2020 i 2024): tampoc fa res. Exclosos del ressaltat.
+                ShowWhen = () => !(IsDA62() && _isMsfs2024) && !IsDA40(),
                 OnClick = () => {
                     if (IsCirrusSR22() || (IsCaravan() && _isMsfs2024)) {
                         // Cirrus SR22T: el Set de l'InputEvent només toca una O: privada (inaccessible des
@@ -3173,16 +3195,23 @@ namespace SimConnect3
                     // Resta d'avions: fallback genèric.
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_DEICE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                 } });
+            // DA-62 (2026-09-05, confirmat per recerca — motors Austro AE330 amb FADEC): cowl flaps
+            // totalment automàtics, sense control manual del pilot. DA-40 i Cirrus SR22 (2026-09-05,
+            // confirmat per Pere): tampoc en tenen. Exclosos tots tres d'aquests 4 botons.
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_L_INC", BasePos=new Point(1500, 1560), W=75, H=40, Resizable=true, NoShadow=true,
+                ShowWhen = () => !IsDA62() && !IsDA40() && !IsCirrusSR22(),
                 OnClick = () => { uint target = cowlFlapL == 0 ? 8191u : 16383u;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_L_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_L_DEC", BasePos=new Point(1500, 1640), W=75, H=40, Resizable=true, NoShadow=true,
+                ShowWhen = () => !IsDA62() && !IsDA40() && !IsCirrusSR22(),
                 OnClick = () => { uint target = cowlFlapL == 2 ? 8191u : 0u;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_L_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_R_INC", BasePos=new Point(1600, 1560), W=75, H=40, Resizable=true, NoShadow=true,
+                ShowWhen = () => !IsDA62() && !IsDA40() && !IsCirrusSR22(),
                 OnClick = () => { uint target = cowlFlapR == 0 ? 8191u : 16383u;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_R_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_R_DEC", BasePos=new Point(1600, 1640), W=75, H=40, Resizable=true, NoShadow=true,
+                ShowWhen = () => !IsDA62() && !IsDA40() && !IsCirrusSR22(),
                 OnClick = () => { uint target = cowlFlapR == 2 ? 8191u : 0u;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_R_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
 
@@ -3338,12 +3367,16 @@ namespace SimConnect3
                 // Baron G58 / Cessna Caravan / Cirrus SR22 / Bonanza G36 — 2 àrees clicables per bomba (pujar cap a HIGH/ON / baixar cap a OFF),
                 // redimensionables i movibles amb F12. No depenen de cap lectura: cada clic avança un pas l'estat local.
                 new() { Name="SW_FUELPUMP1_UP", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1804, 1720), ZoomWidth=75, ZoomHeight=40, Img=null,
+                        OnClickEnabled = () => UsesPump1_3StateUi(),
                         OnClick = () => { if (UsesPump1_3StateUi()) StepFuelPumpBaron(1, -1); } },
                 new() { Name="SW_FUELPUMP1_DN", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1804, 1770), ZoomWidth=75, ZoomHeight=40, Img=null,
+                        OnClickEnabled = () => UsesPump1_3StateUi(),
                         OnClick = () => { if (UsesPump1_3StateUi()) StepFuelPumpBaron(1, 1); } },
                 new() { Name="SW_FUELPUMP2_UP", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1864, 1720), ZoomWidth=75, ZoomHeight=40, Img=null,
+                        OnClickEnabled = () => IsBaronG58(),
                         OnClick = () => { if (IsBaronG58()) StepFuelPumpBaron(2, -1); } },
                 new() { Name="SW_FUELPUMP2_DN", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1864, 1770), ZoomWidth=75, ZoomHeight=40, Img=null,
+                        OnClickEnabled = () => IsBaronG58(),
                         OnClick = () => { if (IsBaronG58()) StepFuelPumpBaron(2, 1); } },
                 // DA-40 — l'interruptor 2 és el fuel transfer switch, no una bomba. Etiqueta movible amb F12.
                 new() { Name="SW_DA40_FUELTRANSF_LBL", TypeKey="DA40_LBL", BasePos=new Point(1804, 1598), ZoomWidth=160, ZoomHeight=60, Img=null,
@@ -8032,6 +8065,33 @@ namespace SimConnect3
             }
         }
 
+        /// <summary>
+        /// Cert si `bounds` queda majoritàriament amagat sota una tapa 3D activa per a l'avió actual
+        /// (qualsevol overlay amb "COVER" al Name i ShowWhen() actualment cert). Fet servir per "show
+        /// all areas": una zona de clic que existeix però està tapada visualment mai s'ha de ressaltar.
+        /// </summary>
+        private bool IsHiddenByActiveCover(Rectangle bounds)
+        {
+            bool CoveredIn(List<OverlayImage> list)
+            {
+                foreach (var ov in list)
+                {
+                    if (!ov.Name.Contains("COVER")) continue;
+                    // SW_SE_SELECTOR_COVER (2026-09-05): excepció — no amaga cap control, només tapa
+                    // l'art de fons vell (2 manetes fotografiades) perquè el selector únic nou
+                    // (SW_SE_SELECTOR / SE_SELECTOR-LEFT / SE_SELECTOR-RIGHT) es dibuixi a sobre, ben
+                    // actiu. Tractar-la com una tapa normal amagava per error aquests controls reals.
+                    if (ov.Name == "SW_SE_SELECTOR_COVER") continue;
+                    if (!(ov.ShowWhen?.Invoke() ?? false)) continue;
+                    var overlap = Rectangle.Intersect(ov.Bounds, bounds);
+                    if ((long)overlap.Width * overlap.Height * 2 >= (long)bounds.Width * bounds.Height)
+                        return true;
+                }
+                return false;
+            }
+            return CoveredIn(overlayImages) || CoveredIn(g3000OverlayImages);
+        }
+
         // Dibuixa una "tapa" opaca amb efecte de relleu (vora clara dalt/esquerra, fosca baix/dreta) a la
         // posició/mida de l'overlay indicat. Reutilitzat per totes les SW_*_COVER_RELIEF*.
         private void DrawReliefCover(Graphics g, string overlayName)
@@ -8705,6 +8765,15 @@ namespace SimConnect3
                     foreach (var ov in g3000OverlayImages)
                     {
                         if (ov.OnClick == null) continue;
+                        // OJO: NO filtrem per ov.ShowWhen aquí — en molts interruptors (llums, etc.)
+                        // ShowWhen no indica aplicabilitat per avió sinó la posició visual actual del
+                        // switch (p.ex. "() => !beaconActive"), i amagaria el ressaltat quan la llum
+                        // està encesa. L'aplicabilitat real es llegeix d'OnClickEnabled quan existeix
+                        // (senyal ja usat pel dispatch de clics: "aquest OnClick fa alguna cosa de
+                        // veritat ara mateix"), i amb tapes 3D (IsHiddenByActiveCover).
+                        if (!(ov.OnClickEnabled?.Invoke() ?? true)) continue;
+                        if (ov.Name.Contains("RECOGN")) continue; // llum recognition: no la fem servir mai
+                        if (IsHiddenByActiveCover(ov.Bounds)) continue; // tapat per una tapa 3D
                         if (ov.IsRound)
                         {
                             e.Graphics.FillEllipse(overlayBrush, ov.Bounds);
@@ -9443,20 +9512,26 @@ namespace SimConnect3
                 // OverlayImages amb OnClick (G1000 — el G3000 ja ha fet return abans d'arribar aquí)
                 foreach (var ov in overlayImages)
                 {
-                    if (ov.OnClick != null)
-                    {
-                        e.Graphics.FillRectangle(overlayBrush, ov.Bounds);
-                        e.Graphics.DrawRectangle(overlayPen, ov.Bounds);
-                    }
+                    if (ov.OnClick == null) continue;
+                    // OJO: NO filtrem per ov.ShowWhen aquí — veure comentari equivalent al bloc G3000
+                    // (ShowWhen sovint és estat visual del switch, no aplicabilitat per avió).
+                    if (!(ov.OnClickEnabled?.Invoke() ?? true)) continue;
+                    if (ov.Name.Contains("RECOGN")) continue; // llum recognition: no la fem servir mai
+                    if (IsHiddenByActiveCover(ov.Bounds)) continue; // tapat per una tapa 3D
+                    e.Graphics.FillRectangle(overlayBrush, ov.Bounds);
+                    e.Graphics.DrawRectangle(overlayPen, ov.Bounds);
                 }
 
                 // Trim wheel vertical
                 e.Graphics.FillRectangle(overlayBrush, trimZone);
                 e.Graphics.DrawRectangle(overlayPen, trimZone);
 
-                // Rudder trim wheel horitzontal
-                e.Graphics.FillRectangle(overlayBrush, rudderTrimZone);
-                e.Graphics.DrawRectangle(overlayPen, rudderTrimZone);
+                // Rudder trim wheel horitzontal — DA-40 (2026-09-05, confirmat per Pere): exclosa.
+                if (!IsDA40())
+                {
+                    e.Graphics.FillRectangle(overlayBrush, rudderTrimZone);
+                    e.Graphics.DrawRectangle(overlayPen, rudderTrimZone);
+                }
             }
 
 
