@@ -53,8 +53,6 @@ namespace SimConnect3
         private bool sfsMonitorRunning = false;
         private Form? _sfsMissingForm;
         private System.Threading.Timer? _sfsCheckTimer;
-        private System.Windows.Forms.Button _tactileBtn = null!;
-        private System.Windows.Forms.Button _showAreasBtn = null!;
         private System.Windows.Forms.Label _aircraftTitleLbl = null!;
 
 
@@ -1413,8 +1411,6 @@ namespace SimConnect3
         private double _fuelSelectionSet = 2;
 
         private bool calibrationMode = false;
-        private bool  _tactilebtnDragging = false;
-        private Point _tactilebtnDragOffset;
         private System.Windows.Forms.Button? _configBtn;
         private bool  _configBtnDragging = false;
         private Point _configBtnDragOffset;
@@ -1423,6 +1419,7 @@ namespace SimConnect3
         private Point _closeBtnDragOffset;
         private bool  _showAreasBtnDragging = false;
         private Point _showAreasBtnDragOffset;
+        private Point _showAreasBtnPos;
         private System.Windows.Forms.Button _gearBtn = null!;
         private System.Windows.Forms.Button _overlayGearBtn = null!;
         private bool  _gearBtnDragging = false;
@@ -1451,81 +1448,19 @@ namespace SimConnect3
         private bool  _focusBtnDragging;
         private Point _focusBtnDragOffset;
 
-        // Engine Start/Stop buttons
-        private System.Windows.Forms.Button _engineStartBtn = null!;
-        private bool  _engineStartBtnDragging;
-        private Point _engineStartBtnDragOffset;
-
-        private System.Windows.Forms.Button _engineStopBtn = null!;
-        private bool  _engineStopBtnDragging;
-        private Point _engineStopBtnDragOffset;
-
-        // Botons provisionals de prova — DA-40 FUEL_SELECTOR_SET, independents del selector de l'app,
-        // per comprovar si la comanda sola fa efecte a MSFS.
-        private System.Windows.Forms.Button _testFuelSelNormBtn = null!;
-        private bool  _testFuelSelNormBtnDragging;
-        private Point _testFuelSelNormBtnDragOffset;
-        private System.Windows.Forms.Button _testFuelSelEmergBtn = null!;
-        private bool  _testFuelSelEmergBtnDragging;
-        private Point _testFuelSelEmergBtnDragOffset;
-        private System.Windows.Forms.Button _testFuelSelOffBtn = null!;
-        private bool  _testFuelSelOffBtnDragging;
-        private Point _testFuelSelOffBtnDragOffset;
-        private TextBox _testJunctionInput = null!;
-        private bool  _testJunctionInputDragging;
-        private Point _testJunctionInputDragOffset;
-        private System.Windows.Forms.Button _testJunctionSendBtn = null!;
-        private bool  _testJunctionSendBtnDragging;
-        private Point _testJunctionSendBtnDragOffset;
-        private System.Windows.Forms.Button _testTriggerSendBtn = null!;
-        private bool  _testTriggerSendBtnDragging;
-        private Point _testTriggerSendBtnDragOffset;
-        private System.Windows.Forms.Button _testAvionicsToggleBtn = null!;
-        private bool  _testAvionicsToggleBtnDragging;
-        private Point _testAvionicsToggleBtnDragOffset;
-        // Caravan ALTGEN1 (2026-08-26) — revòlver de candidats RPN pel moviment visual de RESET,
-        // reutilitzant el botó "SEND" de la pantalla AUX (un clic = un candidat nou). Fer-ho amb
-        // l'alternador ja en TRIP/OFF abans de clicar (RESET normalment només té sentit des d'apagat).
-        // Vegeu [[project_wasm_pending_changes]] — 2 intents previs (O: i B:ELECTRICAL_Alternator_1_Reset
-        // sols, amb l'alternador ja engegat) van fallar; aquests combinen el B: amb el TOGGLE real.
-        private int _testAltGen1ResetIdx = 0;
-        // Confirmat 2026-08-26 al Behavior Debug (LocalVariables, filtre "alt", "Show only vars set
-        // by plane") que XMLVAR_Alternator_Reset_Trip i XMLVAR_Alternator_1_Reset_Trip SÓN variables
-        // reals de l'avió (no invents). Ara provem un valor clarament diferent de 0 per confirmar
-        // en directe (mirant aquell mateix panell) si el nostre missatger genèric les pot escriure.
-        // Caravan IGNITION (2026-08-26, MSFS2020) — als Pinned Events del Behavior Debug, Execute sobre
-        // "ENGINE_Ignition_1_Auto" i "ENGINE_Ignition_1_On" SÍ mouen el selector al VC (confirmat per
-        // Pere); "ENGINE_Ignition_1_Toggle" (el que ja fem servir pel 2024) NO fa res a 2020.
-        // Caravan DEICE (2026-08-26, MSFS2020) — DEICE_Airframe_1 (valor vist 2.000) i
-        // XMLVAR_DeiceWindshield_1 (valor vist 1.000) confirmats REALS al Behavior Debug LocalVariables
-        // (no invents, com el vell L:XMLVAR_DEICE_MASTER que mai es va confirmar per la Caravan).
-        // DA-40 MASTER — RESOLT 2026-08-28: K:ENGINE_MASTER_1_SET (mateix event que la DA-62).
-        // DA-62 PANEL LIGHT (2026-08-28, MSFS2020) — Ronda 2: "1 (>K:PANEL_LIGHTS_SET)" fa pujar la
-        // llum una mica (efecte real i persistent, sembla un INCREMENT no un SET absolut, com el pom de
-        // la C172). "3 0 (>K:2:LIGHT_POTENTIOMETER_SET)" l'apaga 1s però torna sol — coincideix amb el
-        // patró de pom físic ja vist (valor reafirmat des d'una posició real, no controlable des de
-        // fora). Provem repetir K:PANEL_LIGHTS_SET moltes vegades per veure si arriba a plena brillantor.
-        // CARAVAN 208B FUEL PUMP 1 (2026-09-01, MSFS2020 NOMÉS) — confirmat K:ELECT_FUEL_PUMP1_SET amb
-        // valor directe (0=OFF,1=ON,2=AUTO/NORM), mateix event que Baron/Bonanza 2020.
-        // TBM930 INERT SEP (2026-09-02, MSFS2020 NOMÉS) — ni K:ANTI_ICE_TOGGLE_ENG1 sol, ni combinat amb
-        // L:MF_TBM930_DEICE_Engine_1_Set, ni el L: sol van bé. Provem el B: directe (sense passar pel
-        // relay del pedaç XML) i el toggle natiu via el missatger genèric per descartar diferències.
-        private readonly string[] _testAltGen1ResetCandidates = new[] {
-            "(>B:DEICE_Engine_1_Set)",
-            "1 (>B:DEICE_Engine_1_Set)",
-            "0 (>B:DEICE_Engine_1_Set)",
-            "(>K:ANTI_ICE_TOGGLE_ENG1)",
-        };
-
         private System.Windows.Forms.Button _g3000Btn = null!;
         private bool  _g3000BtnDragging;
         private Point _g3000BtnDragOffset;
+        private System.Windows.Forms.Button _g1000Btn = null!;
+        private bool  _g1000BtnDragging;
+        private Point _g1000BtnDragOffset;
 
         private bool  _tb21Dragging;
         private Point _tb21DragOffset;
         private DateTime _lastRepaint = DateTime.MinValue;
 
-        private Label? _tipLbl;
+        private Form? _popoutReminderForm;
+        private Label? _popoutReminderMsgLbl;
         private Form? _overlayPanel;
         private Panel? _fsConnPanel;
         private bool _taxiPropActive = false;
@@ -1885,41 +1820,6 @@ namespace SimConnect3
                 e.Graphics.DrawRectangle(pen, 0, 0, _overlayPanel.Width - 1, _overlayPanel.Height - 1);
             };
 
-            _tactileBtn = new System.Windows.Forms.Button
-            {
-                Text = "🖐  Make this screen touch",
-                Location = new Point(3477, 1230),
-                Size = new Size(363, 63),
-                BackColor = Color.FromArgb(40, 40, 40),
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI Emoji", 26f, FontStyle.Bold, GraphicsUnit.Pixel),
-                Cursor = Cursors.Hand
-            };
-            _tactileBtn.FlatAppearance.BorderSize = 2;
-            _tactileBtn.FlatAppearance.BorderColor = Color.White;
-            _tactileBtn.Click += (s, e) =>
-            {
-                if (calibrationMode) return;
-                TouchDetector.LaunchWindowsTouchSettingsAndExit(this);
-            };
-            _tactileBtn.MouseDown += (s, e) =>
-            {
-                if (!calibrationMode) return;
-                _tactilebtnDragging = true;
-                _tactilebtnDragOffset = e.Location;
-            };
-            _tactileBtn.MouseMove += (s, e) =>
-            {
-                if (!_tactilebtnDragging) return;
-                var screenPt = _tactileBtn.PointToScreen(e.Location);
-                var formPt = _overlayPanel!.PointToClient(screenPt);
-                _tactileBtn.Location = new Point(formPt.X - _tactilebtnDragOffset.X, formPt.Y - _tactilebtnDragOffset.Y);
-            };
-            _tactileBtn.MouseUp += (s, e) => { _tactilebtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
-            _tactileBtn.Location = new Point(900, 100);
-            _overlayPanel.Controls.Add(_tactileBtn);
-
             _configBtn = new System.Windows.Forms.Button
             {
                 Text = "⚙  CONFIGURATION",
@@ -2013,9 +1913,9 @@ namespace SimConnect3
             _fsConnTitle.MouseUp += (s, e) => { _tb21Dragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             _overlayPanel.Controls.Add(_fsConnPanel);
 
-            _g3000Btn = MakeGroupBtn("TBM 930 cockpit", 363, 63);
+            _g3000Btn = MakeGroupBtn("TBM 930 Cockpit", 363, 63);
             _g3000Btn.Location = new Point(3100, 100);
-            _g3000Btn.Click += (s, e) => SetG3000Active(!_g3000Active);
+            _g3000Btn.Click += (s, e) => SetG3000Active(true);
             _g3000Btn.MouseDown += (s, e) =>
             {
                 if (!calibrationMode) return;
@@ -2031,6 +1931,26 @@ namespace SimConnect3
             };
             _g3000Btn.MouseUp += (s, e) => { _g3000BtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             _overlayPanel.Controls.Add(_g3000Btn);
+
+            _g1000Btn = MakeGroupBtn("G1000 Cockpit", 363, 63);
+            _g1000Btn.Location = new Point(_g3000Btn.Location.X, _g3000Btn.Location.Y + _g3000Btn.Height + 10);
+            _g1000Btn.Click += (s, e) => SetG3000Active(false);
+            _g1000Btn.MouseDown += (s, e) =>
+            {
+                if (!calibrationMode) return;
+                _g1000BtnDragging = true;
+                _g1000BtnDragOffset = e.Location;
+            };
+            _g1000Btn.MouseMove += (s, e) =>
+            {
+                if (!_g1000BtnDragging) return;
+                var screenPt = _g1000Btn.PointToScreen(e.Location);
+                var formPt = _overlayPanel!.PointToClient(screenPt);
+                _g1000Btn.Location = new Point(formPt.X - _g1000BtnDragOffset.X, formPt.Y - _g1000BtnDragOffset.Y);
+            };
+            _g1000Btn.MouseUp += (s, e) => { _g1000BtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            _overlayPanel.Controls.Add(_g1000Btn);
+            UpdateCockpitModeButtons();
 
             _thrQuadrantBtn = new System.Windows.Forms.Button
             {
@@ -2086,42 +2006,6 @@ namespace SimConnect3
             closeButton.Anchor = AnchorStyles.None;
             _overlayPanel.Controls.Add(closeButton);
 
-            _showAreasBtn = new System.Windows.Forms.Button
-            {
-                Text = "👆  show the clickable areas",
-                Location = new Point(3477, 1170),
-                Size = new Size(363, 63),
-                BackColor = Color.DimGray,
-                ForeColor = Color.White,
-                FlatStyle = FlatStyle.Flat,
-                Font = new Font("Segoe UI Emoji", 26f, FontStyle.Bold, GraphicsUnit.Pixel),
-                Cursor = Cursors.Hand
-            };
-            _showAreasBtn.FlatAppearance.BorderSize = 1;
-            _showAreasBtn.FlatAppearance.BorderColor = Color.White;
-            _showAreasBtn.Click += (s, e) =>
-            {
-                if (calibrationMode) return;
-                mainSurface.ShowAllAreas = !mainSurface.ShowAllAreas;
-                _showAreasBtn.BackColor = mainSurface.ShowAllAreas ? Color.Orange : Color.DimGray;
-                pbMain.Invalidate();
-            };
-            _showAreasBtn.MouseDown += (s, e) =>
-            {
-                if (!calibrationMode) return;
-                _showAreasBtnDragging = true;
-                _showAreasBtnDragOffset = e.Location;
-            };
-            _showAreasBtn.MouseMove += (s, e) =>
-            {
-                if (!_showAreasBtnDragging) return;
-                var screenPt = _showAreasBtn.PointToScreen(e.Location);
-                var formPt = _overlayPanel!.PointToClient(screenPt);
-                _showAreasBtn.Location = new Point(formPt.X - _showAreasBtnDragOffset.X, formPt.Y - _showAreasBtnDragOffset.Y);
-            };
-            _showAreasBtn.MouseUp += (s, e) => { _showAreasBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
-            _showAreasBtn.Location = new Point(500, 100);
-            _overlayPanel.Controls.Add(_showAreasBtn);
 
             _gearBtn = new System.Windows.Forms.Button
             {
@@ -2210,6 +2094,11 @@ namespace SimConnect3
             this.Controls.Add(_gearBtn);
             _gearBtn.BringToFront();
 
+            // ── "Botó" mostrar àrees clicables — dibuixat directament sobre pbMain (no Control, per
+            // transparència real; els Button/Label de WinForms no la garanteixen de forma fiable
+            // com a fills d'un PictureBox amb contingut dibuixat a mà) — just sota l'engranatge.
+            _showAreasBtnPos = new Point(_gearBtn.Location.X, _gearBtn.Location.Y + _gearBtn.Height + 10);
+
             // ── Helpers de posicionament de grups ──────────────────────────
             void UpdateVolGroupPositions()
             {
@@ -2217,8 +2106,10 @@ namespace SimConnect3
                 _volDownBtn.Location = new Point(_volGrpAnchor.X, _volGrpAnchor.Y + 70);
             }
             // ── Helpers MSFS focus + tecles ────────────────────────────────
+            // "FlightSimulator" = MSFS2020, "FlightSimulator2024" = MSFS2024 (executables diferents).
             System.Diagnostics.Process? GetMSFSProcess() =>
-                System.Diagnostics.Process.GetProcessesByName("FlightSimulator").FirstOrDefault();
+                System.Diagnostics.Process.GetProcessesByName("FlightSimulator").FirstOrDefault()
+                ?? System.Diagnostics.Process.GetProcessesByName("FlightSimulator2024").FirstOrDefault();
 
             // ── Drag handlers — grup volum ─────────────────────────────────
             void OnVolGrpMouseDown(object? s, MouseEventArgs e)
@@ -2375,174 +2266,6 @@ namespace SimConnect3
             };
             _focusBtn.Location = new Point(2200, 100);
             _overlayPanel.Controls.Add(_focusBtn);
-
-            // ── Botó ENGINE START ──────────────────────────────────────────
-            _engineStartBtn = MakeGroupBtn("ENG START", 220, 63);
-            _engineStartBtn.Location = new Point(1920 + 120 + 120, 1380);
-            _engineStartBtn.Click += (s, e) =>
-            {
-                if (calibrationMode) return;
-                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.ENGINE_AUTO_START, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-            };
-            _engineStartBtn.MouseDown += (s, e) =>
-            {
-                if (!calibrationMode) return;
-                _engineStartBtnDragging = true;
-                _engineStartBtnDragOffset = e.Location;
-            };
-            _engineStartBtn.MouseMove += (s, e) =>
-            {
-                if (!_engineStartBtnDragging) return;
-                var sp = _engineStartBtn.PointToScreen(e.Location);
-                var fp = _overlayPanel!.PointToClient(sp);
-                _engineStartBtn.Location = new Point(fp.X - _engineStartBtnDragOffset.X, fp.Y - _engineStartBtnDragOffset.Y);
-            };
-            _engineStartBtn.MouseUp += (s, e) =>
-            {
-                _engineStartBtnDragging = false;
-                try { ExportCalibrationPositions(silent: true); } catch { }
-            };
-            _engineStartBtn.Location = new Point(2500, 100);
-            _overlayPanel.Controls.Add(_engineStartBtn);
-
-            // ── Botó ENGINE STOP ──────────────────────────────────────────
-            _engineStopBtn = MakeGroupBtn("ENG STOP", 220, 63);
-            _engineStopBtn.Location = new Point(1920 + 120 + 120 + 120, 1380);
-            _engineStopBtn.Click += (s, e) =>
-            {
-                if (calibrationMode) return;
-                simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.ENGINE_AUTO_SHUTDOWN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-            };
-            _engineStopBtn.MouseDown += (s, e) =>
-            {
-                if (!calibrationMode) return;
-                _engineStopBtnDragging = true;
-                _engineStopBtnDragOffset = e.Location;
-            };
-            _engineStopBtn.MouseMove += (s, e) =>
-            {
-                if (!_engineStopBtnDragging) return;
-                var sp = _engineStopBtn.PointToScreen(e.Location);
-                var fp = _overlayPanel!.PointToClient(sp);
-                _engineStopBtn.Location = new Point(fp.X - _engineStopBtnDragOffset.X, fp.Y - _engineStopBtnDragOffset.Y);
-            };
-            _engineStopBtn.MouseUp += (s, e) =>
-            {
-                _engineStopBtnDragging = false;
-                try { ExportCalibrationPositions(silent: true); } catch { }
-            };
-            _engineStopBtn.Location = new Point(2800, 100);
-            _overlayPanel.Controls.Add(_engineStopBtn);
-
-            // ── Botons de prova provisionals: FUEL_SELECTOR_SET independent del selector DA-40 ──────
-            _testFuelSelNormBtn = MakeGroupBtn("FSEL NORM (2)", 220, 63);
-            _testFuelSelNormBtn.Click += (s, e) => { if (!calibrationMode) { Debug.WriteLine($">>> NORMAL premut, simconnect null? {simconnect == null}"); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_NORMAL, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } };
-            _testFuelSelNormBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testFuelSelNormBtnDragging = true; _testFuelSelNormBtnDragOffset = e.Location; };
-            _testFuelSelNormBtn.MouseMove += (s, e) => {
-                if (!_testFuelSelNormBtnDragging) return;
-                var sp = _testFuelSelNormBtn.PointToScreen(e.Location);
-                var fp = _overlayPanel!.PointToClient(sp);
-                _testFuelSelNormBtn.Location = new Point(fp.X - _testFuelSelNormBtnDragOffset.X, fp.Y - _testFuelSelNormBtnDragOffset.Y);
-            };
-            _testFuelSelNormBtn.MouseUp += (s, e) => { _testFuelSelNormBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
-            _testFuelSelNormBtn.Location = new Point(3100, 20);
-            _overlayPanel.Controls.Add(_testFuelSelNormBtn);
-
-            _testFuelSelEmergBtn = MakeGroupBtn("FSEL EMERG (3)", 220, 63);
-            _testFuelSelEmergBtn.Click += (s, e) => { if (!calibrationMode) { Debug.WriteLine($">>> EMERGENCY premut, simconnect null? {simconnect == null}"); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_EMERGENCY, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } };
-            _testFuelSelEmergBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testFuelSelEmergBtnDragging = true; _testFuelSelEmergBtnDragOffset = e.Location; };
-            _testFuelSelEmergBtn.MouseMove += (s, e) => {
-                if (!_testFuelSelEmergBtnDragging) return;
-                var sp = _testFuelSelEmergBtn.PointToScreen(e.Location);
-                var fp = _overlayPanel!.PointToClient(sp);
-                _testFuelSelEmergBtn.Location = new Point(fp.X - _testFuelSelEmergBtnDragOffset.X, fp.Y - _testFuelSelEmergBtnDragOffset.Y);
-            };
-            _testFuelSelEmergBtn.MouseUp += (s, e) => { _testFuelSelEmergBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
-            _testFuelSelEmergBtn.Location = new Point(3100, 95);
-            _overlayPanel.Controls.Add(_testFuelSelEmergBtn);
-
-            _testFuelSelOffBtn = MakeGroupBtn("FSEL OFF (0)", 220, 63);
-            _testFuelSelOffBtn.Click += (s, e) => { if (!calibrationMode) { Debug.WriteLine($">>> OFF premut, simconnect null? {simconnect == null}"); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SFS_DA40_FUELSEL_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } };
-            _testFuelSelOffBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testFuelSelOffBtnDragging = true; _testFuelSelOffBtnDragOffset = e.Location; };
-            _testFuelSelOffBtn.MouseMove += (s, e) => {
-                if (!_testFuelSelOffBtnDragging) return;
-                var sp = _testFuelSelOffBtn.PointToScreen(e.Location);
-                var fp = _overlayPanel!.PointToClient(sp);
-                _testFuelSelOffBtn.Location = new Point(fp.X - _testFuelSelOffBtnDragOffset.X, fp.Y - _testFuelSelOffBtnDragOffset.Y);
-            };
-            _testFuelSelOffBtn.MouseUp += (s, e) => { _testFuelSelOffBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
-            _testFuelSelOffBtn.Location = new Point(3100, 170);
-            _overlayPanel.Controls.Add(_testFuelSelOffBtn);
-
-            // ── Prova lliure de junction: escriu "IO" (index*10+opció, p.ex. 11 = junction 1, opció 1) i envia ──
-            _testJunctionInput = new TextBox { Location = new Point(3100, 235), Width = 100, Font = new Font("Arial", 14) };
-            _testJunctionInput.MouseDown += (s, e) => { if (!calibrationMode) return; _testJunctionInputDragging = true; _testJunctionInputDragOffset = e.Location; };
-            _testJunctionInput.MouseMove += (s, e) => {
-                if (!_testJunctionInputDragging) return;
-                var sp = _testJunctionInput.PointToScreen(e.Location);
-                var fp = _overlayPanel!.PointToClient(sp);
-                _testJunctionInput.Location = new Point(fp.X - _testJunctionInputDragOffset.X, fp.Y - _testJunctionInputDragOffset.Y);
-            };
-            _testJunctionInput.MouseUp += (s, e) => { _testJunctionInputDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
-            _overlayPanel.Controls.Add(_testJunctionInput);
-            _testJunctionSendBtn = MakeGroupBtn("SEND", 100, 40);
-            _testJunctionSendBtn.Location = new Point(3210, 230);
-            _testJunctionSendBtn.Click += (s, e) => {
-                if (calibrationMode) return;
-                // TBM930 INERT SEP 2020 — revòlver de candidats, un per clic.
-                string rpn = _testAltGen1ResetCandidates[_testAltGen1ResetIdx % _testAltGen1ResetCandidates.Length];
-                Debug.WriteLine($">>> SEND: TBM930 INERTSEP 2020 TEST #{_testAltGen1ResetIdx} de {_testAltGen1ResetCandidates.Length}: {rpn}");
-                SendGenericRpn(rpn);
-                _testAltGen1ResetIdx++;
-            };
-            _testJunctionSendBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testJunctionSendBtnDragging = true; _testJunctionSendBtnDragOffset = e.Location; };
-            _testJunctionSendBtn.MouseMove += (s, e) => {
-                if (!_testJunctionSendBtnDragging) return;
-                var sp = _testJunctionSendBtn.PointToScreen(e.Location);
-                var fp = _overlayPanel!.PointToClient(sp);
-                _testJunctionSendBtn.Location = new Point(fp.X - _testJunctionSendBtnDragOffset.X, fp.Y - _testJunctionSendBtnDragOffset.Y);
-            };
-            _testJunctionSendBtn.MouseUp += (s, e) => { _testJunctionSendBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
-            _overlayPanel.Controls.Add(_testJunctionSendBtn);
-
-            // ── Mateix codi (index*10+valor), però cap a FUELSYSTEM_TRIGGER_SET (booleà 0/1) — Caravan etc. ──
-            _testTriggerSendBtn = MakeGroupBtn("TRIG", 100, 40);
-            _testTriggerSendBtn.Location = new Point(3320, 230);
-            _testTriggerSendBtn.Click += (s, e) => {
-                if (calibrationMode) return;
-                // Caravan STARTER — prova aïllada del preset MobiFlight "C208 Engine Starter Switch Off".
-                Debug.WriteLine(">>> TRIG: Caravan STARTER -> OFF (nostre WASM, prova)");
-                SendGenericRpn("(A:GENERAL ENG STARTER:1, Bool) if{ 0 (>K:SET_STARTER1_HELD) (>K:TOGGLE_STARTER1) }");
-            };
-            _testTriggerSendBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testTriggerSendBtnDragging = true; _testTriggerSendBtnDragOffset = e.Location; };
-            _testTriggerSendBtn.MouseMove += (s, e) => {
-                if (!_testTriggerSendBtnDragging) return;
-                var sp = _testTriggerSendBtn.PointToScreen(e.Location);
-                var fp = _overlayPanel!.PointToClient(sp);
-                _testTriggerSendBtn.Location = new Point(fp.X - _testTriggerSendBtnDragOffset.X, fp.Y - _testTriggerSendBtnDragOffset.Y);
-            };
-            _testTriggerSendBtn.MouseUp += (s, e) => { _testTriggerSendBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
-            _overlayPanel.Controls.Add(_testTriggerSendBtn);
-
-            // ── Mateix camp, però envia el valor cru com a índex de bus a ELECTRICAL_LINE_CONNECTION_TOGGLE
-            // (DA-62 avionics — 'nom'_n de Behaviors probablement es resol a un número, com el junction del C400) ──
-            _testAvionicsToggleBtn = MakeGroupBtn("AVTGL", 100, 40);
-            _testAvionicsToggleBtn.Location = new Point(3430, 230);
-            _testAvionicsToggleBtn.Click += (s, e) => {
-                if (calibrationMode) return;
-                // Caravan STARTER — prova aïllada del preset MobiFlight "C208 Engine Starter Switch Motor".
-                Debug.WriteLine(">>> AVT: Caravan STARTER -> MOTOR (mecanisme net, confirmat 2026-08-09)");
-                SendGenericRpn("0 (>K:TURBINE_IGNITION_SWITCH_SET1) (A:GENERAL ENG STARTER:1, Bool) ! if{ 1 (>K:SET_STARTER1_HELD) }");
-            };
-            _testAvionicsToggleBtn.MouseDown += (s, e) => { if (!calibrationMode) return; _testAvionicsToggleBtnDragging = true; _testAvionicsToggleBtnDragOffset = e.Location; };
-            _testAvionicsToggleBtn.MouseMove += (s, e) => {
-                if (!_testAvionicsToggleBtnDragging) return;
-                var sp = _testAvionicsToggleBtn.PointToScreen(e.Location);
-                var fp = _overlayPanel!.PointToClient(sp);
-                _testAvionicsToggleBtn.Location = new Point(fp.X - _testAvionicsToggleBtnDragOffset.X, fp.Y - _testAvionicsToggleBtnDragOffset.Y);
-            };
-            _testAvionicsToggleBtn.MouseUp += (s, e) => { _testAvionicsToggleBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
-            _overlayPanel.Controls.Add(_testAvionicsToggleBtn);
 
             //this.TopMost = true;
             this.Load += frmMain_Load;
@@ -5030,15 +4753,20 @@ namespace SimConnect3
         // Canvi de panell TBM930/G1000 — extret del Click del _g3000Btn perquè es pugui invocar també
         // des de la detecció automàtica d'avió sense passar per PerformClick() (el botó viu a la
         // pantalla AUX, que sempre està amagada — CanSelect pot ser false i fer que PerformClick no faci res).
+        /// <summary>Ressalta el botó del cockpit actiu (TBM 930 / G1000) i apaga l'altre.</summary>
+        private void UpdateCockpitModeButtons()
+        {
+            _g3000Btn.FlatAppearance.BorderSize = _g3000Active ? 4 : 1;
+            _g3000Btn.FlatAppearance.BorderColor = Color.White;
+            _g1000Btn.FlatAppearance.BorderSize = _g3000Active ? 1 : 4;
+            _g1000Btn.FlatAppearance.BorderColor = Color.White;
+        }
+
         private void SetG3000Active(bool active)
         {
             if (calibrationMode) return;
             _g3000Active = active;
-            _g3000Btn.Text = _g3000Active ? "G1000 cockpit" : "TBM 930 cockpit";
-            _panelVisible = false;
-            _gearBtn.BackColor = Color.FromArgb(40, 40, 40);
-            _gearBtn.Text = "⚙";
-            _overlayPanel!.Hide();
+            UpdateCockpitModeButtons();
             _thrQuadrantBtn.Visible = _g3000Active;
             if (!_g3000Active) { _thrQuadrantVisible = false; }
             if (_g3000Active)
@@ -5068,47 +4796,73 @@ namespace SimConnect3
             else
             {
                 ApplyPfdRegion();
-                if (_tipLbl != null) { this.Controls.Remove(_tipLbl); _tipLbl.Dispose(); _tipLbl = null; }
+                if (_popoutReminderForm != null && !_popoutReminderForm.IsDisposed) _popoutReminderForm.Close();
                 Task.Run(async () =>
                 {
                     await Task.Delay(1000);
-                    this.BeginInvoke(new Action(() =>
-                    {
-                        _tipLbl = new Label
-                        {
-                            Text = "If you no longer need G3000 mode, close the MSFS G3000 pop‑out windows to restore full panel functionality.  [10]",
-                            AutoSize = false,
-                            Size = new Size(1440, 120),
-                            Location = new Point((3840 - 1440) / 2, (2160 - 120) / 2 + 50),
-                            TextAlign = ContentAlignment.MiddleCenter,
-                            Font = new Font("Segoe UI", 26f),
-                            ForeColor = Color.White,
-                            BackColor = Color.DarkRed
-                        };
-                        this.Controls.Add(_tipLbl);
-                        _tipLbl.BringToFront();
-                    }));
+                    this.BeginInvoke(new Action(ShowPopoutReminder));
                     for (int i = 9; i >= 0; i--)
                     {
                         await Task.Delay(1000);
                         this.BeginInvoke(new Action(() =>
                         {
-                            if (_tipLbl == null) return;
+                            if (_popoutReminderForm == null || _popoutReminderForm.IsDisposed) return;
                             if (i <= 0)
-                            {
-                                this.Controls.Remove(_tipLbl);
-                                _tipLbl.Dispose();
-                                _tipLbl = null;
-                            }
-                            else
-                            {
-                                _tipLbl.Text = "If you no longer need G3000 mode, close the MSFS G3000 pop‑out windows to restore full G1000 panel functionality.  [" + i + "]";
-                            }
+                                _popoutReminderForm.Close();
+                            else if (_popoutReminderMsgLbl != null)
+                                _popoutReminderMsgLbl.Text = "If you no longer need G3000 mode, close the MSFS G3000 pop-out windows to restore full G1000 panel functionality.  [" + i + "]";
                         }));
                     }
                 });
             }
             pbMain.Invalidate();
+        }
+
+        /// <summary>Finestra normal (no modal) que recorda tancar els pop-outs G3000, amb botó de tancar; el compte enrere de 10s el porta el bucle de SetG3000Active.</summary>
+        private void ShowPopoutReminder()
+        {
+            var form = new Form
+            {
+                AutoScaleMode = AutoScaleMode.None,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false,
+                MinimizeBox = false,
+                Text = "panelAIR",
+                Size = new Size(1440, 200),
+                BackColor = Color.White,
+                StartPosition = FormStartPosition.Manual
+            };
+            form.Location = this.PointToScreen(new Point((this.ClientSize.Width - form.Width) / 2, 570));
+
+            var msgLbl = new Label
+            {
+                Text = "If you no longer need G3000 mode, close the MSFS G3000 pop-out windows to restore full G1000 panel functionality.  [10]",
+                AutoSize = false,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = new Font("Segoe UI", 18f),
+                ForeColor = Color.FromArgb(22, 32, 42),
+                Location = new Point(24, 20),
+                Size = new Size(form.ClientSize.Width - 48, 110)
+            };
+            form.Controls.Add(msgLbl);
+
+            var closeButton = new Button
+            {
+                Text = "Close",
+                Size = new Size(160, 48),
+                Location = new Point((form.ClientSize.Width - 160) / 2, 138),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(235, 91, 37),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 14f, FontStyle.Bold)
+            };
+            closeButton.FlatAppearance.BorderSize = 0;
+            closeButton.Click += (s, e) => form.Close();
+            form.Controls.Add(closeButton);
+
+            _popoutReminderMsgLbl = msgLbl;
+            _popoutReminderForm = form;
+            form.Show(this);
         }
 
         private void ForceTbmPulseLightOff()
@@ -8129,6 +7883,22 @@ namespace SimConnect3
             g.DrawLine(shadowPen, rb.Right - 1, rb.Bottom - 1, rb.Left, rb.Bottom - 1);
         }
 
+        /// <summary>Icona "mostrar àrees clicables" — cridat des dels dos camins de PbMain_Paint (G1000 i G3000/TBM).</summary>
+        private void DrawShowAreasIcon(Graphics g)
+        {
+            var showAreasRect = new Rectangle(_showAreasBtnPos, new Size(63, 63));
+            if (mainSurface.ShowAllAreas)
+            {
+                using var showAreasFill = new SolidBrush(Color.FromArgb(140, Color.Orange));
+                g.FillRectangle(showAreasFill, showAreasRect);
+            }
+            using (var showAreasBorder = new Pen(Color.Orange, 2))
+                g.DrawRectangle(showAreasBorder, showAreasRect.X + 1, showAreasRect.Y + 1, showAreasRect.Width - 3, showAreasRect.Height - 3);
+            using (var showAreasFont = new Font("Segoe UI Emoji", 34f, FontStyle.Bold, GraphicsUnit.Pixel))
+            using (var showAreasFmt = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
+                g.DrawString("👆", showAreasFont, Brushes.Orange, showAreasRect, showAreasFmt);
+        }
+
         private void PbMain_Paint(object? sender, PaintEventArgs e)
         {
             try
@@ -8780,6 +8550,7 @@ namespace SimConnect3
                     e.Graphics.FillRectangle(overlayBrush, _g3kRudderTrimZone);
                 }
 
+                DrawShowAreasIcon(e.Graphics);
                 return;
             }
 
@@ -9571,12 +9342,32 @@ namespace SimConnect3
                 e.Graphics.DrawString("CALIBRATGE ACTIU — F12 per sortir", font, Brushes.Red, new Point(200, 15));
             }
 
+            DrawShowAreasIcon(e.Graphics);
+
             }
             catch (OverflowException) { }
         }
 
         private void PbMain_MouseDown(object? sender, MouseEventArgs e)
         {
+            if (e.Button == MouseButtons.Left)
+            {
+                var showAreasRect = new Rectangle(_showAreasBtnPos, new Size(63, 63));
+                if (showAreasRect.Contains(e.Location))
+                {
+                    if (calibrationMode)
+                    {
+                        _showAreasBtnDragging = true;
+                        _showAreasBtnDragOffset = new Point(e.X - _showAreasBtnPos.X, e.Y - _showAreasBtnPos.Y);
+                    }
+                    else
+                    {
+                        mainSurface.ShowAllAreas = !mainSurface.ShowAllAreas;
+                        pbMain.Invalidate();
+                    }
+                    return;
+                }
+            }
             if (e.Button != MouseButtons.Left) return;
             if (_g3000Active && !calibrationMode)
             {
@@ -9906,6 +9697,12 @@ namespace SimConnect3
 
         private void PbMain_MouseMove(object? sender, MouseEventArgs e)
         {
+            if (_showAreasBtnDragging)
+            {
+                _showAreasBtnPos = new Point(e.X - _showAreasBtnDragOffset.X, e.Y - _showAreasBtnDragOffset.Y);
+                pbMain.Invalidate();
+                return;
+            }
             if (_thrHandleDragging)
             {
                 var thrHandle = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
@@ -10242,6 +10039,12 @@ namespace SimConnect3
 
         private void PbMain_MouseUp(object? sender, MouseEventArgs e)
         {
+            if (_showAreasBtnDragging)
+            {
+                _showAreasBtnDragging = false;
+                try { ExportCalibrationPositions(silent: true); } catch { }
+                return;
+            }
             if (_thrHandleDragging)
             {
                 _thrHandleDragging = false;
@@ -10480,26 +10283,17 @@ namespace SimConnect3
             sb.AppendLine($"LVLIND:lvlind:{_apLvlIndBaseX}:{_apLvlIndBaseY}:{_apLvlIndW}:{_apLvlIndH}");
             sb.AppendLine($"RRI:rri:{rudderTrimIndXOffset}:{rudderTrimIndY}");
             sb.AppendLine($"RRZ:rrz:{rudderTrimZoneBaseX}:{rudderTrimZoneBaseY}");
-            sb.AppendLine($"TACBTN:tactile:{_tactileBtn.Location.X}:{_tactileBtn.Location.Y}");
             if (_configBtn != null) sb.AppendLine($"CONFBTN:conf:{_configBtn.Location.X}:{_configBtn.Location.Y}");
             sb.AppendLine($"CLOSEBTN:close:{closeButton.Location.X}:{closeButton.Location.Y}");
-            sb.AppendLine($"SHOWBTN:show:{_showAreasBtn.Location.X}:{_showAreasBtn.Location.Y}");
+            sb.AppendLine($"SHOWBTN:show:{_showAreasBtnPos.X}:{_showAreasBtnPos.Y}");
             sb.AppendLine($"GEARBTN:gear:{_gearBtn.Location.X}:{_gearBtn.Location.Y}");
             sb.AppendLine($"OVGEARBTN:ovgear:{_overlayGearBtn.Location.X}:{_overlayGearBtn.Location.Y}");
             sb.AppendLine($"VOLGRP:vg:{_volGrpAnchor.X}:{_volGrpAnchor.Y}");
             sb.AppendLine($"FSBTN:fs:{_fullscreenBtn.Location.X}:{_fullscreenBtn.Location.Y}");
             sb.AppendLine($"ENDBTN:end:{_msfsEndBtn.Location.X}:{_msfsEndBtn.Location.Y}");
             sb.AppendLine($"FOCUSBTN:focus:{_focusBtn.Location.X}:{_focusBtn.Location.Y}");
-            sb.AppendLine($"ENGSTARTBTN:engstart:{_engineStartBtn.Location.X}:{_engineStartBtn.Location.Y}");
-            sb.AppendLine($"ENGSTOPBTN:engstop:{_engineStopBtn.Location.X}:{_engineStopBtn.Location.Y}");
-            sb.AppendLine($"TESTFSELNORM:testfselnorm:{_testFuelSelNormBtn.Location.X}:{_testFuelSelNormBtn.Location.Y}");
-            sb.AppendLine($"TESTFSELEMERG:testfselemerg:{_testFuelSelEmergBtn.Location.X}:{_testFuelSelEmergBtn.Location.Y}");
-            sb.AppendLine($"TESTFSELOFF:testfseloff:{_testFuelSelOffBtn.Location.X}:{_testFuelSelOffBtn.Location.Y}");
-            sb.AppendLine($"TESTJUNCTBOX:testjunctbox:{_testJunctionInput.Location.X}:{_testJunctionInput.Location.Y}");
-            sb.AppendLine($"TESTJUNCTSEND:testjunctsend:{_testJunctionSendBtn.Location.X}:{_testJunctionSendBtn.Location.Y}");
-            sb.AppendLine($"TESTTRIGSEND:testtrigsend:{_testTriggerSendBtn.Location.X}:{_testTriggerSendBtn.Location.Y}");
-            sb.AppendLine($"TESTAVTGL:testavtgl:{_testAvionicsToggleBtn.Location.X}:{_testAvionicsToggleBtn.Location.Y}");
             sb.AppendLine($"G3KBTN:g3k:{_g3000Btn.Location.X}:{_g3000Btn.Location.Y}");
+            sb.AppendLine($"G1000BTN:g1000:{_g1000Btn.Location.X}:{_g1000Btn.Location.Y}");
             sb.AppendLine($"THRQBTN:tq:{_thrQuadrantBtn.Location.X}:{_thrQuadrantBtn.Location.Y}:0:0");
             if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
             string path = GetCalibrationFilePath();
@@ -10645,10 +10439,6 @@ namespace SimConnect3
                     rudderTrimArrowLeftPos  = new Point(rudderTrimZoneBaseX + 42,  rudderTrimZoneBaseY + 50);
                     rudderTrimArrowRightPos = new Point(rudderTrimZoneBaseX + 465, rudderTrimZoneBaseY + 50);
                 }
-                else if (type == "TACBTN")
-                {
-                    _tactileBtn.Location = new Point(x, y);
-                }
                 else if (type == "CONFBTN")
                 {
                     if (_configBtn != null) _configBtn.Location = new Point(x, y);
@@ -10659,7 +10449,7 @@ namespace SimConnect3
                 }
                 else if (type == "SHOWBTN")
                 {
-                    _showAreasBtn.Location = new Point(x, y);
+                    _showAreasBtnPos = new Point(x, y);
                 }
                 else if (type == "GEARBTN")
                 {
@@ -10687,45 +10477,13 @@ namespace SimConnect3
                 {
                     _focusBtn.Location = new Point(x, y);
                 }
-                else if (type == "ENGSTARTBTN")
-                {
-                    _engineStartBtn.Location = new Point(x, y);
-                }
-                else if (type == "ENGSTOPBTN")
-                {
-                    _engineStopBtn.Location = new Point(x, y);
-                }
-                else if (type == "TESTFSELNORM")
-                {
-                    _testFuelSelNormBtn.Location = new Point(x, y);
-                }
-                else if (type == "TESTFSELEMERG")
-                {
-                    _testFuelSelEmergBtn.Location = new Point(x, y);
-                }
-                else if (type == "TESTFSELOFF")
-                {
-                    _testFuelSelOffBtn.Location = new Point(x, y);
-                }
-                else if (type == "TESTJUNCTBOX")
-                {
-                    _testJunctionInput.Location = new Point(x, y);
-                }
-                else if (type == "TESTJUNCTSEND")
-                {
-                    _testJunctionSendBtn.Location = new Point(x, y);
-                }
-                else if (type == "TESTTRIGSEND")
-                {
-                    _testTriggerSendBtn.Location = new Point(x, y);
-                }
-                else if (type == "TESTAVTGL")
-                {
-                    _testAvionicsToggleBtn.Location = new Point(x, y);
-                }
                 else if (type == "G3KBTN")
                 {
                     _g3000Btn.Location = new Point(x, y);
+                }
+                else if (type == "G1000BTN")
+                {
+                    _g1000Btn.Location = new Point(x, y);
                 }
                 else if (type == "THRQBTN")
                 {

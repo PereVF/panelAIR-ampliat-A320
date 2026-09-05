@@ -9,8 +9,8 @@ using System.Windows.Forms;
 namespace SimConnect3
 {
     /// <summary>
-    /// Pantalla de Configuration de panelAIR: Touch Screen, SFSmonitor, SFS Link, TBM 930, Touch Gestures.
-    /// Les 5 targetes es mostren sempre en fila, d'esquerra a dreta.
+    /// Pantalla de Configuration de panelAIR: Screen Position, Touch Screen, SFSmonitor, SFS Link,
+    /// TBM 930, Touch Gestures. Les 6 targetes es mostren sempre en fila, d'esquerra a dreta.
     /// </summary>
     public class ConfigurationForm : Form
     {
@@ -32,7 +32,7 @@ namespace SimConnect3
         {
             AutoScaleMode = AutoScaleMode.None;
             Text = "panelAIR Configuration";
-            Size = new Size(2850, 1100);
+            Size = new Size(3400, 1100);
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.Sizable;
             MaximizeBox = true;
@@ -60,6 +60,7 @@ namespace SimConnect3
             };
             Controls.Add(cardsRow);
 
+            cardsRow.Controls.Add(BuildScreenPositionCard());
             cardsRow.Controls.Add(BuildTouchCard());
             cardsRow.Controls.Add(BuildSfsMonitorCard());
             cardsRow.Controls.Add(BuildSfsLinkCard());
@@ -161,23 +162,70 @@ namespace SimConnect3
                 Font = new Font("Segoe UI", 19f),
                 ForeColor = Color.FromArgb(102, 114, 127),
                 Location = new Point(32, 165),
-                Size = new Size(456, 115)
+                Size = new Size(456, 175)
             };
             card.Controls.Add(descLbl);
 
             content = new Panel
             {
-                Location = new Point(32, 295),
-                Size = new Size(456, 650)
+                Location = new Point(32, 355),
+                Size = new Size(456, 590)
             };
             card.Controls.Add(content);
 
             return card;
         }
 
+        private Panel BuildScreenPositionCard()
+        {
+            var card = MakeCardShell(1, "Screen Position",
+                "Tell Windows where this screen sits, so dragging G1000/G3000 pop-outs here feels natural.",
+                out var content);
+
+            var openButton = new Button
+            {
+                Text = "Open Display Settings",
+                Size = new Size(456, 90),
+                Location = new Point(0, 0),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(235, 91, 37),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 20f, FontStyle.Bold)
+            };
+            openButton.FlatAppearance.BorderSize = 0;
+            content.Controls.Add(openButton);
+
+            var statusLbl = new Label
+            {
+                Text = "",
+                ForeColor = Color.FromArgb(21, 115, 71),
+                Font = new Font("Segoe UI", 15f, FontStyle.Bold),
+                Location = new Point(0, 104),
+                Size = new Size(456, 220)
+            };
+            content.Controls.Add(statusLbl);
+
+            openButton.Click += (s, e) =>
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo { FileName = "ms-settings:display", UseShellExecute = true });
+                    statusLbl.ForeColor = Color.FromArgb(21, 115, 71);
+                    statusLbl.Text = "Drag the box for your new panelAIR screen (3840×2160) to match where it really sits next to your main screen. Click “Identify” if you're not sure which one it is.";
+                }
+                catch
+                {
+                    statusLbl.ForeColor = Color.FromArgb(153, 27, 27);
+                    statusLbl.Text = "Could not open Display Settings.";
+                }
+            };
+
+            return card;
+        }
+
         private Panel BuildTouchCard()
         {
-            var card = MakeCardShell(1, "Touch Screen Setup",
+            var card = MakeCardShell(2, "Touch Screen Setup",
                 "Set this monitor as the touch screen used by panelAIR.", out var content);
 
             _touchButton = new Button
@@ -220,7 +268,7 @@ namespace SimConnect3
 
         private Panel BuildSfsMonitorCard()
         {
-            var card = MakeCardShell(2, "SFSmonitor",
+            var card = MakeCardShell(3, "SFSmonitor",
                 "panelAIR can automatically launch SFSmonitor, which talks to your rotAIR hardware.",
                 out var content);
 
@@ -458,7 +506,7 @@ namespace SimConnect3
 
         private Panel BuildSfsLinkCard()
         {
-            var card = MakeCardShell(3, "SFS Link",
+            var card = MakeCardShell(4, "SFS Link",
                 "panelAIR will install the latest version of SFS Link into your Microsoft Flight Simulator Community folders. You will be asked to confirm before each folder is modified.",
                 out var content);
 
@@ -505,8 +553,8 @@ namespace SimConnect3
 
         private Panel BuildTbm930Card()
         {
-            var card = MakeCardShell(4, "TBM 930 Setup",
-                "To use all panelAIR functions with the TBM 930, install this add-on:", out var content);
+            var card = MakeCardShell(5, "TBM 930 Setup",
+                "Only if you fly the TBM 930 in MSFS2020: install this add-on. Not needed for MSFS2024.", out var content);
 
             AddTbm930Item(content, y: 0,
                 title: "TBM 930 LVARs",
@@ -553,7 +601,7 @@ namespace SimConnect3
 
         private Panel BuildEdgeSwipeCard()
         {
-            var card = MakeCardShell(5, "Touch Gestures",
+            var card = MakeCardShell(6, "Touch Gestures",
                 "This monitor can accidentally open Windows menus when swiping from the edge of the screen (e.g. using the rudder trim wheel).",
                 out var content);
 
