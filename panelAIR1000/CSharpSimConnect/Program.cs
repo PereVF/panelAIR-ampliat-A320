@@ -16,15 +16,25 @@ namespace SimConnect3
             TouchDetector.Install();
 
             bool has4K = Screen.AllScreens.Any(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
-            if (!has4K)
+
+            bool hasPanel = false;
+            using (var searcher = new System.Management.ManagementObjectSearcher(
+                @"SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%VID_0457%PID_0819%' AND ConfigManagerErrorCode = 0 AND Present = TRUE"))
             {
-                MessageBox.Show(
-                    "No compatible 4K display detected.\n\npanelAIR1000 requires a 3840 × 2160 (4K UHD) display to operate.\n\nPlease connect a compatible 4K monitor and restart the application.",
-                    "panelAIR1000",
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-                return;
+                hasPanel = searcher.Get().Count > 0;
             }
+            bool hasMonitor = false;
+            using (var searcher = new System.Management.ManagementObjectSearcher(
+                @"SELECT * FROM Win32_PnPEntity WHERE (DeviceID LIKE '%RTK1B1A%' OR DeviceID LIKE '%XMI3446%') AND ConfigManagerErrorCode = 0"))
+            {
+                hasMonitor = searcher.Get().Count > 0;
+            }
+
+            // Si no té ni el nostre monitor ni el tàctil, sabem del cert que no té panelAIR —
+            // mode demo directe (finestra a escala), sense preguntar res més. També mode demo si,
+            // per qualsevol motiu, no hi ha cap pantalla 4K real (evita petar el codi que dona per
+            // fet que n'hi ha una).
+            frmMain.IsDemoMode = (!hasPanel && !hasMonitor) || !has4K;
 
             if (!AppSettings.Instance.WelcomeCompleted)
             {

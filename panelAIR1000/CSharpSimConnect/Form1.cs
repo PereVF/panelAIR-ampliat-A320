@@ -55,6 +55,13 @@ namespace SimConnect3
         private System.Threading.Timer? _sfsCheckTimer;
         private System.Windows.Forms.Label _aircraftTitleLbl = null!;
 
+        // Mode demo (sense hardware panelAIR): finestra redimensionable a escala en comptes
+        // de fullscreen natiu 1:1 sobre una pantalla 4K real. Decidit a Program.cs abans de
+        // construir frmMain (necessari perquè el constructor fa servir screen4K de seguida).
+        internal static bool IsDemoMode = false;
+        private System.Threading.Timer? _demoTimer;
+        private DateTime _demoStartTime;
+
 
 
 
@@ -1273,14 +1280,22 @@ namespace SimConnect3
             public Func<bool>? SuppressInput;
             public Func<bool>? HideAreasWhenActive;
             public Func<Rectangle, bool>? IsHiddenByCover;
+            public Func<Point, Point>? TransformMouse;
             public bool ShowAllAreas = false;
 
             public UiSurface(PictureBox pb)
             {
                 Pb = pb;
-                pb.MouseDown += OnMouseDown;
-                pb.MouseMove += OnMouseMove;
+                pb.MouseDown += (s, e) => OnMouseDown(s, TranslateForSurface(e));
+                pb.MouseMove += (s, e) => OnMouseMove(s, TranslateForSurface(e));
                 pb.Paint += OnPaint;
+            }
+
+            private MouseEventArgs TranslateForSurface(MouseEventArgs e)
+            {
+                if (TransformMouse == null) return e;
+                var pt = TransformMouse(e.Location);
+                return new MouseEventArgs(e.Button, e.Clicks, pt.X, pt.Y, e.Delta);
             }
 
             private void OnMouseDown(object? sender, MouseEventArgs e)
@@ -1757,11 +1772,15 @@ namespace SimConnect3
                 if (s != null) { using var src = Image.FromStream(s); _bgG3000Image = new Bitmap(src); }
 
             pbMain.Paint += PbMain_Paint;
-            pbMain.MouseDown += PbMain_MouseDown;
-            pbMain.MouseMove += PbMain_MouseMove;
-            pbMain.MouseUp += PbMain_MouseUp;
+            // En mode demo la finestra es redimensiona i el dibuix es fa a escala (veure PbMain_Paint);
+            // aquí traduïm la posició del clic "real" a la posició equivalent al full virtual 3840x2160
+            // abans que arribi a la lògica de detecció de botons, que no canvia gens.
+            pbMain.MouseDown += (s, e) => PbMain_MouseDown(s, TranslateMouseEventArgs(e));
+            pbMain.MouseMove += (s, e) => PbMain_MouseMove(s, TranslateMouseEventArgs(e));
+            pbMain.MouseUp += (s, e) => PbMain_MouseUp(s, TranslateMouseEventArgs(e));
 
             mainSurface = new UiSurface(pbMain);
+            mainSurface.TransformMouse = ToVirtualCoords;
             mainSurface.HideAreasWhenActive = () => _g3000Active;
             mainSurface.IsHiddenByCover = IsHiddenByActiveCover;
             uiSurfaces.Add(mainSurface);
@@ -1810,15 +1829,49 @@ namespace SimConnect3
                 new() { Name="ADF_MUTE", BasePos=new Point(1867, 562), IsActive=()=>adfMute },
             };
 
-            var screen4k = Screen.AllScreens.FirstOrDefault(s => !s.Primary && s.Bounds.Width == 3840 && s.Bounds.Height == 2160)
-                ?? Screen.AllScreens.First(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
+            if (IsDemoMode)
+            {
+                // Finestra normal, redimensionable, oberta al 80% de l'alçada del monitor
+                // principal de Windows (proporció 3840:2160). Un cop oberta, l'usuari la pot
+                // moure/redimensionar/maximitzar lliurement a qualsevol dels seus monitors.
+                var wa = Screen.PrimaryScreen?.WorkingArea ?? new Rectangle(0, 0, 1920, 1080);
+                double aspect = 3840.0 / 2160.0;
+                int targetH = (int)(wa.Height * 0.8);
+                int targetW = (int)(targetH * aspect);
+                if (targetW > wa.Width * 0.95)
+                {
+                    targetW = (int)(wa.Width * 0.95);
+                    targetH = (int)(targetW / aspect);
+                }
+                this.FormBorderStyle = FormBorderStyle.Sizable;
+                this.MaximizeBox = true;
+                this.MinimumSize = new Size(800, 450);
+                this.StartPosition = FormStartPosition.Manual;
+                this.Size = new Size(targetW, targetH);
+                this.Location = new Point(wa.X + (wa.Width - targetW) / 2, wa.Y + (wa.Height - targetH) / 2);
+                pbMain.Dock = DockStyle.Fill;
+                this.Text = "panelAIR1000 — DEMO";
+                // Els forats del PFD/MFD (i TSC en G3000) depenen de l'escala actual — recalcular-los
+                // cada vegada que la finestra es redimensiona (arrossegar-la sola no cal: la Region
+                // és relativa al propi Form, es mou sola amb la finestra).
+                pbMain.SizeChanged += (s, e) => { if (_g3000Active) ApplyG3000Region(); else ApplyPfdRegion(); };
+                // El primer càlcul (fet just aquí, dins el constructor) pot agafar encara la mida
+                // "de fàbrica" de pbMain (3840x2160) abans que el Dock=Fill s'apliqui de veritat.
+                // Es recalcula un cop més quan la finestra ja s'ha mostrat, amb la mida definitiva.
+                this.Shown += (s, e) => { if (_g3000Active) ApplyG3000Region(); else ApplyPfdRegion(); };
+            }
+            else
+            {
+                var screen4k = Screen.AllScreens.FirstOrDefault(s => !s.Primary && s.Bounds.Width == 3840 && s.Bounds.Height == 2160)
+                    ?? Screen.AllScreens.First(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
 
-            this.StartPosition = FormStartPosition.Manual;
-            this.Location = screen4k.Bounds.Location;
-            this.Size = screen4k.Bounds.Size;
+                this.StartPosition = FormStartPosition.Manual;
+                this.Location = screen4k.Bounds.Location;
+                this.Size = screen4k.Bounds.Size;
+                this.TopMost = true;
+            }
 
             ApplyPfdRegion();
-            this.TopMost = true;
 
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
             {
@@ -2121,6 +2174,7 @@ namespace SimConnect3
             _gearBtn.MouseUp += (s, e) => { _gearBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             this.Controls.Add(_gearBtn);
             _gearBtn.BringToFront();
+            if (IsDemoMode) _gearBtn.Visible = false; // demo: sense engranatge, sense accés a l'AUX
 
             // ── Overlay genèric d'avisos (substitueix MessageBox.Show per avisos que poden sortir
             // en ple vol, com el recordatori del mod TBM930) ──
@@ -4129,10 +4183,6 @@ namespace SimConnect3
 
         private void ApplyPfdRegion()
         {
-            // Regió completa del Form
-            Region formRegion = new Region(new Rectangle(
-                0, 0, this.Width, this.Height));
-
             // FORAT PFD
             Rectangle pfdHole = new Rectangle(
                 238,   // X
@@ -4140,7 +4190,6 @@ namespace SimConnect3
                 1323,  // Width
                 992    // Height
             );
-            formRegion.Exclude(pfdHole);
 
             // FORAT MFD
             Rectangle mfdHole = new Rectangle(
@@ -4149,6 +4198,13 @@ namespace SimConnect3
                 1323,  // Width
                 992    // Height
             );
+
+            if (IsDemoMode) { ApplyDemoRegionHoles(pfdHole, mfdHole); return; }
+
+            // Regió completa del Form
+            Region formRegion = new Region(new Rectangle(
+                0, 0, this.Width, this.Height));
+            formRegion.Exclude(pfdHole);
             formRegion.Exclude(mfdHole);
 
             // Aplica la regió al Form
@@ -4157,20 +4213,47 @@ namespace SimConnect3
 
         private void ApplyG3000Region()
         {
+            Rectangle pfdHole = new Rectangle(200, 458, 1595, 995);
+            // amplada 1615px confirmada per l'usuari → fins a x=3655
+            Rectangle mfdHole = new Rectangle(2040, 459, 1615, 991);
+            Rectangle tscLeftHole = new Rectangle(1867, 1653, 721, 442);
+            Rectangle tscRightHole = new Rectangle(2821, 1653, 724, 442);
+
+            if (IsDemoMode) { ApplyDemoRegionHoles(pfdHole, mfdHole, tscLeftHole, tscRightHole); return; }
+
             Region formRegion = new Region(new Rectangle(
                 0, 0, this.Width, this.Height));
+            formRegion.Exclude(pfdHole);
+            formRegion.Exclude(mfdHole);
+            formRegion.Exclude(tscLeftHole);
+            formRegion.Exclude(tscRightHole);
 
-            // FORAT PFD
-            formRegion.Exclude(new Rectangle(200, 458, 1595, 995));
+            this.Region = formRegion;
+        }
 
-            // FORAT MFD (amplada 1615px confirmada per l'usuari → fins a x=3655)
-            formRegion.Exclude(new Rectangle(2040, 459, 1615, 991));
+        // Mode demo: els mateixos forats que en hardware real (PFD/MFD, i TSC pel G3000), però
+        // recalculats a la mida/escala actuals de la finestra redimensionable — deixen veure de
+        // veritat el que hi hagi darrere de tota l'app (p. ex. un pop-out real del G1000 de MSFS,
+        // o l'escriptori). Cal recalcular-ho cada vegada que la finestra es redimensiona.
+        private void ApplyDemoRegionHoles(params Rectangle[] virtualHoles)
+        {
+            var (scale, offX, offY) = GetDemoTransform();
+            if (scale <= 0f) { this.Region = null; return; }
 
-            // FORAT TSC esquerra
-            formRegion.Exclude(new Rectangle(1867, 1653, 721, 442));
+            // this.Region treballa en coordenades relatives a TOTA la finestra (barra de títol
+            // i vores incloses) — cal sumar l'offset de pbMain dins la finestra, que en mode
+            // demo té vora/títol (a diferència del kiosk sense vores del hardware real).
+            Point pbScreenOrigin = pbMain.PointToScreen(Point.Empty);
+            int chromeDx = pbScreenOrigin.X - this.Location.X;
+            int chromeDy = pbScreenOrigin.Y - this.Location.Y;
 
-            // FORAT TSC dreta
-            formRegion.Exclude(new Rectangle(2821, 1653, 724, 442));
+            Rectangle ToWindow(Rectangle v) => new Rectangle(
+                chromeDx + (int)(offX + v.X * scale), chromeDy + (int)(offY + v.Y * scale),
+                Math.Max(1, (int)(v.Width * scale)), Math.Max(1, (int)(v.Height * scale)));
+
+            var formRegion = new Region(new Rectangle(0, 0, this.Width, this.Height));
+            foreach (var hole in virtualHoles)
+                formRegion.Exclude(ToWindow(hole));
 
             this.Region = formRegion;
         }
@@ -4181,101 +4264,131 @@ namespace SimConnect3
         }
         private void frmMain_Load(object sender, EventArgs e)
         {
-            // Level 1 — 4K screen check
-            bool has4K = Screen.AllScreens.Any(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
-            if (!has4K)
+            if (IsDemoMode)
             {
-                MessageBox.Show("A 4K screen (3840x2160) is required to run this application.", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                Application.Exit();
-                return;
-            }
+                MessageBox.Show(this,
+                    "You're running panelAIR1000 in DEMO mode (no panelAIR hardware detected).\n\n" +
+                    "You have 10 minutes to explore the app. Resize this window or move it to any monitor you like.\n\n" +
+                    "Connect a real panelAIR panel at any time to unlock full operation.",
+                    "panelAIR1000 — Demo", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
-            // Level 2 — Touch screen HID check (VID=0457, PID=0819)
-            bool hasPanel = false;
-            using (var searcher = new System.Management.ManagementObjectSearcher(
-                @"SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%VID_0457%PID_0819%' AND ConfigManagerErrorCode = 0 AND Present = TRUE"))
-            {
-                hasPanel = searcher.Get().Count > 0;
-            }
-            bool hasMonitor = false;
-            // Model original (RTK1B1A) + nou model exclusiu Xiaomi (XMI3446, 2026-08-31) — tots dos
-            // vàlids, cap client amb el monitor antic queda desconnectat.
-            using (var searcher = new System.Management.ManagementObjectSearcher(
-                @"SELECT * FROM Win32_PnPEntity WHERE (DeviceID LIKE '%RTK1B1A%' OR DeviceID LIKE '%XMI3446%') AND ConfigManagerErrorCode = 0"))
-            {
-                hasMonitor = searcher.Get().Count > 0;
-            }
+                _demoStartTime = DateTime.Now;
+                int demoTotalSeconds = 600;
+                bool demoExpiryHandled = false;   // guard contra callbacks duplicats
 
-            // Mòduls rotAIR (VID 0x16D0): n'hi ha prou amb detectar-ne 1 dels 5 tipus.
-            bool hasRotAIR = false;
-            int[] rotAirPids = { 0x128F, 0x13E5, 0x1290, 0x13E4, 0x13E3 }; // Type-1 GC, Type-2 GCAM, Type-1 ANA, Type-2 ANA, Type-2 GC
-            foreach (int rotAirPid in rotAirPids)
-            {
-                if (DeviceList.Local.GetHidDevices(0x16D0, rotAirPid).Any())
-                {
-                    hasRotAIR = true;
-                    break;
-                }
-            }
-
-            if (!hasPanel || !hasMonitor || !hasRotAIR)
-            {
-                var screen4K = Screen.AllScreens.FirstOrDefault(s => !s.Primary && s.Bounds.Width == 3840 && s.Bounds.Height == 2160)
-                    ?? Screen.AllScreens.First(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
-                using (var msgHelper = new Form { StartPosition = FormStartPosition.Manual, TopMost = true, Size = new Size(1, 1), ShowInTaskbar = false })
-                {
-                    msgHelper.Location = new Point(screen4K.Bounds.X + screen4K.Bounds.Width / 2, screen4K.Bounds.Y + screen4K.Bounds.Height / 2);
-                    msgHelper.Show();
-                    MessageBox.Show(msgHelper, "panelAIR verification failed.\n\nThis application requires an SFS panelAIR device to operate.\n\nIf you own a panelAIR device, please ensure that:\n\n  • The panelAIR display is connected to the computer and powered on.\n  • The panelAIR USB touch cable is connected to the computer.\n  • The RotAIR module is connected to a USB port.\n\nThen restart the application.\n\n(If you do not own a panelAIR device, the application will remain functional for 10 minutes only.)", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                }
-                var countdownForm = new Form
-                {
-                    Text = "panelAIR1000 - Trial Mode",
-                    Size = new Size(800, 300),
-                    FormBorderStyle = FormBorderStyle.FixedDialog,
-                    StartPosition = FormStartPosition.Manual,
-                    TopMost = true,
-                    ControlBox = false
-                };
-                countdownForm.Location = new Point(
-                    screen4K.Bounds.X + (screen4K.Bounds.Width - countdownForm.Width) / 2,
-                    screen4K.Bounds.Y + (screen4K.Bounds.Height - countdownForm.Height) / 2
-                );
-                var label = new Label
-                {
-                    Text = "No panelAIR1000 detected.\nClosing in 10:00...",
-                    Dock = DockStyle.Fill,
-                    TextAlign = ContentAlignment.MiddleCenter,
-                    Font = new Font("Arial", 24)
-                };
-                countdownForm.Controls.Add(label);
-                countdownForm.Show();   // no-modal: l'app principal continua inicialitzant-se
-
-                var startTime = DateTime.Now;
-                int totalSeconds = 600;
-                bool expiryHandled = false;   // guard contra callbacks duplicats
-
-                trialBgTimer = new System.Threading.Timer(_ => {
-                    int elapsed = (int)(DateTime.Now - startTime).TotalSeconds;
-                    int secondsLeft = totalSeconds - elapsed;
-                    if (countdownForm.IsDisposed) return;
+                _demoTimer = new System.Threading.Timer(_ => {
+                    int elapsed = (int)(DateTime.Now - _demoStartTime).TotalSeconds;
+                    int secondsLeft = demoTotalSeconds - elapsed;
+                    if (IsDisposed || !IsHandleCreated) return;
                     try
                     {
-                        countdownForm.BeginInvoke(new Action(() => {
-                            if (expiryHandled) return;   // descarta callbacks duplicats
+                        BeginInvoke(new Action(() => {
+                            if (demoExpiryHandled) return;   // descarta callbacks duplicats
                             if (secondsLeft <= 0)
                             {
-                                expiryHandled = true;
-                                System.Diagnostics.Process.GetCurrentProcess().Kill();
+                                demoExpiryHandled = true;
+                                try { Process.Start(new ProcessStartInfo { FileName = "https://simflightservices.com/shop/air-panels/", UseShellExecute = true }); } catch { }
+                                MessageBox.Show(this, "Thanks for trying panelAIR1000!\n\nWe've opened our shop page so you can get the real thing.", "panelAIR1000 — Demo ended", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                Process.GetCurrentProcess().Kill();
                             }
                             else
                             {
-                                label.Text = $"No panelAIR1000 detected.\nClosing in {secondsLeft / 60}:{secondsLeft % 60:D2}...";
+                                this.Text = $"panelAIR1000 — DEMO (closing in {secondsLeft / 60}:{secondsLeft % 60:D2})";
                             }
                         }));
                     }
                     catch { }
-                }, null, 0, 200);
+                }, null, 0, 1000);
+            }
+            else
+            {
+                // Touch screen HID check (VID=0457, PID=0819)
+                bool hasPanel = false;
+                using (var searcher = new System.Management.ManagementObjectSearcher(
+                    @"SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%VID_0457%PID_0819%' AND ConfigManagerErrorCode = 0 AND Present = TRUE"))
+                {
+                    hasPanel = searcher.Get().Count > 0;
+                }
+                bool hasMonitor = false;
+                // Model original (RTK1B1A) + nou model exclusiu Xiaomi (XMI3446, 2026-08-31) — tots dos
+                // vàlids, cap client amb el monitor antic queda desconnectat.
+                using (var searcher = new System.Management.ManagementObjectSearcher(
+                    @"SELECT * FROM Win32_PnPEntity WHERE (DeviceID LIKE '%RTK1B1A%' OR DeviceID LIKE '%XMI3446%') AND ConfigManagerErrorCode = 0"))
+                {
+                    hasMonitor = searcher.Get().Count > 0;
+                }
+
+                // Mòduls rotAIR (VID 0x16D0): n'hi ha prou amb detectar-ne 1 dels 5 tipus.
+                bool hasRotAIR = false;
+                int[] rotAirPids = { 0x128F, 0x13E5, 0x1290, 0x13E4, 0x13E3 }; // Type-1 GC, Type-2 GCAM, Type-1 ANA, Type-2 ANA, Type-2 GC
+                foreach (int rotAirPid in rotAirPids)
+                {
+                    if (DeviceList.Local.GetHidDevices(0x16D0, rotAirPid).Any())
+                    {
+                        hasRotAIR = true;
+                        break;
+                    }
+                }
+
+                if (!hasPanel || !hasMonitor || !hasRotAIR)
+                {
+                    var screen4K = Screen.AllScreens.FirstOrDefault(s => !s.Primary && s.Bounds.Width == 3840 && s.Bounds.Height == 2160)
+                        ?? Screen.AllScreens.First(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
+                    using (var msgHelper = new Form { StartPosition = FormStartPosition.Manual, TopMost = true, Size = new Size(1, 1), ShowInTaskbar = false })
+                    {
+                        msgHelper.Location = new Point(screen4K.Bounds.X + screen4K.Bounds.Width / 2, screen4K.Bounds.Y + screen4K.Bounds.Height / 2);
+                        msgHelper.Show();
+                        MessageBox.Show(msgHelper, "panelAIR verification failed.\n\nThis application requires an SFS panelAIR device to operate.\n\nIf you own a panelAIR device, please ensure that:\n\n  • The panelAIR display is connected to the computer and powered on.\n  • The panelAIR USB touch cable is connected to the computer.\n  • The RotAIR module is connected to a USB port.\n\nThen restart the application.\n\n(If you do not own a panelAIR device, the application will remain functional for 10 minutes only.)", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                    var countdownForm = new Form
+                    {
+                        Text = "panelAIR1000 - Trial Mode",
+                        Size = new Size(800, 300),
+                        FormBorderStyle = FormBorderStyle.FixedDialog,
+                        StartPosition = FormStartPosition.Manual,
+                        TopMost = true,
+                        ControlBox = false
+                    };
+                    countdownForm.Location = new Point(
+                        screen4K.Bounds.X + (screen4K.Bounds.Width - countdownForm.Width) / 2,
+                        screen4K.Bounds.Y + (screen4K.Bounds.Height - countdownForm.Height) / 2
+                    );
+                    var label = new Label
+                    {
+                        Text = "No panelAIR1000 detected.\nClosing in 10:00...",
+                        Dock = DockStyle.Fill,
+                        TextAlign = ContentAlignment.MiddleCenter,
+                        Font = new Font("Arial", 24)
+                    };
+                    countdownForm.Controls.Add(label);
+                    countdownForm.Show();   // no-modal: l'app principal continua inicialitzant-se
+
+                    var startTime = DateTime.Now;
+                    int totalSeconds = 600;
+                    bool expiryHandled = false;   // guard contra callbacks duplicats
+
+                    trialBgTimer = new System.Threading.Timer(_ => {
+                        int elapsed = (int)(DateTime.Now - startTime).TotalSeconds;
+                        int secondsLeft = totalSeconds - elapsed;
+                        if (countdownForm.IsDisposed) return;
+                        try
+                        {
+                            countdownForm.BeginInvoke(new Action(() => {
+                                if (expiryHandled) return;   // descarta callbacks duplicats
+                                if (secondsLeft <= 0)
+                                {
+                                    expiryHandled = true;
+                                    System.Diagnostics.Process.GetCurrentProcess().Kill();
+                                }
+                                else
+                                {
+                                    label.Text = $"No panelAIR1000 detected.\nClosing in {secondsLeft / 60}:{secondsLeft % 60:D2}...";
+                                }
+                            }));
+                        }
+                        catch { }
+                    }, null, 0, 200);
+                }
             }
 
             //flapsTimer.Interval = 30; // ~33 FPS, suau
@@ -4293,27 +4406,30 @@ namespace SimConnect3
 
             ConnectToSimConnect();
 
-            // SFSmonitor detection
-            sfsMonitorRunning = Process.GetProcesses().Any(p => p.ProcessName.StartsWith("SFSmonitor"));
-            if (!sfsMonitorRunning && AppSettings.Instance.SfsMonitorAutoLaunch
-                && !string.IsNullOrWhiteSpace(AppSettings.Instance.SfsMonitorPath)
-                && System.IO.File.Exists(AppSettings.Instance.SfsMonitorPath))
+            // SFSmonitor detection — no aplica en mode demo (sense hardware, no té sentit exigir-ho)
+            if (!IsDemoMode)
             {
-                try
+                sfsMonitorRunning = Process.GetProcesses().Any(p => p.ProcessName.StartsWith("SFSmonitor"));
+                if (!sfsMonitorRunning && AppSettings.Instance.SfsMonitorAutoLaunch
+                    && !string.IsNullOrWhiteSpace(AppSettings.Instance.SfsMonitorPath)
+                    && System.IO.File.Exists(AppSettings.Instance.SfsMonitorPath))
                 {
-                    var sfsProc = Process.Start(new ProcessStartInfo { FileName = AppSettings.Instance.SfsMonitorPath, UseShellExecute = true });
-                    if (sfsProc != null) ProcessWindowMover.MoveToPrimaryScreenWhenReady(sfsProc);
+                    try
+                    {
+                        var sfsProc = Process.Start(new ProcessStartInfo { FileName = AppSettings.Instance.SfsMonitorPath, UseShellExecute = true });
+                        if (sfsProc != null) ProcessWindowMover.MoveToPrimaryScreenWhenReady(sfsProc);
+                    }
+                    catch { }
                 }
-                catch { }
+                if (!sfsMonitorRunning) ShowSfsWarning();
+                _sfsCheckTimer = new System.Threading.Timer(_ =>
+                {
+                    if (IsDisposed || !IsHandleCreated) return;
+                    bool running = Process.GetProcesses().Any(p => p.ProcessName.StartsWith("SFSmonitor"));
+                    try { Invoke(() => { sfsMonitorRunning = running; if (running) HideSfsWarning(); else ShowSfsWarning(); }); }
+                    catch (ObjectDisposedException) { }
+                }, null, 3000, 3000);
             }
-            if (!sfsMonitorRunning) ShowSfsWarning();
-            _sfsCheckTimer = new System.Threading.Timer(_ =>
-            {
-                if (IsDisposed || !IsHandleCreated) return;
-                bool running = Process.GetProcesses().Any(p => p.ProcessName.StartsWith("SFSmonitor"));
-                try { Invoke(() => { sfsMonitorRunning = running; if (running) HideSfsWarning(); else ShowSfsWarning(); }); }
-                catch (ObjectDisposedException) { }
-            }, null, 3000, 3000);
 
             // Si s'ha obert RAM abans que MSFS, quedem en "waiting" i reintentem sols.
             if (simconnect == null)
@@ -8170,13 +8286,83 @@ namespace SimConnect3
                 g.DrawString("👆", showAreasFont, Brushes.Orange, showAreasRect, showAreasFmt);
         }
 
+        // Mode demo: pbMain es dibuixa sempre pensant en un full virtual de 3840x2160 (igual que
+        // amb hardware real); aquí calculem quin factor cal per encaixar-lo dins la mida real
+        // (redimensionable) de la finestra, centrat (efecte "letterbox").
+        private (float scale, float offX, float offY) GetDemoTransform()
+        {
+            if (!IsDemoMode || pbMain.Width <= 0 || pbMain.Height <= 0) return (1f, 0f, 0f);
+            float scale = Math.Min(pbMain.Width / 3840f, pbMain.Height / 2160f);
+            float offX = (pbMain.Width - 3840f * scale) / 2f;
+            float offY = (pbMain.Height - 2160f * scale) / 2f;
+            return (scale, offX, offY);
+        }
+
+        // Tradueix un punt de la finestra real (mode demo) al punt equivalent al full virtual
+        // 3840x2160, perquè la detecció de clics (pensada sempre en coordenades virtuals) no
+        // s'hagi de tocar. Fora de mode demo, retorna el punt tal qual (zero canvi de comportament).
+        private Point ToVirtualCoords(Point p)
+        {
+            if (!IsDemoMode) return p;
+            var (scale, offX, offY) = GetDemoTransform();
+            if (scale <= 0f) return p;
+            return new Point((int)((p.X - offX) / scale), (int)((p.Y - offY) / scale));
+        }
+
+        private MouseEventArgs TranslateMouseEventArgs(MouseEventArgs e)
+        {
+            if (!IsDemoMode) return e;
+            var pt = ToVirtualCoords(e.Location);
+            return new MouseEventArgs(e.Button, e.Clicks, pt.X, pt.Y, e.Delta);
+        }
+
+
+
         private void PbMain_Paint(object? sender, PaintEventArgs e)
         {
             try
             {
+            if (IsDemoMode)
+            {
+                var (demoScale, demoOffX, demoOffY) = GetDemoTransform();
+                e.Graphics.TranslateTransform(demoOffX, demoOffY);
+                e.Graphics.ScaleTransform(demoScale, demoScale);
+
+                // Amb un escalat actiu (encara que sigui gairebé 1:1), GDI+ interpola cada imatge
+                // dibuixada — car de calcular i el cost creix amb la mida de sortida (per això anava
+                // lent a mida gran/4K). En mode demo no cal la mateixa qualitat que en hardware real:
+                // prioritzem velocitat.
+                e.Graphics.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                e.Graphics.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.HighSpeed;
+                e.Graphics.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighSpeed;
+                e.Graphics.CompositingQuality = System.Drawing.Drawing2D.CompositingQuality.HighSpeed;
+            }
+
             var activeBg = (_g3000Active && _bgG3000Image != null) ? _bgG3000Image : _bgImage;
-            if (activeBg != null)
-                e.Graphics.DrawImage(activeBg, pbMain.ClientRectangle);
+            if (IsDemoMode && activeBg != null)
+            {
+                // En mode demo, fons + marca d'aigua es combinen en una sola imatge ja feta
+                // (regenerada només quan canvia l'avió/mode o l'esglaó d'opacitat, no cada
+                // fotograma) — dibuixar-les per separat cada vegada doblava el cost de repintat
+                // i anava molt lent a resolucions grans (4K real).
+                // Invisible els primers 30 segons; a partir d'aquí, puja de manera lineal fins
+                // arribar del tot opaca al minut 10.
+                double demoElapsedSeconds = (DateTime.Now - _demoStartTime).TotalSeconds;
+                double demoWatermarkProgress = demoElapsedSeconds < 30.0
+                    ? 0.0
+                    : Math.Clamp((demoElapsedSeconds - 30.0) / (600.0 - 30.0), 0.0, 1.0);
+                int alphaByte = (int)Math.Round(255 * demoWatermarkProgress);
+                if (_demoCompositeBg == null || _demoCompositeBgSource != activeBg || _demoCompositeBgAlpha != alphaByte)
+                {
+                    _demoCompositeBg?.Dispose();
+                    _demoCompositeBg = BuildDemoComposite(activeBg, alphaByte);
+                    _demoCompositeBgSource = activeBg;
+                    _demoCompositeBgAlpha = alphaByte;
+                }
+                e.Graphics.DrawImage(_demoCompositeBg, new Rectangle(0, 0, 3840, 2160));
+            }
+            else if (activeBg != null)
+                e.Graphics.DrawImage(activeBg, new Rectangle(0, 0, 3840, 2160));
 
             if (_g3000Active)
             {
@@ -9650,8 +9836,42 @@ namespace SimConnect3
 
             DrawShowAreasIcon(e.Graphics);
 
+
             }
             catch (OverflowException) { }
+        }
+
+        // Fons + marca d'aigua "DEMO" (mesura anti-abús) precombinats en una sola imatge, per no
+        // haver de fer dos dibuixos grans (fons i marca d'aigua per separat) a cada fotograma —
+        // això anava molt lent a resolucions grans (4K real). Es regenera només quan canvia
+        // l'avió/mode de cabina o l'esglaó d'opacitat (cada uns 15 segons), mai a cada repintat.
+        private Bitmap? _demoCompositeBg;
+        private Image? _demoCompositeBgSource;
+        private int _demoCompositeBgAlpha = -1;
+
+        private Bitmap BuildDemoComposite(Image bg, int alphaByte)
+        {
+            var bmp = new Bitmap(3840, 2160, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = Graphics.FromImage(bmp))
+            {
+                g.DrawImage(bg, new Rectangle(0, 0, 3840, 2160));
+                if (alphaByte > 0)
+                {
+                    using var font = new Font("Segoe UI", 90f, FontStyle.Bold);
+                    using var brush = new SolidBrush(Color.FromArgb(alphaByte, 255, 255, 255));
+                    var state = g.Save();
+                    g.RotateTransform(-30f);
+                    for (int y = -2000; y < 4500; y += 340)
+                    {
+                        for (int x = -2500; x < 6500; x += 620)
+                        {
+                            g.DrawString("DEMO", font, brush, x, y);
+                        }
+                    }
+                    g.Restore(state);
+                }
+            }
+            return bmp;
         }
 
         private void PbMain_MouseDown(object? sender, MouseEventArgs e)
