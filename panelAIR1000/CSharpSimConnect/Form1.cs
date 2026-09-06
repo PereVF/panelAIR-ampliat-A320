@@ -4205,7 +4205,20 @@ namespace SimConnect3
             {
                 hasMonitor = searcher.Get().Count > 0;
             }
-            if (!hasPanel || !hasMonitor)
+
+            // Mòduls rotAIR (VID 0x16D0): n'hi ha prou amb detectar-ne 1 dels 5 tipus.
+            bool hasRotAIR = false;
+            int[] rotAirPids = { 0x128F, 0x13E5, 0x1290, 0x13E4, 0x13E3 }; // Type-1 GC, Type-2 GCAM, Type-1 ANA, Type-2 ANA, Type-2 GC
+            foreach (int rotAirPid in rotAirPids)
+            {
+                if (DeviceList.Local.GetHidDevices(0x16D0, rotAirPid).Any())
+                {
+                    hasRotAIR = true;
+                    break;
+                }
+            }
+
+            if (!hasPanel || !hasMonitor || !hasRotAIR)
             {
                 var screen4K = Screen.AllScreens.FirstOrDefault(s => !s.Primary && s.Bounds.Width == 3840 && s.Bounds.Height == 2160)
                     ?? Screen.AllScreens.First(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
@@ -4213,7 +4226,7 @@ namespace SimConnect3
                 {
                     msgHelper.Location = new Point(screen4K.Bounds.X + screen4K.Bounds.Width / 2, screen4K.Bounds.Y + screen4K.Bounds.Height / 2);
                     msgHelper.Show();
-                    MessageBox.Show(msgHelper, "panelAIR verification failed.\n\nThis application requires an SFS panelAIR device to operate.\n\nIf you own a panelAIR device, please ensure that:\n\n  • The panelAIR display is connected to the computer and powered on.\n  • The panelAIR USB touch cable is connected to the computer.\n\nThen restart the application.\n\n(If you do not own a panelAIR device, the application will remain functional for 10 minutes only.)", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    MessageBox.Show(msgHelper, "panelAIR verification failed.\n\nThis application requires an SFS panelAIR device to operate.\n\nIf you own a panelAIR device, please ensure that:\n\n  • The panelAIR display is connected to the computer and powered on.\n  • The panelAIR USB touch cable is connected to the computer.\n  • The RotAIR module is connected to a USB port.\n\nThen restart the application.\n\n(If you do not own a panelAIR device, the application will remain functional for 10 minutes only.)", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 }
                 var countdownForm = new Form
                 {
