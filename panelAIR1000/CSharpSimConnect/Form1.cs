@@ -205,12 +205,18 @@ namespace SimConnect3
 
         // Cessna 172 — selector únic Left/Both/Right (sense Off), confirmat que respon a
         // K:2:FUELSYSTEM_JUNCTION_SET amb junction=1 (opcions: 1=Left, 2=Both, 3=Right).
+        // 2026-09-05: el paquet de tercers "FS Connection" ven diverses variants del C172SP amb panells
+        // diferents (p.ex. "C172SP Classic Aerial Advertising" = instruments clàssics, "C172SP IFD Aerial
+        // Advertising" = GPS Avidyne IFD, "C172SP G1000 Tow" = G1000 real) — totes contenen "172", així
+        // que calen exclusions explícites per no tractar les no-G1000 com a compatibles.
         bool IsC172() =>
-            _currentAircraftTitle.IndexOf("C172", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            _currentAircraftTitle.IndexOf("172", StringComparison.OrdinalIgnoreCase) >= 0 ||
-            // Títol real del C172 per defecte a MSFS2020: "Cessna Skyhawk G1000 Asobo" — sense "172"
-            // enlloc (confirmat per Pere, 2026-09-01), per això no es detectava cap element propi.
-            _currentAircraftTitle.IndexOf("Skyhawk", StringComparison.OrdinalIgnoreCase) >= 0;
+            (_currentAircraftTitle.IndexOf("C172", StringComparison.OrdinalIgnoreCase) >= 0 ||
+             _currentAircraftTitle.IndexOf("172", StringComparison.OrdinalIgnoreCase) >= 0 ||
+             // Títol real del C172 per defecte a MSFS2020: "Cessna Skyhawk G1000 Asobo" — sense "172"
+             // enlloc (confirmat per Pere, 2026-09-01), per això no es detectava cap element propi.
+             _currentAircraftTitle.IndexOf("Skyhawk", StringComparison.OrdinalIgnoreCase) >= 0) &&
+            _currentAircraftTitle.IndexOf("Classic", StringComparison.OrdinalIgnoreCase) < 0 &&
+            _currentAircraftTitle.IndexOf("IFD", StringComparison.OrdinalIgnoreCase) < 0;
 
         // Text de les 3 etiquetes del selector únic (SW_SE_LBL_1/2/3), segons l'avió monomotor actiu.
         string SeSelectorLabelText(int slot)
@@ -2458,17 +2464,17 @@ namespace SimConnect3
             var cockpitRight = mainSurface;
             cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-UP",   BasePos = new Point(3450, 1646), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir = -1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
             cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-DN",   BasePos = new Point(3450, 1776), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir =  1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_DN,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
-            // DA-40 i Cirrus SR22 (2026-09-05, confirmat per Pere): tren fix, no retràctil — exclosos
-            // del ressaltat. Nota: el criteri general de "gear només per avions retràctils" queda
-            // pendent de repassar per a la resta d'avions (veure conversa sobre l gear).
+            // DA-40, Cirrus SR22, C408, C400, C172 i Caravan (2026-09-05, confirmat per Pere): exclosos
+            // del ressaltat. Nota: el criteri general de "gear només per avions retràctils" queda pendent
+            // de repassar per a la resta d'avions (veure conversa sobre l gear).
             cockpitRight.Buttons.Add(new UiButton { Name="LGEAR-UP", BasePos=new Point(2843, 1590), W=110, H=115, Resizable=true, NoShadow=true,
-                ShowWhen = () => !IsDA40() && !IsCirrusSR22(),
+                ShowWhen = () => !IsDA40() && !IsCirrusSR22() && !IsC408() && !IsC400() && !IsC172() && !IsCaravan(),
                 OnClick = () => {
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_UP, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="LGEAR-DN", BasePos=new Point(2843, 1750), W=110, H=115, Resizable=true, NoShadow=true,
-                ShowWhen = () => !IsDA40() && !IsCirrusSR22(),
+                ShowWhen = () => !IsDA40() && !IsCirrusSR22() && !IsC408() && !IsC400() && !IsC172() && !IsCaravan(),
                 OnClick = () => {
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.LGEAR_DN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                     pbMain.Invalidate();
@@ -2535,7 +2541,10 @@ namespace SimConnect3
                 // DA-40 (2026-09-05, confirmat per Pere, 2020 i 2024): un sol interruptor d'avionics físic
                 // — la branca de 2020 ja era un no-op explícit; la de 2024 cau al genèric sense cap codi
                 // propi, tampoc real.
-                ShowWhen = () => !IsCirrusSR22() && !IsC408() && !IsDA62() && !IsDA40(),
+                // C400 (2026-09-05, confirmat per Pere): tampoc té cap codi propi per aquesta branca.
+                // Baron G58 (2026-09-05, confirmat per Pere): tampoc en té.
+                // Bonanza G36 (2026-09-05, confirmat per Pere): tampoc en té.
+                ShowWhen = () => !IsCirrusSR22() && !IsC408() && !IsDA62() && !IsDA40() && !IsC400() && !IsBaronG58() && !IsBonanzaG36(),
                 OnClick = () => {
                     if (IsDA40() && !_isMsfs2024)
                     {
@@ -3117,7 +3126,11 @@ namespace SimConnect3
                     simconnect?.TransmitClientEvent(0,
                     ignition2Active ? SIMCONNECT_EVENTS.KINGAIR_IGN2_OFF : SIMCONNECT_EVENTS.KINGAIR_IGN2_ARM,
                     0u, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
+            // C408 (2026-09-05, confirmat per Pere): no fa res — exclosa del ressaltat. C172 (2024,
+            // 2026-09-05, confirmat per Pere): tampoc fa res — NOMÉS exclosa a 2024, ja que la 2020 té
+            // codi propi confirmat (potenciòmetre A:LIGHT POTENTIOMETER:3, veure OnClick de sota).
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_PANELLIGHT", BasePos=new Point(1924, 1653), W=75, H=75, Resizable=true, NoShadow=true,
+                ShowWhen = () => !IsC408() && !(IsC172() && _isMsfs2024),
                 OnClick = () => {
                     if (IsC172() && !_isMsfs2024)
                     {
@@ -3136,9 +3149,11 @@ namespace SimConnect3
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_PANELLIGHT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                 } });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_DEICE", BasePos=new Point(1984, 1653), W=75, H=75, Resizable=true, NoShadow=true,
-                // DA-62 (2024): confirmat "not supported" — veure comentari ABANDONAT més avall. DA-40
-                // (2026-09-05, confirmat per Pere, 2020 i 2024): tampoc fa res. Exclosos del ressaltat.
-                ShowWhen = () => !(IsDA62() && _isMsfs2024) && !IsDA40(),
+                // DA-62 (2024): confirmat "not supported" — veure comentari ABANDONAT més avall. DA-40 i
+                // C172 (2026-09-05, confirmat per Pere, 2020 i 2024): tampoc fan res. Caravan (2026-09-05,
+                // confirmat per Pere): NOMÉS a 2024 — la branca de 2020 té codi propi confirmat (llegeix
+                // el Set complet de l'InputEvent DEICE_Airframe_1, veure OnClick de sota).
+                ShowWhen = () => !(IsDA62() && _isMsfs2024) && !IsDA40() && !IsC172() && !(IsCaravan() && _isMsfs2024),
                 OnClick = () => {
                     if (IsCirrusSR22() || (IsCaravan() && _isMsfs2024)) {
                         // Cirrus SR22T: el Set de l'InputEvent només toca una O: privada (inaccessible des
@@ -3196,22 +3211,24 @@ namespace SimConnect3
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SWITCH_DEICE, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                 } });
             // DA-62 (2026-09-05, confirmat per recerca — motors Austro AE330 amb FADEC): cowl flaps
-            // totalment automàtics, sense control manual del pilot. DA-40 i Cirrus SR22 (2026-09-05,
-            // confirmat per Pere): tampoc en tenen. Exclosos tots tres d'aquests 4 botons.
+            // totalment automàtics, sense control manual del pilot. DA-40, Cirrus SR22, C408, C400, C172
+            // i Caravan (2026-09-05, confirmat per Pere): tampoc en tenen (ni L ni R).
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_L_INC", BasePos=new Point(1500, 1560), W=75, H=40, Resizable=true, NoShadow=true,
-                ShowWhen = () => !IsDA62() && !IsDA40() && !IsCirrusSR22(),
+                ShowWhen = () => !IsDA62() && !IsDA40() && !IsCirrusSR22() && !IsC408() && !IsC400() && !IsC172() && !IsCaravan(),
                 OnClick = () => { uint target = cowlFlapL == 0 ? 8191u : 16383u;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_L_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_L_DEC", BasePos=new Point(1500, 1640), W=75, H=40, Resizable=true, NoShadow=true,
-                ShowWhen = () => !IsDA62() && !IsDA40() && !IsCirrusSR22(),
+                ShowWhen = () => !IsDA62() && !IsDA40() && !IsCirrusSR22() && !IsC408() && !IsC400() && !IsC172() && !IsCaravan(),
                 OnClick = () => { uint target = cowlFlapL == 2 ? 8191u : 0u;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_L_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
+            // Bonanza G36 (2026-09-05, confirmat per Pere): monomotor — només el cowl flap "1" (L) és
+            // real, el "2" (R) no existeix. Exclòs NOMÉS aquí, no a L_INC/L_DEC de sobre.
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_R_INC", BasePos=new Point(1600, 1560), W=75, H=40, Resizable=true, NoShadow=true,
-                ShowWhen = () => !IsDA62() && !IsDA40() && !IsCirrusSR22(),
+                ShowWhen = () => !IsDA62() && !IsDA40() && !IsCirrusSR22() && !IsC408() && !IsC400() && !IsC172() && !IsCaravan() && !IsBonanzaG36(),
                 OnClick = () => { uint target = cowlFlapR == 0 ? 8191u : 16383u;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_R_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_COWLFLAP_R_DEC", BasePos=new Point(1600, 1640), W=75, H=40, Resizable=true, NoShadow=true,
-                ShowWhen = () => !IsDA62() && !IsDA40() && !IsCirrusSR22(),
+                ShowWhen = () => !IsDA62() && !IsDA40() && !IsCirrusSR22() && !IsC408() && !IsC400() && !IsC172() && !IsCaravan() && !IsBonanzaG36(),
                 OnClick = () => { uint target = cowlFlapR == 2 ? 8191u : 0u;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.COWL_FLAP_R_SET, target, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
 
@@ -3372,12 +3389,15 @@ namespace SimConnect3
                 new() { Name="SW_FUELPUMP1_DN", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1804, 1770), ZoomWidth=75, ZoomHeight=40, Img=null,
                         OnClickEnabled = () => UsesPump1_3StateUi(),
                         OnClick = () => { if (UsesPump1_3StateUi()) StepFuelPumpBaron(1, 1); } },
+                // Baron G58 (2026-09-05, confirmat per Pere): la bomba 2 només és de 3 posicions a 2024
+                // — a 2020 és un simple ON/OFF (SW_DN_FUELPUMP2), sense UP/DN. Gatejat igual que el
+                // ShowWhen/OnClickEnabled de SW_DN_FUELPUMP2 de sobre.
                 new() { Name="SW_FUELPUMP2_UP", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1864, 1720), ZoomWidth=75, ZoomHeight=40, Img=null,
-                        OnClickEnabled = () => IsBaronG58(),
-                        OnClick = () => { if (IsBaronG58()) StepFuelPumpBaron(2, -1); } },
+                        OnClickEnabled = () => IsBaronG58() && _isMsfs2024,
+                        OnClick = () => { if (IsBaronG58() && _isMsfs2024) StepFuelPumpBaron(2, -1); } },
                 new() { Name="SW_FUELPUMP2_DN", TypeKey="SFS_PUMP_ZONE", BasePos=new Point(1864, 1770), ZoomWidth=75, ZoomHeight=40, Img=null,
-                        OnClickEnabled = () => IsBaronG58(),
-                        OnClick = () => { if (IsBaronG58()) StepFuelPumpBaron(2, 1); } },
+                        OnClickEnabled = () => IsBaronG58() && _isMsfs2024,
+                        OnClick = () => { if (IsBaronG58() && _isMsfs2024) StepFuelPumpBaron(2, 1); } },
                 // DA-40 — l'interruptor 2 és el fuel transfer switch, no una bomba. Etiqueta movible amb F12.
                 new() { Name="SW_DA40_FUELTRANSF_LBL", TypeKey="DA40_LBL", BasePos=new Point(1804, 1598), ZoomWidth=160, ZoomHeight=60, Img=null,
                         NoResize = true,
@@ -4867,10 +4887,15 @@ namespace SimConnect3
         /// <summary>Ressalta el botó del cockpit actiu (TBM 930 / G1000) i apaga l'altre.</summary>
         private void UpdateCockpitModeButtons()
         {
-            _g3000Btn.FlatAppearance.BorderSize = _g3000Active ? 4 : 1;
-            _g3000Btn.FlatAppearance.BorderColor = Color.White;
-            _g1000Btn.FlatAppearance.BorderSize = _g3000Active ? 1 : 4;
-            _g1000Btn.FlatAppearance.BorderColor = Color.White;
+            // 2026-09-05: la vora blanca prima (1px) de l'inactiu es confonia amb l'activa (4px) — massa
+            // subtil per distingir-los d'un cop d'ull. Ara l'actiu porta vora taronja gruixuda (color
+            // d'accent de l'app) i l'inactiu es queda amb una vora blanca fina, sense tocar el color de
+            // fons del botó (mateix criteri d'abans: mai un farciment de color).
+            var accent = Color.FromArgb(235, 91, 37);
+            _g3000Btn.FlatAppearance.BorderSize = _g3000Active ? 7 : 1;
+            _g3000Btn.FlatAppearance.BorderColor = _g3000Active ? accent : Color.White;
+            _g1000Btn.FlatAppearance.BorderSize = _g3000Active ? 1 : 7;
+            _g1000Btn.FlatAppearance.BorderColor = _g3000Active ? Color.White : accent;
         }
 
         private void SetG3000Active(bool active)
@@ -4882,6 +4907,10 @@ namespace SimConnect3
             if (!_g3000Active) { _thrQuadrantVisible = false; }
             if (_g3000Active)
             {
+                // 2026-09-05: si es torna a TBM930 abans que el compte enrere de 10s del recordatori de
+                // pop-outs (obert en entrar a G1000) acabi, es quedava obert i semblava que el mode
+                // TBM930 també el disparava.
+                if (_popoutReminderForm != null && !_popoutReminderForm.IsDisposed) _popoutReminderForm.Close();
                 _thrQuadrantVisible = true;
                 ApplyG3000Region();
                 SetAPTrimPos(0);
@@ -9526,8 +9555,9 @@ namespace SimConnect3
                 e.Graphics.FillRectangle(overlayBrush, trimZone);
                 e.Graphics.DrawRectangle(overlayPen, trimZone);
 
-                // Rudder trim wheel horitzontal — DA-40 (2026-09-05, confirmat per Pere): exclosa.
-                if (!IsDA40())
+                // Rudder trim wheel horitzontal — DA-40, C172 i Bonanza G36 (2026-09-05, confirmat per
+                // Pere): exclosa.
+                if (!IsDA40() && !IsC172() && !IsBonanzaG36())
                 {
                     e.Graphics.FillRectangle(overlayBrush, rudderTrimZone);
                     e.Graphics.DrawRectangle(overlayPen, rudderTrimZone);
