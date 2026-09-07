@@ -399,12 +399,22 @@ namespace SimConnect3
             openButton.FlatAppearance.BorderSize = 0;
             content.Controls.Add(openButton);
 
+            var dpiNoteLbl = new Label
+            {
+                Text = "Recommended: while configuring this screen, set Windows text size to 200% (Settings → Display → Scale) — pop-up windows and dialog titles follow this setting.",
+                ForeColor = Color.FromArgb(153, 27, 27),
+                Font = new Font("Segoe UI", 14f, FontStyle.Bold),
+                Location = new Point(0, 104),
+                Size = new Size(456, 110)
+            };
+            content.Controls.Add(dpiNoteLbl);
+
             var statusLbl = new Label
             {
                 Text = "",
                 ForeColor = Color.FromArgb(21, 115, 71),
                 Font = new Font("Segoe UI", 15f, FontStyle.Bold),
-                Location = new Point(0, 104),
+                Location = new Point(0, 224),
                 Size = new Size(456, 220)
             };
             content.Controls.Add(statusLbl);

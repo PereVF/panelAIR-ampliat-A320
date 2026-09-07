@@ -8316,6 +8316,22 @@ namespace SimConnect3
             return new MouseEventArgs(e.Button, e.Clicks, pt.X, pt.Y, e.Delta);
         }
 
+        // Tradueix un rectangle en coordenades virtuals (3840x2160) a la mida/posició reals de
+        // pbMain, per poder invalidar només un tros petit (p. ex. una roda de trim) en comptes de
+        // tota la finestra. Sense això, en mode demo (finestra petita) el rectangle "virtual" cau
+        // fora dels límits reals del control i no es repinta res.
+        private Rectangle ToRealInvalidateRect(Rectangle virtualRect)
+        {
+            if (!IsDemoMode) return virtualRect;
+            var (scale, offX, offY) = GetDemoTransform();
+            if (scale <= 0f) return virtualRect;
+            return new Rectangle(
+                (int)(offX + virtualRect.X * scale) - 4,
+                (int)(offY + virtualRect.Y * scale) - 4,
+                (int)(virtualRect.Width * scale) + 8,
+                (int)(virtualRect.Height * scale) + 8);
+        }
+
 
 
         private void PbMain_Paint(object? sender, PaintEventArgs e)
@@ -10451,7 +10467,7 @@ namespace SimConnect3
                 trimFramePos += deltaY / TRIM_PIXELS_PER_FRAME;
                 trimFramePos = ((trimFramePos % RUDDER_TRIM_FRAME_COUNT)
                                + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
-                pbMain.Invalidate();
+                pbMain.Invalidate(ToRealInvalidateRect(Rectangle.Inflate(trimZone, 80, 80)));
             }
             if (_g3kTrimDragging)
             {
@@ -10464,7 +10480,7 @@ namespace SimConnect3
                 while (_g3kTrimAccumulatedDelta <= -TRIM_TICK_PIXELS) { SendTrimTick(-1); _g3kTrimAccumulatedDelta += TRIM_TICK_PIXELS; }
                 trimFramePos += deltaY / TRIM_PIXELS_PER_FRAME;
                 trimFramePos = ((trimFramePos % TRIM_FRAME_COUNT) + TRIM_FRAME_COUNT) % TRIM_FRAME_COUNT;
-                pbMain.Invalidate();
+                pbMain.Invalidate(ToRealInvalidateRect(Rectangle.Inflate(_g3kTrimZone, 80, 80)));
             }
             if (_g3kRudderTrimDragging)
             {
@@ -10477,7 +10493,7 @@ namespace SimConnect3
                 while (_g3kRudderTrimAccumulatedDelta <= -RUDDER_TRIM_TICK_PIXELS) { SendRudderTrimTick(-1); _g3kRudderTrimAccumulatedDelta += RUDDER_TRIM_TICK_PIXELS; }
                 rudderTrimFramePos -= deltaX / RUDDER_TRIM_PIXELS_PER_FRAME;
                 rudderTrimFramePos = ((rudderTrimFramePos % RUDDER_TRIM_FRAME_COUNT) + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
-                pbMain.Invalidate();
+                pbMain.Invalidate(ToRealInvalidateRect(Rectangle.Inflate(_g3kRudderTrimZone, 80, 80)));
             }
             if (g3kApSliderDragging)
             {
@@ -10502,7 +10518,7 @@ namespace SimConnect3
                 rudderTrimFramePos -= deltaX / RUDDER_TRIM_PIXELS_PER_FRAME;
                 rudderTrimFramePos = ((rudderTrimFramePos % RUDDER_TRIM_FRAME_COUNT)
                                      + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
-                pbMain.Invalidate();
+                pbMain.Invalidate(ToRealInvalidateRect(Rectangle.Inflate(rudderTrimZone, 80, 80)));
             }
         }
 
