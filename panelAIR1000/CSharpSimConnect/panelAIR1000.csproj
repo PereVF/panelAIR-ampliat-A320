@@ -122,6 +122,8 @@
     <EmbeddedResource Include="Resources\FUEL SEL SW.png" />
     <EmbeddedResource Include="Resources\MASTER CAUTION LIGHT.png" />
     <EmbeddedResource Include="Resources\MASTER WARNING LIGHT.png" />
+    <EmbeddedResource Include="Resources\popm_setup_guide_screenshot.png" />
+    <EmbeddedResource Include="Resources\popm_new_profile_icon.png" />
   </ItemGroup>
 
   <ItemGroup>
