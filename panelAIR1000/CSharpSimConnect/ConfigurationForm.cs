@@ -342,10 +342,7 @@ namespace SimConnect3
             // vertical còmode de llegir i, en ser més ampla que abans, deixa que el text i la
             // captura aprofitin més espai horitzontal (el seu ample ja es calcula relatiu a
             // guideForm.ClientSize.Width, així que s'adapta sol).
-            var screen4k = Screen.AllScreens.FirstOrDefault(s => !s.Primary && s.Bounds.Width == 3840 && s.Bounds.Height == 2160)
-                ?? Screen.AllScreens.FirstOrDefault(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160)
-                ?? Screen.PrimaryScreen
-                ?? Screen.AllScreens[0];
+            var screen4k = GetPanelAir4kScreen();
 
             int guideWidth = (int)(screen4k.Bounds.Width * 0.50);
             int guideHeight = (int)(screen4k.Bounds.Height * 0.90);
@@ -377,75 +374,101 @@ namespace SimConnect3
 
             int textWidth = guideForm.ClientSize.Width - 64;
 
-            var introLbl = new Label
-            {
-                Text = "First, install POPM using the instructions on its download page.\r\n" +
-                       "Once it's installed, set up each aircraft like this:",
-                Font = new Font("Segoe UI", 24f),
-                ForeColor = Color.FromArgb(22, 32, 42),
-                Location = new Point(32, 32),
-                AutoSize = true,
-                MaximumSize = new Size(textWidth, 0)
-            };
-            scrollPanel.Controls.Add(introLbl);
-
-            // Icona "+" retallada directament de la captura de POPM: es posa al costat del pas 1
-            // perquè es vegi exactament quin botó prémer, sense haver-la de descriure amb paraules.
             const int iconSize = 44;
-            var step1Lbl = new Label
-            {
-                Text = "1.  New profile — press \"+\", name the aircraft, then Accept.",
-                Font = new Font("Segoe UI", 24f),
-                ForeColor = Color.FromArgb(22, 32, 42),
-                Location = new Point(32, introLbl.Bottom + 24),
-                AutoSize = true,
-                MaximumSize = new Size(textWidth - iconSize - 16, 0)
-            };
-            scrollPanel.Controls.Add(step1Lbl);
 
-            var step1Icon = new PictureBox
+            // Helpers locals: una línia normal a tota l'amplada, o una línia curta amb una icona
+            // a la seva dreta. La icona sempre queda ben enganxada al text perquè la línia és
+            // prou curta per no fer wrap — mai més pinnejar-la al capdamunt d'un paràgraf llarg
+            // (això és el que Pere ha dit que no quedava ben situat).
+            Label AddLine(ref int y, string text, int gapBefore = 24)
             {
-                SizeMode = PictureBoxSizeMode.Zoom,
-                Location = new Point(step1Lbl.Right + 16, step1Lbl.Top),
-                Size = new Size(iconSize, iconSize)
-            };
-            try
-            {
-                using var si = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream("panelAIR1000.Resources.popm_new_profile_icon.png");
-                if (si != null) step1Icon.Image = Image.FromStream(si);
+                y += gapBefore;
+                var lbl = new Label
+                {
+                    Text = text,
+                    Font = new Font("Segoe UI", 24f),
+                    ForeColor = Color.FromArgb(22, 32, 42),
+                    Location = new Point(32, y),
+                    AutoSize = true,
+                    MaximumSize = new Size(textWidth, 0)
+                };
+                scrollPanel.Controls.Add(lbl);
+                y = lbl.Bottom;
+                return lbl;
             }
-            catch { }
-            scrollPanel.Controls.Add(step1Icon);
 
-            int afterStep1Y = Math.Max(step1Lbl.Bottom, step1Icon.Bottom) + 24;
-
-            var step2Lbl = new Label
+            Label AddIconLine(ref int y, string text, string resourceName, int gapBefore = 24)
             {
-                Text = "2.  Add panels — one for PFD, one for MFD (plus TSC1 and TSC2 for the TBM 930). Paste the Top/Left/Width/Height values we provide — they're the same for any aircraft.",
-                Font = new Font("Segoe UI", 24f),
-                ForeColor = Color.FromArgb(22, 32, 42),
-                Location = new Point(32, afterStep1Y),
-                AutoSize = true,
-                MaximumSize = new Size(textWidth, 0)
-            };
-            scrollPanel.Controls.Add(step2Lbl);
+                y += gapBefore;
+                var lbl = new Label
+                {
+                    Text = text,
+                    Font = new Font("Segoe UI", 24f),
+                    ForeColor = Color.FromArgb(22, 32, 42),
+                    Location = new Point(32, y),
+                    AutoSize = true,
+                    MaximumSize = new Size(textWidth - iconSize - 16, 0)
+                };
+                scrollPanel.Controls.Add(lbl);
+                var icon = new PictureBox
+                {
+                    SizeMode = PictureBoxSizeMode.Zoom,
+                    Location = new Point(lbl.Right + 16, lbl.Top),
+                    Size = new Size(iconSize, iconSize)
+                };
+                try
+                {
+                    using var s = System.Reflection.Assembly.GetExecutingAssembly().GetManifestResourceStream(resourceName);
+                    if (s != null) icon.Image = Image.FromStream(s);
+                }
+                catch { }
+                scrollPanel.Controls.Add(icon);
+                y = Math.Max(lbl.Bottom, icon.Bottom);
+                return lbl;
+            }
 
-            var step3Lbl = new Label
+            Label AddWarningLine(ref int y, string text, int gapBefore = 8)
             {
-                Text = "3.  One panel at a time: press \"Identify\", click that instrument's screen inside MSFS (a colored circle appears), then press the green target icon at the top to confirm. Repeat for each screen — 2 times for a regular G1000 aircraft (PFD, MFD), 4 times for the TBM 930 (PFD, MFD, TSC1, TSC2).",
-                Font = new Font("Segoe UI", 24f),
-                ForeColor = Color.FromArgb(22, 32, 42),
-                Location = new Point(32, step2Lbl.Bottom + 24),
-                AutoSize = true,
-                MaximumSize = new Size(textWidth, 0)
-            };
-            scrollPanel.Controls.Add(step3Lbl);
+                y += gapBefore;
+                var lbl = new Label
+                {
+                    Text = text,
+                    Font = new Font("Segoe UI", 20f, FontStyle.Bold),
+                    ForeColor = Color.FromArgb(153, 27, 27),
+                    Location = new Point(32, y),
+                    AutoSize = true,
+                    MaximumSize = new Size(textWidth, 0)
+                };
+                scrollPanel.Controls.Add(lbl);
+                y = lbl.Bottom;
+                return lbl;
+            }
+
+            // Ordre real del flux de POPM (corregit per Pere, 2026-09-11, confirmat contra el
+            // GETTING_STARTED.md oficial de hawkeye-stan): primer es creen i s'identifiquen TOTS
+            // els panells, després es prem la icona verda UN SOL COP (confirma tots els panells
+            // alhora, no un per un), després "Start Pop Out", i només un cop les finestres han
+            // sortit es poden enganxar les coordenades i activar Hide Title Bar / touch.
+            int y = 8;
+            AddLine(ref y, "Set up each aircraft you want to fly like this:", 24);
+            AddLine(ref y, "1.  Have MSFS already running with your aircraft loaded on the runway, ready to fly — the new profile automatically links to whichever aircraft is currently active.");
+            AddIconLine(ref y, "2.  New profile — press the icon, name the aircraft, then Accept.", "panelAIR1000.Resources.popm_new_profile_icon.png");
+            AddLine(ref y, "3.  Add panels — one for PFD, one for MFD (plus TSC1 and TSC2 for the TBM 930).");
+            AddLine(ref y, "4.  For each panel, press \"Identify\" and click that instrument's screen inside MSFS — a colored circle appears. Repeat for every screen — 2 times for a regular G1000 aircraft (PFD, MFD), 4 times for the TBM 930 (PFD, MFD, TSC1, TSC2).");
+            AddIconLine(ref y, "5.  Once every panel is identified, press the green icon once — that confirms them all together and lets you start the pop out.", "panelAIR1000.Resources.popm_confirm_icon.png");
+            AddLine(ref y, "6.  Press \"Start Pop Out\" at the bottom.");
+            AddWarningLine(ref y, "Don't touch your mouse while this happens — wait until it finishes and the POPM window reappears (it disappears during the process).");
+            AddLine(ref y, "7.  The screens will open at an arbitrary position and size. Paste the Top/Left/Width/Height values we provide below under the \"G1000 coordinates\" or \"G3000 coordinates\" title — for G1000, they're the same for any G1000 aircraft. Turn on \"Hide Title Bar\" for every panel.", 16);
+            AddIconLine(ref y, "8.  For TSC1 and TSC2 only, also turn on touch screen using the hand icon.", "panelAIR1000.Resources.popm_touch_icon.png");
+            AddLine(ref y, "9.  Once the aircraft is fully set up, lock it — turn the padlock green, like in the picture below.");
+
+            int afterStep3Y = y + 32;
 
             // Captura un 50% més gran que abans (600 -> 900 d'alçada màxima).
             var screenshotBox = new PictureBox
             {
                 SizeMode = PictureBoxSizeMode.Zoom,
-                Location = new Point(32, step3Lbl.Bottom + 32),
+                Location = new Point(32, afterStep3Y),
                 Size = new Size(textWidth, 900)
             };
             try
@@ -467,31 +490,110 @@ namespace SimConnect3
             };
             scrollPanel.Controls.Add(oneProfileNoteLbl);
 
-            var coordsTitleLbl = new Label
+            // G1000 (PFD, MFD) i G3000/TBM 930 (PFD, MFD, TSC1, TSC2): Width/Height ja se saben
+            // (fixos, mateixa resolució 3840x2160 sempre), però Top/Left depenen d'on tingui el
+            // client la seva pantalla 4K — per això NO es calculen en obrir la guia, només quan es
+            // prem el botó corresponent (l'usuari pot moure la pantalla mentre la guia és oberta).
+            // Dos jocs de valors de referència diferents perquè MSFS 2020 i MSFS 2024 fan servir
+            // builds diferents de POPM amb mides/posicions de panell pròpies (confirmat per Pere,
+            // 2026-09-10) — però tots dos capturats amb la pantalla 4K de Pere a la MATEIXA posició
+            // real, (0, 1440) (no (0, 1840): correcció de Pere, la pantalla no s'havia mogut).
+            const int ref2024Left = 0, ref2024Top = 1440;
+            var g1000Panels2024 = new[]
             {
-                Text = "These are your G1000 coordinates",
+                ("PFD", 1875, 180, 1640, 1025),
+                ("MFD", 1875, 2020, 1640, 1025)
+            };
+            var g3000Panels2024 = new[]
+            {
+                ("PFD", 1875, 180, 1640, 1025),
+                ("MFD", 1875, 2020, 1640, 1025),
+                ("TSC1", 3060, 1825, 768, 480),
+                ("TSC2", 3060, 2800, 768, 480)
+            };
+
+            const int ref2020Left = 0, ref2020Top = 1440;
+            var g1000Panels2020 = new[]
+            {
+                ("PFD", 1480, 238, 1325, 1000),
+                ("MFD", 1480, 2278, 1325, 1000)
+            };
+            var g3000Panels2020 = new[]
+            {
+                ("PFD", 1898, 193, 1615, 1000),
+                ("MFD", 1893, 2035, 1615, 1000),
+                ("TSC1", 3040, 1870, 714, 560),
+                ("TSC2", 3040, 2825, 714, 560)
+            };
+
+            // 2020 a l'esquerra, 2024 a la dreta — aprofita millor l'amplada de la pàgina que
+            // apilar-les una sota l'altra.
+            const int colGap = 48, colWidth = 700;
+            int leftX = 32, rightX = 32 + colWidth + colGap;
+
+            var g1000GroupLbl = new Label
+            {
+                Text = "G1000 coordinates",
                 Font = new Font("Segoe UI", 24f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(22, 32, 42),
-                Location = new Point(32, oneProfileNoteLbl.Bottom + 24),
+                Location = new Point(32, oneProfileNoteLbl.Bottom + 32),
                 AutoSize = true
             };
-            scrollPanel.Controls.Add(coordsTitleLbl);
+            scrollPanel.Controls.Add(g1000GroupLbl);
+            var g1000_2020 = BuildCoordsSection(scrollPanel, "MSFS 2020", leftX, g1000GroupLbl.Bottom + 16, colWidth, g1000Panels2020, ref2020Left, ref2020Top);
+            var g1000_2024 = BuildCoordsSection(scrollPanel, "MSFS 2024", rightX, g1000GroupLbl.Bottom + 16, colWidth, g1000Panels2024, ref2024Left, ref2024Top);
+            int g1000Bottom = Math.Max(g1000_2020.Bottom, g1000_2024.Bottom);
 
-            // Valors de referència capturats al propi equip de Pere, amb la pantalla 4K a (0, 1440)
-            // (veure project_dpi_issue / project_popm_integration) — es desplacen pel delta entre
-            // aquella posició i la posició real detectada de la pantalla 4K d'aquest client. Width i
-            // Height no canvien mai (mateixa resolució 3840x2160 sempre, és un requisit de hardware).
-            const int refScreenLeft = 0, refScreenTop = 1440;
-            int deltaX = screen4k.Bounds.Left - refScreenLeft;
-            int deltaY = screen4k.Bounds.Top - refScreenTop;
-
-            var pfd = (Top: 1875 + deltaY, Left: 180 + deltaX, Width: 1640, Height: 1025);
-            var mfd = (Top: 1875 + deltaY, Left: 2020 + deltaX, Width: 1640, Height: 1025);
-
-            var coordsGrid = new DataGridView
+            var g3000GroupLbl = new Label
             {
-                Location = new Point(32, coordsTitleLbl.Bottom + 16),
-                Size = new Size(700, 116),
+                Text = "G3000 coordinates (TBM 930)",
+                Font = new Font("Segoe UI", 24f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(22, 32, 42),
+                Location = new Point(32, g1000Bottom + 40),
+                AutoSize = true
+            };
+            scrollPanel.Controls.Add(g3000GroupLbl);
+            BuildCoordsSection(scrollPanel, "MSFS 2020", leftX, g3000GroupLbl.Bottom + 16, colWidth, g3000Panels2020, ref2020Left, ref2020Top);
+            BuildCoordsSection(scrollPanel, "MSFS 2024", rightX, g3000GroupLbl.Bottom + 16, colWidth, g3000Panels2024, ref2024Left, ref2024Top);
+
+            _popoutGuideForm = guideForm;
+            guideForm.Show(this);
+        }
+
+        // Construeix un bloc "subtítol + botó Calculate My Top/Left + taula" per a un joc de
+        // panells (G1000 o G3000) d'una versió concreta de MSFS, a la columna X indicada (2020 a
+        // l'esquerra, 2024 a la dreta). Retorna la taula perquè el bloc de sota pugui col·locar-se
+        // relatiu al seu final (mateix patró de "posicionar-se sempre relatiu al .Bottom real" que
+        // ja fem servir arreu en aquesta pantalla per no re-endevinar coordenades fixes).
+        private DataGridView BuildCoordsSection(Panel parent, string title, int x, int y, int width, (string Name, int RefTop, int RefLeft, int Width, int Height)[] panels, int refScreenLeft, int refScreenTop)
+        {
+            var titleLbl = new Label
+            {
+                Text = title,
+                Font = new Font("Segoe UI", 19f, FontStyle.Bold),
+                ForeColor = Color.FromArgb(102, 114, 127),
+                Location = new Point(x, y),
+                AutoSize = true
+            };
+            parent.Controls.Add(titleLbl);
+
+            var calcBtn = new Button
+            {
+                Text = "Calculate My Top/Left",
+                Size = new Size(280, 56),
+                Location = new Point(x, titleLbl.Bottom + 16),
+                FlatStyle = FlatStyle.Flat,
+                BackColor = Color.FromArgb(235, 91, 37),
+                ForeColor = Color.White,
+                Font = new Font("Segoe UI", 14f, FontStyle.Bold)
+            };
+            calcBtn.FlatAppearance.BorderSize = 0;
+            parent.Controls.Add(calcBtn);
+
+            var grid = new DataGridView
+            {
+                Location = new Point(x, calcBtn.Bottom + 16),
+                Size = new Size(Math.Min(700, width), 40 + 40 * panels.Length + 4),
                 AllowUserToAddRows = false,
                 AllowUserToDeleteRows = false,
                 AllowUserToResizeRows = false,
@@ -505,18 +607,55 @@ namespace SimConnect3
                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize,
                 RowTemplate = { Height = 40 }
             };
-            coordsGrid.Columns.Add("panel", "Panel");
-            coordsGrid.Columns.Add("top", "Top");
-            coordsGrid.Columns.Add("left", "Left");
-            coordsGrid.Columns.Add("width", "Width");
-            coordsGrid.Columns.Add("height", "Height");
-            foreach (DataGridViewColumn col in coordsGrid.Columns) col.Width = 130;
-            coordsGrid.Rows.Add("PFD", pfd.Top, pfd.Left, pfd.Width, pfd.Height);
-            coordsGrid.Rows.Add("MFD", mfd.Top, mfd.Left, mfd.Width, mfd.Height);
-            scrollPanel.Controls.Add(coordsGrid);
+            grid.Columns.Add("panel", "Panel");
+            grid.Columns.Add("top", "Top");
+            grid.Columns.Add("left", "Left");
+            grid.Columns.Add("width", "Width");
+            grid.Columns.Add("height", "Height");
+            foreach (DataGridViewColumn col in grid.Columns) col.Width = 130;
+            foreach (var p in panels)
+                grid.Rows.Add(p.Name, "", "", p.Width, p.Height);
+            // És només informativa, no editable: sense això, DataGridView selecciona sol la
+            // primera cel·la i la pinta de blau, com si convidés a fer-hi clic.
+            grid.DefaultCellStyle.SelectionBackColor = grid.DefaultCellStyle.BackColor;
+            grid.DefaultCellStyle.SelectionForeColor = grid.DefaultCellStyle.ForeColor;
+            grid.ClearSelection();
+            grid.CurrentCell = null;
+            parent.Controls.Add(grid);
 
-            _popoutGuideForm = guideForm;
-            guideForm.Show(this);
+            // Valors de referència capturats al propi equip de Pere — es desplacen pel delta entre
+            // la posició de la seva pantalla 4K en aquell moment (refScreenLeft/Top) i la posició
+            // real detectada de la pantalla 4K d'aquest client, calculat al moment de prémer el
+            // botó (no en obrir la guia).
+            var calculatedColor = Color.FromArgb(235, 91, 37);
+            calcBtn.Click += (s, e) =>
+            {
+                var screen4kNow = GetPanelAir4kScreen();
+                int deltaX = screen4kNow.Bounds.Left - refScreenLeft;
+                int deltaY = screen4kNow.Bounds.Top - refScreenTop;
+                for (int i = 0; i < panels.Length; i++)
+                {
+                    var topCell = grid.Rows[i].Cells["top"];
+                    var leftCell = grid.Rows[i].Cells["left"];
+                    topCell.Value = panels[i].RefTop + deltaY;
+                    leftCell.Value = panels[i].RefLeft + deltaX;
+                    // Taronja com el botó: distingeix d'un cop d'ull els valors calculats dels fixos.
+                    topCell.Style.ForeColor = calculatedColor;
+                    topCell.Style.Font = new Font(grid.Font, FontStyle.Bold);
+                    leftCell.Style.ForeColor = calculatedColor;
+                    leftCell.Style.Font = new Font(grid.Font, FontStyle.Bold);
+                }
+            };
+
+            return grid;
+        }
+
+        private static Screen GetPanelAir4kScreen()
+        {
+            return Screen.AllScreens.FirstOrDefault(s => !s.Primary && s.Bounds.Width == 3840 && s.Bounds.Height == 2160)
+                ?? Screen.AllScreens.FirstOrDefault(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160)
+                ?? Screen.PrimaryScreen
+                ?? Screen.AllScreens[0];
         }
 
         private void OnTouchDetected()
@@ -676,7 +815,7 @@ namespace SimConnect3
                 {
                     Process.Start(new ProcessStartInfo { FileName = "ms-settings:display", UseShellExecute = true });
                     statusLbl.ForeColor = Color.FromArgb(21, 115, 71);
-                    statusLbl.Text = "Drag the box for your new panelAIR screen (3840×2160) to match where it really sits next to your main screen. Click “Identify” if you're not sure which one it is.";
+                    statusLbl.Text = "Drag the box for your new panelAIR screen (3840×2160) to match where it really sits next to your main screen. Click “Identify” if you're not sure which one it is.\n\nThen press Apply.";
                 }
                 catch
                 {
@@ -1152,9 +1291,9 @@ namespace SimConnect3
 
             var introLbl = new Label
             {
-                Text = "A free community tool called POPM — SFS doesn't provide technical support for it.\n\n" +
-                       "Alt+G can pop out screens, but always keeps the Windows title bar. POPM removes it — and for G3000, it's the only way to make TSC1/TSC2 touch-enabled.\n\n" +
-                       "Different builds for MSFS 2020 and 2024. Download, install, then open our quick setup guide below.",
+                Text = "POPM is a free tool made by other flight simmers. It lets you pop out your screens automatically and place them exactly within panelAIR's bezels. (SFS doesn't provide support for how this software works.)\n\n" +
+                       "You can already pop out screens in MSFS with \"Alt+G\", but that always leaves a title bar on top. POPM removes that bar completely, and for the G3000 it's the only way to make the TSC1 and TSC2 screens respond to touch.\n\n" +
+                       "There's a separate version for MSFS 2020 and for MSFS 2024. Download the one for your simulator below, unzip it anywhere you like, run the program inside, then open our step-by-step guide.",
                 Font = new Font("Segoe UI", 19f),
                 ForeColor = Color.FromArgb(102, 114, 127),
                 Location = new Point(0, 0),
