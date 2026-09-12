@@ -4213,10 +4213,13 @@ namespace SimConnect3
 
         private void ApplyG3000Region()
         {
+            // Valors ajustats (2026-09-12) perquè coincideixin EXACTAMENT amb la zona transparent
+            // real de "main GA_3000 4K panel_m.png" (mesurat píxel a píxel) — abans el forat de
+            // MFD i el de TSC esquerra eren una mica més grans que la transparència de la imatge i
+            // es menjaven part del bisell opac. Veure [[project_demo_mode]] / conversa 2026-09-12.
             Rectangle pfdHole = new Rectangle(200, 458, 1595, 995);
-            // amplada 1615px confirmada per l'usuari → fins a x=3655
-            Rectangle mfdHole = new Rectangle(2040, 459, 1615, 991);
-            Rectangle tscLeftHole = new Rectangle(1867, 1653, 721, 442);
+            Rectangle mfdHole = new Rectangle(2040, 459, 1594, 993);
+            Rectangle tscLeftHole = new Rectangle(1867, 1654, 721, 439);
             Rectangle tscRightHole = new Rectangle(2821, 1653, 724, 442);
 
             if (IsDemoMode) { ApplyDemoRegionHoles(pfdHole, mfdHole, tscLeftHole, tscRightHole); return; }
@@ -9894,7 +9897,12 @@ namespace SimConnect3
         {
             if (e.Button == MouseButtons.Left)
             {
+                // Zona de clic més gran que la icona dibuixada (63x63): amb el dit és fàcil quedar-se
+                // just fora del quadrat exacte. La icona en si NO canvia de mida ni posició —
+                // DrawShowAreasIcon (PbMain_Paint) segueix fent servir el rectangle original de 63x63,
+                // aquest és només per detectar el clic.
                 var showAreasRect = new Rectangle(_showAreasBtnPos, new Size(63, 63));
+                showAreasRect.Inflate(25, 25);
                 if (showAreasRect.Contains(e.Location))
                 {
                     if (calibrationMode)

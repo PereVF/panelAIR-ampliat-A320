@@ -501,8 +501,8 @@ namespace SimConnect3
             const int ref2024Left = 0, ref2024Top = 1440;
             var g1000Panels2024 = new[]
             {
-                ("PFD", 1875, 180, 1640, 1025),
-                ("MFD", 1875, 2020, 1640, 1025)
+                ("PFD", 1455, 200, 1400, 1040),
+                ("MFD", 1455, 2240, 1400, 1040)
             };
             var g3000Panels2024 = new[]
             {
