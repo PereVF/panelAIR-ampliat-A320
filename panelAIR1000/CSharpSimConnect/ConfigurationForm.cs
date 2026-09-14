@@ -397,6 +397,23 @@ namespace SimConnect3
                 return lbl;
             }
 
+            Label AddItalicLine(ref int y, string text, int gapBefore = 24)
+            {
+                y += gapBefore;
+                var lbl = new Label
+                {
+                    Text = text,
+                    Font = new Font("Segoe UI", 18f, FontStyle.Italic),
+                    ForeColor = Color.FromArgb(102, 114, 127),
+                    Location = new Point(32, y),
+                    AutoSize = true,
+                    MaximumSize = new Size(textWidth, 0)
+                };
+                scrollPanel.Controls.Add(lbl);
+                y = lbl.Bottom;
+                return lbl;
+            }
+
             Label AddIconLine(ref int y, string text, string resourceName, int gapBefore = 24)
             {
                 y += gapBefore;
@@ -459,6 +476,7 @@ namespace SimConnect3
             AddLine(ref y, "6.  Press \"Start Pop Out\" at the bottom.");
             AddWarningLine(ref y, "Don't touch your mouse while this happens — wait until it finishes and the POPM window reappears (it disappears during the process).");
             AddLine(ref y, "7.  The screens will open at an arbitrary position and size. Paste the Top/Left/Width/Height values we provide below under the \"G1000 coordinates\" or \"G3000 coordinates\" title — for G1000, they're the same for any G1000 aircraft. Turn on \"Hide Title Bar\" for every panel.", 16);
+            AddItalicLine(ref y, "The windows move live as you type — but only Start Pop Out confirms the final fit.", 4);
             AddIconLine(ref y, "8.  For TSC1 and TSC2 only, also turn on touch screen using the hand icon.", "panelAIR1000.Resources.popm_touch_icon.png");
             AddLine(ref y, "9.  Once the aircraft is fully set up, lock it — turn the padlock green, like in the picture below.");
 
@@ -479,16 +497,30 @@ namespace SimConnect3
             catch { }
             scrollPanel.Controls.Add(screenshotBox);
 
+            var screenshotCaptionLbl = new Label
+            {
+                Text = "For reference only — use the calculators below to get the exact values for your setup.",
+                Font = new Font("Segoe UI", 16f, FontStyle.Italic),
+                ForeColor = Color.FromArgb(102, 114, 127),
+                Location = new Point(32, screenshotBox.Bottom + 8),
+                AutoSize = true,
+                MaximumSize = new Size(textWidth, 0)
+            };
+            scrollPanel.Controls.Add(screenshotCaptionLbl);
+
             var oneProfileNoteLbl = new Label
             {
                 Text = "You'll need one profile in POPM for every aircraft you want to fly — paste the same G1000 values below into each one.",
                 Font = new Font("Segoe UI", 20f),
                 ForeColor = Color.FromArgb(102, 114, 127),
-                Location = new Point(32, screenshotBox.Bottom + 32),
+                Location = new Point(32, screenshotCaptionLbl.Bottom + 24),
                 AutoSize = true,
                 MaximumSize = new Size(textWidth, 0)
             };
             scrollPanel.Controls.Add(oneProfileNoteLbl);
+
+            int afterOneProfileY = oneProfileNoteLbl.Bottom;
+            AddItalicLine(ref afterOneProfileY, "These values may need a few pixels of manual adjustment — that's normal.", 8);
 
             // G1000 (PFD, MFD) i G3000/TBM 930 (PFD, MFD, TSC1, TSC2): Width/Height ja se saben
             // (fixos, mateixa resolució 3840x2160 sempre), però Top/Left depenen d'on tingui el
@@ -506,10 +538,10 @@ namespace SimConnect3
             };
             var g3000Panels2024 = new[]
             {
-                ("PFD", 1875, 180, 1640, 1025),
-                ("MFD", 1875, 2020, 1640, 1025),
-                ("TSC1", 3060, 1825, 768, 480),
-                ("TSC2", 3060, 2800, 768, 480)
+                ("PFD", 1868, 180, 1640, 1032),
+                ("MFD", 1868, 2015, 1640, 1032),
+                ("TSC1", 3062, 1845, 768, 480),
+                ("TSC2", 3062, 2800, 768, 480)
             };
 
             const int ref2020Left = 0, ref2020Top = 1440;
@@ -536,7 +568,7 @@ namespace SimConnect3
                 Text = "G1000 coordinates",
                 Font = new Font("Segoe UI", 24f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(22, 32, 42),
-                Location = new Point(32, oneProfileNoteLbl.Bottom + 32),
+                Location = new Point(32, afterOneProfileY + 32),
                 AutoSize = true
             };
             scrollPanel.Controls.Add(g1000GroupLbl);
