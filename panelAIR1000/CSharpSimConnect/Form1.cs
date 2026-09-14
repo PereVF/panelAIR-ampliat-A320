@@ -1890,7 +1890,7 @@ namespace SimConnect3
                 StartPosition = FormStartPosition.Manual,
                 BackColor = Color.FromArgb(40, 40, 40),
                 ShowInTaskbar = false,
-                Size = new Size(3440, 280),
+                Size = new Size(3440, 275),
                 Location = new Point(this.Left + 200, this.Top + 1160)
             };
             _overlayPanel.KeyPreview = true;
@@ -2479,17 +2479,11 @@ namespace SimConnect3
             pfdAudio.Buttons.Add(new UiButton { Name = "COM2_mic",    BasePos = new Point(1867, 137),  OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_COM2_MIC,     0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             pfdAudio.Buttons.Add(new UiButton { Name = "COM2",        BasePos = new Point(1972, 137),  OnClick = () => { if (!com2Tx) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_COM2, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
             pfdAudio.Buttons.Add(new UiButton { Name = "SPKR",        BasePos = new Point(1972, 364),  OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_SPKR,         0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
-            pfdAudio.Buttons.Add(new UiButton { Name = "PA",          BasePos = new Point(1867, 364),  OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_PA,           0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
-            pfdAudio.Buttons.Add(new UiButton { Name = "HI_SENS",     BasePos = new Point(1972, 442),  OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_HI_SENS,      0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             pfdAudio.Buttons.Add(new UiButton { Name = "MKR_MUT",     BasePos = new Point(1867, 442),  OnClick = () => { if (!MKRmute_bool) { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_MKR_MUTE_ON, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); MKRmute_bool = true; } else { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_MKR_MUTE_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); MKRmute_bool = false; } } });
             pfdAudio.Buttons.Add(new UiButton { Name = "NAV1",        BasePos = new Point(1972, 520),  OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_NAV1,         0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             pfdAudio.Buttons.Add(new UiButton { Name = "DME",         BasePos = new Point(1867, 520),  OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_DME,          0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             pfdAudio.Buttons.Add(new UiButton { Name = "NAV2",        BasePos = new Point(1972, 598),  OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_NAV2,         0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             pfdAudio.Buttons.Add(new UiButton { Name = "ADF",         BasePos = new Point(1867, 598),  OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_ADF,          0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
-            pfdAudio.Buttons.Add(new UiButton { Name = "PLAY",        BasePos = new Point(1972, 754),  OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_PLAY,         0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
-            pfdAudio.Buttons.Add(new UiButton { Name = "MAN_SQ",      BasePos = new Point(1867, 754),  OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_MAN_SQ,       0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
-            pfdAudio.Buttons.Add(new UiButton { Name = "PILOT",       BasePos = new Point(1972, 832),  OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_PILOT,        0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
-            pfdAudio.Buttons.Add(new UiButton { Name = "COPILOT",     BasePos = new Point(1867, 832),  OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_COPILOT,      0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
             pfdAudio.Buttons.Add(new UiButton { Name = "DISPLAY_BKUP", BasePos = new Point(1920, 1082), W = 60, H = 60, IsRound = true, OnClick = () => { if (!displayBackupActive_bool) simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_DISPLAY_BKUP_ON, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); else simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AUDIO_DISPLAY_BKUP_OFF, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); } });
 
             var mfdBottom = mainSurface;
