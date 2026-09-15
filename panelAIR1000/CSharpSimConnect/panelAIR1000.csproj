@@ -7,11 +7,14 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>enable</ImplicitUsings>
     <Platforms>x64</Platforms>
-    <AssemblyName>panelAIR1000</AssemblyName>
+    <AssemblyName>panelAIR_App</AssemblyName>
     <RootNamespace>panelAIR1000</RootNamespace>
     <ApplicationIcon>panel.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <PublishSingleFile>true</PublishSingleFile>
+    <!-- Només l'.exe visible porta el número de versió — el .dll/.pdb/.deps.json/.runtimeconfig.json
+         es queden amb el nom base (AssemblyName) sense versió. Canvia només aquest número. -->
+    <ExeVersionTag>v0-0</ExeVersionTag>
   </PropertyGroup>
 
   <ItemGroup>
@@ -146,6 +149,39 @@
     <Copy SourceFiles="$(LiveCalibrationFile)"
           DestinationFolder="$(OutDir)"
           Condition="Exists('$(LiveCalibrationFile)')" />
+  </Target>
+
+  <!-- "dotnet publish" (build distribuïble, FolderProfile.pubxml) no recull automàticament el fitxer
+       copiat pel target de dalt cap a $(OutDir) — el pas de publish només empaqueta els items que ja
+       coneix (DLLs, Content...), no una còpia manual feta amb <Copy>. Cal repetir la còpia, ara cap a
+       $(PublishDir), un cop el propi Publish ja ha creat la carpeta (2026-09-14). -->
+  <Target Name="CopyLiveCalibrationOnPublish" AfterTargets="Publish" Condition="'$(Configuration)'=='Release'">
+    <PropertyGroup>
+      <LiveCalibrationFile>$(LocalAppData)\panelAIR1000\calibration_export.txt</LiveCalibrationFile>
+    </PropertyGroup>
+    <Copy SourceFiles="$(LiveCalibrationFile)"
+          DestinationFolder="$(PublishDir)"
+          Condition="Exists('$(LiveCalibrationFile)')" />
+  </Target>
+
+  <!-- Només l'.exe final ha de portar el número de versió (ExeVersionTag, dalt) — el .dll/.pdb/
+       .deps.json/.runtimeconfig.json es queden amb el nom base. L'apphost (.exe) porta el nom del
+       .dll incrustat internament en compilar-se, així que es pot renombrar després sense trencar
+       res (2026-09-15, correcció de Pere: abans es renombrava TOT amb la versió per error). -->
+  <Target Name="RenameExeOnBuild" AfterTargets="Build">
+    <PropertyGroup>
+      <_BuiltExe>$(OutDir)$(AssemblyName).exe</_BuiltExe>
+      <_VersionedExe>$(OutDir)$(AssemblyName)_$(ExeVersionTag).exe</_VersionedExe>
+    </PropertyGroup>
+    <Move SourceFiles="$(_BuiltExe)" DestinationFiles="$(_VersionedExe)" Condition="Exists('$(_BuiltExe)')" />
+  </Target>
+
+  <Target Name="RenameExeOnPublish" AfterTargets="Publish">
+    <PropertyGroup>
+      <_PublishedExe>$(PublishDir)$(AssemblyName).exe</_PublishedExe>
+      <_VersionedPublishedExe>$(PublishDir)$(AssemblyName)_$(ExeVersionTag).exe</_VersionedPublishedExe>
+    </PropertyGroup>
+    <Move SourceFiles="$(_PublishedExe)" DestinationFiles="$(_VersionedPublishedExe)" Condition="Exists('$(_PublishedExe)')" />
   </Target>
 
 </Project>

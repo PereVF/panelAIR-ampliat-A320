@@ -475,7 +475,7 @@ namespace SimConnect3
             AddIconLine(ref y, "5.  Once every panel is identified, press the green icon once — that confirms them all together and lets you start the pop out.", "panelAIR1000.Resources.popm_confirm_icon.png");
             AddLine(ref y, "6.  Press \"Start Pop Out\" at the bottom.");
             AddWarningLine(ref y, "Don't touch your mouse while this happens — wait until it finishes and the POPM window reappears (it disappears during the process).");
-            AddLine(ref y, "7.  The screens will open at an arbitrary position and size. Paste the Top/Left/Width/Height values we provide below under the \"G1000 coordinates\" or \"G3000 coordinates\" title — for G1000, they're the same for any G1000 aircraft. Turn on \"Hide Title Bar\" for every panel.", 16);
+            AddLine(ref y, "7.  The screens will open at an arbitrary position and size. Type in the Top/Left/Width/Height values we provide below under the \"G1000 coordinates\" or \"G3000 coordinates\" title — for G1000, they're the same for any G1000 aircraft. Turn on \"Hide Title Bar\" for every panel.", 16);
             AddItalicLine(ref y, "The windows move live as you type — but only Start Pop Out confirms the final fit.", 4);
             AddIconLine(ref y, "8.  For TSC1 and TSC2 only, also turn on touch screen using the hand icon.", "panelAIR1000.Resources.popm_touch_icon.png");
             AddLine(ref y, "9.  Once the aircraft is fully set up, lock it — turn the padlock green, like in the picture below.");
@@ -510,7 +510,7 @@ namespace SimConnect3
 
             var oneProfileNoteLbl = new Label
             {
-                Text = "You'll need one profile in POPM for every aircraft you want to fly — paste the same G1000 values below into each one.",
+                Text = "You'll need one profile in POPM for every aircraft you want to fly — type the same G1000 values below into each one.",
                 Font = new Font("Segoe UI", 20f),
                 ForeColor = Color.FromArgb(102, 114, 127),
                 Location = new Point(32, screenshotCaptionLbl.Bottom + 24),
@@ -821,25 +821,31 @@ namespace SimConnect3
             openButton.FlatAppearance.BorderSize = 0;
             content.Controls.Add(openButton);
 
-            var dpiNoteLbl = new Label
-            {
-                Text = "Recommended: while configuring this screen, set Windows text size to 200% (Settings → Display → Scale) — pop-up windows and dialog titles follow this setting.",
-                ForeColor = Color.FromArgb(153, 27, 27),
-                Font = new Font("Segoe UI", 14f, FontStyle.Bold),
-                Location = new Point(0, 104),
-                Size = new Size(456, 110)
-            };
-            content.Controls.Add(dpiNoteLbl);
-
+            // Buides fins que es prem el botó: abans no s'havia arribat encara a la finestra de
+            // Display Settings, així que cap dels dos avisos pinta encara res (mateix patró que la
+            // resta de targetes). L'ordre és Drag the box (verd) primer i Recommended (vermell)
+            // després, per això dpiNoteLbl es posiciona relatiu a statusLbl.Bottom un cop hi ha text.
             var statusLbl = new Label
             {
                 Text = "",
                 ForeColor = Color.FromArgb(21, 115, 71),
                 Font = new Font("Segoe UI", 15f, FontStyle.Bold),
-                Location = new Point(0, 224),
-                Size = new Size(456, 220)
+                Location = new Point(0, 104),
+                AutoSize = true,
+                MaximumSize = new Size(456, 0)
             };
             content.Controls.Add(statusLbl);
+
+            var dpiNoteLbl = new Label
+            {
+                Text = "",
+                ForeColor = Color.FromArgb(153, 27, 27),
+                Font = new Font("Segoe UI", 14f, FontStyle.Bold),
+                Location = new Point(0, 104),
+                AutoSize = true,
+                MaximumSize = new Size(456, 0)
+            };
+            content.Controls.Add(dpiNoteLbl);
 
             openButton.Click += (s, e) =>
             {
@@ -847,7 +853,9 @@ namespace SimConnect3
                 {
                     Process.Start(new ProcessStartInfo { FileName = "ms-settings:display", UseShellExecute = true });
                     statusLbl.ForeColor = Color.FromArgb(21, 115, 71);
-                    statusLbl.Text = "Drag the box for your new panelAIR screen (3840×2160) to match where it really sits next to your main screen. Click “Identify” if you're not sure which one it is.\n\nThen press Apply.";
+                    statusLbl.Text = "Drag the box for your new panelAIR screen (3840×2160) to match where it physically sits next to your main screen. Click “Identify” if you're not sure which one it is.\n\nThen press Apply.";
+                    dpiNoteLbl.Text = "Recommended: while positioning this screen, select it and scroll down to set Windows text size to 200% — pop-up windows and dialog titles follow this setting.";
+                    dpiNoteLbl.Location = new Point(0, statusLbl.Bottom + 16);
                 }
                 catch
                 {

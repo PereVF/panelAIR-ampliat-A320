@@ -34,7 +34,7 @@ Aplicació Windows Forms en C# que connecta hardware físic personalitzat (RotAI
 
 ## Com compilar
 Visual Studio → obrir `panelAIR1000.sln` → configuració x64 (Debug o Release) → Build.
-Output: `bin/x64/Debug/panelAIR1000.exe`
+Output: `bin/x64/Debug/panelAIR_App_v0-0.exe`
 
 ## Estat del projecte (abril 2026)
 - En desenvolupament actiu (última modificació: 19 abril 2026)

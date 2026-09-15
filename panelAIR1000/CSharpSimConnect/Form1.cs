@@ -5027,6 +5027,7 @@ namespace SimConnect3
         private void SetG3000Active(bool active)
         {
             if (calibrationMode) return;
+            bool wasG3000Active = _g3000Active;
             _g3000Active = active;
             UpdateCockpitModeButtons();
             _thrQuadrantBtn.Visible = _g3000Active;
@@ -5063,23 +5064,29 @@ namespace SimConnect3
             {
                 ApplyPfdRegion();
                 if (_popoutReminderForm != null && !_popoutReminderForm.IsDisposed) _popoutReminderForm.Close();
-                Task.Run(async () =>
+                // Només té sentit avisar de tancar els pop-outs G3000 si realment veníem de mode
+                // G3000/TBM930 — abans sortia sempre que es premia el botó G1000, encara que ja
+                // s'estigués en G1000 (2026-09-15).
+                if (wasG3000Active)
                 {
-                    await Task.Delay(1000);
-                    this.BeginInvoke(new Action(ShowPopoutReminder));
-                    for (int i = 9; i >= 0; i--)
+                    Task.Run(async () =>
                     {
                         await Task.Delay(1000);
-                        this.BeginInvoke(new Action(() =>
+                        this.BeginInvoke(new Action(ShowPopoutReminder));
+                        for (int i = 9; i >= 0; i--)
                         {
-                            if (_popoutReminderForm == null || _popoutReminderForm.IsDisposed) return;
-                            if (i <= 0)
-                                _popoutReminderForm.Close();
-                            else if (_popoutReminderMsgLbl != null)
-                                _popoutReminderMsgLbl.Text = "If you no longer need G3000 mode, close the MSFS G3000 pop-out windows to restore full G1000 panel functionality.  [" + i + "]";
-                        }));
-                    }
-                });
+                            await Task.Delay(1000);
+                            this.BeginInvoke(new Action(() =>
+                            {
+                                if (_popoutReminderForm == null || _popoutReminderForm.IsDisposed) return;
+                                if (i <= 0)
+                                    _popoutReminderForm.Close();
+                                else if (_popoutReminderMsgLbl != null)
+                                    _popoutReminderMsgLbl.Text = "If you no longer need G3000 mode, close the MSFS G3000 pop-out windows to restore full G1000 panel functionality.  [" + i + "]";
+                            }));
+                        }
+                    });
+                }
             }
             pbMain.Invalidate();
         }

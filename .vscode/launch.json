@@ -6,7 +6,7 @@
       "type": "coreclr",
       "request": "launch",
       "preLaunchTask": "build",
-      "program": "${workspaceFolder}/panelAIR1000/CSharpSimConnect/bin/x64/Debug/net6.0-windows7.0/panelAIR1000.exe",
+      "program": "${workspaceFolder}/panelAIR1000/CSharpSimConnect/bin/x64/Debug/net6.0-windows7.0/panelAIR_App_v0-0.exe",
       "args": [],
       "cwd": "${workspaceFolder}/panelAIR1000/CSharpSimConnect/bin/x64/Debug/net6.0-windows7.0",
       "stopAtEntry": false,
