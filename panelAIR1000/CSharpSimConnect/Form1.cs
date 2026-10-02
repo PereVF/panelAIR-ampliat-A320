@@ -56,6 +56,31 @@ namespace SimConnect3
         // Decisió de Pere, 2026-10-01: provar primer només amb això (switches + Struct1) en mode
         // G1000 abans de decidir res sobre flaps/trim.
         private System.Windows.Forms.Timer? _dataPollTimer;
+
+        // Struct1 (~112-113 camps restants, tot menys flaps) — prova de Pere, 2026-10-02: en lloc de
+        // 5 cops/segon com els switches, es demana cada 10s (provisional, no és el ritme final).
+        private System.Windows.Forms.Timer? _structPollTimer;
+
+        // Flaps (FLAPS NUM HANDLE POSITIONS + FLAPS HANDLE INDEX) — lectura independent de tota la
+        // resta (prova de Pere, 2026-10-02): es llegeix 1 cop en sincronitzar (obertura de connexió o
+        // canvi d'avió, veure SyncFlapsPositionOnce) i, fora d'això, NO es torna a llegir mai més fins
+        // que nosaltres enviem una comanda de flaps amunt/avall (StartFlapsActiveRead) — llavors es
+        // llegeix activament cada 100ms, allargant 2s la finestra cada cop que el valor canvia de
+        // veritat (debounce), i es para sola quan passen 2s sense cap canvi (idea de Pere: evita que
+        // es quedi llegint per sempre si els flaps ja són al límit i no hi pot haver canvi).
+        private System.Windows.Forms.Timer? _flapsActiveReadTimer;
+        private DateTime _flapsActiveReadUntilUtc = DateTime.MinValue;
+
+        // Trim (elevator + rudder, G1000 i G3000) — lectura independent (prova de Pere, 2026-10-02):
+        // sync 1 cop (connexió / canvi d'avió) i, fora d'això, NO es torna a llegir MAI MÉS, excepte
+        // mentre cal seguir el valor real: elevator (vertical, l'únic motoritzat per l'AP) quan
+        // AUTOPILOT MASTER és actiu O s'arrossega la seva roda (G1000/G3000); rudder NOMÉS quan
+        // s'arrossega la seva pròpia roda (mai per l'AP, confirmat per Pere: el rudder trim no és
+        // motoritzat). Dues definicions/timers independents perquè cadascuna s'engega per motius
+        // diferents.
+        private System.Windows.Forms.Timer? _elevatorTrimActiveReadTimer;
+        private System.Windows.Forms.Timer? _rudderTrimActiveReadTimer;
+
         private bool _suppressCloseOnConnectFail = false;
         private bool showAllClickAreas = false;
         private UiSurface mainSurface;
@@ -412,40 +437,10 @@ namespace SimConnect3
         private System.Windows.Forms.Timer? _flapsAnimTimerG1000;
         private System.Windows.Forms.Timer? _flapsAnimTimerG3000;
 
-        // --- INDICADORS de trim (el cercle que mostra el valor REAL, no la roda que mous amb el dit)
-        // --- mateixa tècnica que els flaps: interpolació local + timer dedicat, en lloc de saltar
-        // --- directament a la posició llegida cada 200ms (confirmat per Pere, 2026-10-01).
-        float trimIndCircleY_Current = float.NaN;
-        float trimIndCircleY_Target;
-        float trimIndCircleY_Start;
-        float trimIndCircleY_Last = float.NaN;
-        DateTime trimIndAnimStartTime;
-        float trimIndAnimDurationSec = 0f;
-        private System.Windows.Forms.Timer? _trimIndAnimTimer;
-
-        float rudderTrimIndCircleX_Current = float.NaN;
-        float rudderTrimIndCircleX_Target;
-        float rudderTrimIndCircleX_Start;
-        float rudderTrimIndCircleX_Last = float.NaN;
-        DateTime rudderTrimIndAnimStartTime;
-        float rudderTrimIndAnimDurationSec = 0f;
-        private System.Windows.Forms.Timer? _rudderTrimIndAnimTimer;
-
-        float _g3kTrimIndCircleY_Current = float.NaN;
-        float _g3kTrimIndCircleY_Target;
-        float _g3kTrimIndCircleY_Start;
-        float _g3kTrimIndCircleY_Last = float.NaN;
-        DateTime _g3kTrimIndAnimStartTime;
-        float _g3kTrimIndAnimDurationSec = 0f;
-        private System.Windows.Forms.Timer? _g3kTrimIndAnimTimer;
-
-        float _g3kRudderTrimIndCircleX_Current = float.NaN;
-        float _g3kRudderTrimIndCircleX_Target;
-        float _g3kRudderTrimIndCircleX_Start;
-        float _g3kRudderTrimIndCircleX_Last = float.NaN;
-        DateTime _g3kRudderTrimIndAnimStartTime;
-        float _g3kRudderTrimIndAnimDurationSec = 0f;
-        private System.Windows.Forms.Timer? _g3kRudderTrimIndAnimTimer;
+        // Indicadors de trim (el cercle que mostra el valor real, no la roda que mous amb el dit):
+        // sense interpolació — es dibuixen directament al valor llegit (2026-10-02, Pere: ara que
+        // només es llegeix activament mentre cal — arrossegant o amb l'AP actiu — qualsevol
+        // suavitzat només afegeix latència respecte al dit, es nota molt).
 
         private int trimAccumulatedDelta = 0;
         private const int TRIM_TICK_PIXELS = 8;         // ajustable (prova 6–12)
@@ -758,6 +753,9 @@ namespace SimConnect3
             LtsTestWrite,
             GenericRpnClientDataDef,
             AircraftTitle,
+            FlapsPosRead,
+            ElevatorTrimRead,
+            RudderTrimRead,
             ParkingBrakeRead,
             BatteryVoltageRead,
             FuelSelLeftRead,
@@ -833,6 +831,24 @@ namespace SimConnect3
             [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
             public string title;
         }
+
+        // Flaps (FLAPS NUM HANDLE POSITIONS + FLAPS HANDLE INDEX), lectura independent de Struct1
+        // (2026-10-02, prova de Pere): es llegeix un cop en sincronitzar (obertura de connexió / canvi
+        // d'avió) i, després, només activament mentre el selector de flaps es mou — veure
+        // StartFlapsActiveRead() i _flapsActiveReadTimer.
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct FlapsPosStruct { public int numPositions; public int handleIndex; }
+
+        // Trim (ELEVATOR TRIM INDICATOR / RUDDER TRIM PCT), lectura independent de Struct1 i, a més,
+        // independent l'una de l'altra (2026-10-02, prova de Pere): cada una es llegeix un cop en
+        // sincronitzar i, després, només activament a 33ms quan cal — elevator (vertical, l'únic
+        // motoritzat per l'AP) quan AUTOPILOT MASTER és actiu o es mou la seva roda; rudder només quan
+        // es mou la seva pròpia roda (mai per l'AP). Veure _elevatorTrimActiveReadTimer /
+        // _rudderTrimActiveReadTimer.
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct ElevatorTrimStruct { public double value; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct RudderTrimStruct { public double value; }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct ParkingBrakeStruct { public int value; } // BRAKE PARKING POSITION (Bool)
@@ -923,6 +939,9 @@ namespace SimConnect3
         {
             Request1,
             RequestAircraftTitle,
+            RequestFlapsPos,
+            RequestElevatorTrimPos,
+            RequestRudderTrimPos,
             RequestParkingBrake,
             RequestBatteryVoltage,
             RequestFuelSelLeft,
@@ -1498,6 +1517,11 @@ namespace SimConnect3
         private int _circuitConn17 = 0;
         private double _fuelSelectionSet = 2;
 
+        // Prova provisional (2026-10-02, Pere): desactiva només el DIBUIX dels 4 indicadors (cercle)
+        // de trim, deixant la roda (imatge) intacta — per aïllar si el cost de FPS en arrossegar/AP
+        // ve de l'indicador o de la roda. Treure quan s'acabi la prova.
+        private const bool DEBUG_DISABLE_TRIM_INDICATORS = false; // prova acabada: la roda era el cost real, no l'indicador
+
         private bool calibrationMode = false;
         private System.Windows.Forms.Button? _configBtn;
         private bool  _configBtnDragging = false;
@@ -1546,6 +1570,13 @@ namespace SimConnect3
         private bool  _tb21Dragging;
         private Point _tb21DragOffset;
         private DateTime _lastRepaint = DateTime.MinValue;
+        // Llindar de repintat per a la roda de trim (2026-10-02): la dada es llegeix tan sovint com
+        // cal (33ms actiu / immediata en cada comanda), però el repintat es limita i es retalla a la
+        // zona de la roda — sense això, arrossegant o amb l'AP actiu, cada lectura disparava un
+        // Invalidate() sencer sense cap límit de freqüència (fins a 30+/s), exactament el mateix
+        // problema dels flaps d'abans, confirmat per Pere amb mesura real (~12/8 FPS perduts).
+        private DateTime _lastElevatorTrimInvalidate = DateTime.MinValue;
+        private DateTime _lastRudderTrimInvalidate = DateTime.MinValue;
 
         private Form? _popoutReminderForm;
         private Label? _popoutReminderMsgLbl;
@@ -1652,8 +1683,6 @@ namespace SimConnect3
             public double baro_hpa; // KOHLSMAN SETTING MB, "Millibars"
             public double alt_sel; // AUTOPILOT ALTITUDE LOCK VAR", "feet"
             public double displayBackupActive;
-            public double elevator_trim;   // ELEVATOR TRIM INDICATOR (-1 .. +1)
-            public double rudder_trim;     // RUDDER TRIM PCT / 100 (-1 .. +1)
             public double gear_center;
             public double gear_left;
             public double gear_right;
@@ -1684,8 +1713,6 @@ namespace SimConnect3
             public int read_pitotheat;
             public int read_fuelpump1;
             public int read_fuelpump2;
-            public int flaps_num_handle_positions;
-            public int flaps_real_handle_position;
             public int gear_handle; // GEAR HANDLE POSITION (Bool: 0=UP, 1=DN)
             public int ign1_left;    // RECIP ENG LEFT MAGNETO:1
             public int ign1_right;   // RECIP ENG RIGHT MAGNETO:1
@@ -1704,8 +1731,6 @@ namespace SimConnect3
             public int avionics_master_2;   // AVIONICS MASTER SWITCH:2 (Bool)
             public int gen_master_alt_1;    // GENERAL ENG MASTER ALTERNATOR:1 (Bool)
             public int gen_master_alt_2;    // GENERAL ENG MASTER ALTERNATOR:2 (Bool)
-            public int starter1;            // GENERAL ENG STARTER:1
-            public int starter2;            // GENERAL ENG STARTER:2
             public double cameraState;
             public double elecSourceSwitch; // L:XMLVAR_Elec_Source_Switch_State (0=OFF, 1=BATT, 2=GPU)
             public double elecGeneratorSwitch; // L:XMLVAR_Elec_Generator_Switch_State
@@ -1741,7 +1766,6 @@ namespace SimConnect3
             public int apBcHold;               // AUTOPILOT BACKCOURSE HOLD (Bool)
             public int apMaster;               // AUTOPILOT MASTER (Bool)
             public int xfrPushL;               // L:XMLVAR_PushXFR
-            public double headingIndicator;    // HEADING INDICATOR (degrees)
             public int masterCautionActive;    // L:Generic_Master_Caution_Active
             public int masterWarningActive;    // L:Generic_Master_Warning_Active
             public double aileronTrimFrac;     // AILERON TRIM PCT (-1..+1)
@@ -2568,8 +2592,8 @@ namespace SimConnect3
             mfdRight.Buttons.Add(new UiButton { Name = "MFD_ent",       BasePos = new Point(3775, 922), OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.MFD_ENT,    0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
 
             var cockpitRight = mainSurface;
-            cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-UP",   BasePos = new Point(3450, 1646), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir = -1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
-            cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-DN",   BasePos = new Point(3450, 1776), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir =  1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_DN,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
+            cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-UP",   BasePos = new Point(3450, 1646), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir = -1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); StartFlapsActiveRead(); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
+            cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-DN",   BasePos = new Point(3450, 1776), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir =  1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_DN,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); StartFlapsActiveRead(); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
             // DA-40, Cirrus SR22, C408, C400, C172 i Caravan (2026-09-05, confirmat per Pere): exclosos
             // del ressaltat. Nota: el criteri general de "gear només per avions retràctils" queda pendent
             // de repassar per a la resta d'avions (veure conversa sobre l gear).
@@ -4150,10 +4174,12 @@ namespace SimConnect3
             new() { Name="G3K_FLAPS_UP",  TypeKey="G3K Flaps UP",  BasePos=new Point(400, 370), ZoomWidth=217, ZoomHeight=60, PressVisualMs=0,
                     OnClick = () => { _g3kFlapsAnimDir = -1; pbMain.Invalidate();
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        StartFlapsActiveRead();
                         Task.Delay(150).ContinueWith(_ => this.BeginInvoke(() => { _g3kFlapsAnimDir = 0; pbMain.Invalidate(); })); } },
             new() { Name="G3K_FLAPS_DN",  TypeKey="G3K Flaps DN",  BasePos=new Point(400, 450), ZoomWidth=217, ZoomHeight=60, PressVisualMs=0,
                     OnClick = () => { _g3kFlapsAnimDir =  1; pbMain.Invalidate();
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_DN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        StartFlapsActiveRead();
                         Task.Delay(150).ContinueWith(_ => this.BeginInvoke(() => { _g3kFlapsAnimDir = 0; pbMain.Invalidate(); })); } },
             new() { Name="G3K_CAUT_LIGHT", TypeKey="G3K Caut Light", BasePos=new Point(900, 200), ZoomWidth=108, ZoomHeight=105, NoResize=true, Img=LoadOverlayImage("MASTER CAUTION LIGHT.png"), ShowWhen=() => _masterCautionActive != 0 },
             new() { Name="G3K_WARN_LIGHT", TypeKey="G3K Warn Light", BasePos=new Point(1020, 200), ZoomWidth=111, ZoomHeight=107, NoResize=true, Img=LoadOverlayImage("MASTER WARNING LIGHT.png"), ShowWhen=() => _masterWarningActive != 0 },
@@ -4465,6 +4491,30 @@ namespace SimConnect3
             _dataPollTimer.Interval = 200; // 5/s, fix — veure comentari del camp
             _dataPollTimer.Tick += (s3, ev3) => PollLowFrequencySimData();
 
+            _structPollTimer = new System.Windows.Forms.Timer();
+            _structPollTimer.Interval = 10000; // provisional, veure comentari del camp
+            _structPollTimer.Tick += (s3b, ev3b) => PollStruct1();
+
+            _flapsActiveReadTimer = new System.Windows.Forms.Timer();
+            _flapsActiveReadTimer.Interval = 100; // veure comentari del camp
+            _flapsActiveReadTimer.Tick += (s3c, ev3c) =>
+            {
+                if (DateTime.UtcNow >= _flapsActiveReadUntilUtc)
+                {
+                    _flapsActiveReadTimer!.Stop();
+                    return;
+                }
+                SyncFlapsPositionOnce();
+            };
+
+            _elevatorTrimActiveReadTimer = new System.Windows.Forms.Timer();
+            _elevatorTrimActiveReadTimer.Interval = 33; // 2026-10-02: 100ms feia salts massa grossos sense la interpolació treta abans
+            _elevatorTrimActiveReadTimer.Tick += (s3d, ev3d) => SyncElevatorTrimOnce();
+
+            _rudderTrimActiveReadTimer = new System.Windows.Forms.Timer();
+            _rudderTrimActiveReadTimer.Interval = 33; // veure comentari del camp
+            _rudderTrimActiveReadTimer.Tick += (s3e, ev3e) => SyncRudderTrimOnce();
+
             _flapsAnimTimerG1000 = new System.Windows.Forms.Timer();
             _flapsAnimTimerG1000.Interval = 33; // veure comentari del camp
             _flapsAnimTimerG1000.Tick += (s4, ev4) =>
@@ -4508,81 +4558,6 @@ namespace SimConnect3
                 pbMain.Invalidate(ToRealInvalidateRect(g3kFlapsIndRect));
             };
 
-            _trimIndAnimTimer = new System.Windows.Forms.Timer();
-            _trimIndAnimTimer.Interval = 33;
-            _trimIndAnimTimer.Tick += (s6, ev6) =>
-            {
-                if (trimIndAnimDurationSec <= 0f)
-                {
-                    _trimIndAnimTimer!.Stop();
-                    return;
-                }
-                const int trimYUp = 1537;
-                const int trimYFull = 1976;
-                const int margin = 20;
-                var r = new Rectangle(
-                    trimIndX - margin,
-                    trimYUp + trimIndYOffset - margin,
-                    20 + margin * 2,
-                    (trimYFull - trimYUp) + 20 + margin * 2);
-                pbMain.Invalidate(ToRealInvalidateRect(r));
-            };
-
-            _rudderTrimIndAnimTimer = new System.Windows.Forms.Timer();
-            _rudderTrimIndAnimTimer.Interval = 33;
-            _rudderTrimIndAnimTimer.Tick += (s7, ev7) =>
-            {
-                if (rudderTrimIndAnimDurationSec <= 0f)
-                {
-                    _rudderTrimIndAnimTimer!.Stop();
-                    return;
-                }
-                const int rtXLeft = 2760;
-                const int rtXRight = 3210;
-                const int margin = 20;
-                var r = new Rectangle(
-                    rtXLeft + rudderTrimIndXOffset - margin,
-                    rudderTrimIndY - 10 - margin,
-                    (rtXRight - rtXLeft) + 20 + margin * 2,
-                    20 + margin * 2);
-                pbMain.Invalidate(ToRealInvalidateRect(r));
-            };
-
-            _g3kTrimIndAnimTimer = new System.Windows.Forms.Timer();
-            _g3kTrimIndAnimTimer.Interval = 33;
-            _g3kTrimIndAnimTimer.Tick += (s8, ev8) =>
-            {
-                if (_g3kTrimIndAnimDurationSec <= 0f)
-                {
-                    _g3kTrimIndAnimTimer!.Stop();
-                    return;
-                }
-                const int margin = 20;
-                var r = new Rectangle(
-                    _g3kTrimIndX - margin,
-                    _g3kTrimZone.Y + _g3kTrimIndYOffset - margin,
-                    17 + margin * 2,
-                    _g3kTrimZone.Height + 17 + margin * 2);
-                pbMain.Invalidate(ToRealInvalidateRect(r));
-            };
-
-            _g3kRudderTrimIndAnimTimer = new System.Windows.Forms.Timer();
-            _g3kRudderTrimIndAnimTimer.Interval = 33;
-            _g3kRudderTrimIndAnimTimer.Tick += (s9, ev9) =>
-            {
-                if (_g3kRudderTrimIndAnimDurationSec <= 0f)
-                {
-                    _g3kRudderTrimIndAnimTimer!.Stop();
-                    return;
-                }
-                const int margin = 20;
-                var r = new Rectangle(
-                    _g3kRudderTrimZone.X + _g3kRudderTrimIndXOffset - margin,
-                    _g3kRudderTrimIndY - 8 - margin,
-                    _g3kRudderTrimZone.Width + 17 + margin * 2,
-                    17 + margin * 2);
-                pbMain.Invalidate(ToRealInvalidateRect(r));
-            };
 
             ConnectToSimConnect();
 
@@ -6354,8 +6329,8 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "KOHLSMAN SETTING MB", "Millibars", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT ALTITUDE LOCK VAR", "feet", SIMCONNECT_DATATYPE.FLOAT64, 0.0f, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:AS1000_MID_Display_Backup_Active", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "ELEVATOR TRIM INDICATOR", "Position", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RUDDER TRIM PCT", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                // ELEVATOR TRIM INDICATOR / RUDDER TRIM PCT ja no van aquí — cada una té la seva pròpia
+                // definició (DEFINITIONS.ElevatorTrimRead / RudderTrimRead).
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GEAR CENTER POSITION", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GEAR LEFT POSITION", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GEAR right POSITION", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -6387,8 +6362,8 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "PITOT HEAT", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL PUMP SWITCH:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL PUMP SWITCH:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FLAPS NUM HANDLE POSITIONS", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FLAPS HANDLE INDEX", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                // FLAPS NUM HANDLE POSITIONS / FLAPS HANDLE INDEX ja no van aquí — tenen la seva pròpia
+                // definició (DEFINITIONS.FlapsPosRead, veure comentari a FlapsPosStruct).
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GEAR HANDLE POSITION", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG LEFT MAGNETO:1",  "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG RIGHT MAGNETO:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -6407,8 +6382,10 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AVIONICS MASTER SWITCH:2",   "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG MASTER ALTERNATOR:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG MASTER ALTERNATOR:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG STARTER:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG STARTER:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                // GENERAL ENG STARTER:1/2 ja es llegeixen més amunt (ign1_starter/ign2_starter) — aquí
+                // hi havia un registre duplicat del mateix simvar (detectat 2026-10-02, confirmat per
+                // Pere); eliminat junt amb els camps starter1/starter2 de l'struct, consolidant l'ús a
+                // ign1_starter/ign2_starter.
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Elec_Source_Switch_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Elec_Generator_Switch_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -6444,7 +6421,8 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT BACKCOURSE HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT MASTER", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_PushXFR", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "HEADING INDICATOR", "degrees", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                // HEADING INDICATOR ja es llegeix més amunt (gyro) — registre duplicat eliminat (veure
+                // comentari a GENERAL ENG STARTER:1/2); consolidat a gyro.
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:Generic_Master_Caution_Active", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:Generic_Master_Warning_Active", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AILERON TRIM PCT", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -6560,6 +6538,18 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.AircraftTitle, "TITLE", null, SIMCONNECT_DATATYPE.STRING256, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<AircraftInfoStruct>(DEFINITIONS.AircraftTitle);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestAircraftTitle, DEFINITIONS.AircraftTitle, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SECOND, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // Flaps — definició pròpia (veure comentari a FlapsPosStruct): es llegeix un cop en
+                // sincronitzar i després activament només mentre el selector es mou (StartFlapsActiveRead).
+                simconnect.AddToDataDefinition(DEFINITIONS.FlapsPosRead, "FLAPS NUM HANDLE POSITIONS", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.FlapsPosRead, "FLAPS HANDLE INDEX", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<FlapsPosStruct>(DEFINITIONS.FlapsPosRead);
+
+                // Trim — definicions pròpies i independents (veure comentari a ElevatorTrimStruct).
+                simconnect.AddToDataDefinition(DEFINITIONS.ElevatorTrimRead, "ELEVATOR TRIM INDICATOR", "Position", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<ElevatorTrimStruct>(DEFINITIONS.ElevatorTrimRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.RudderTrimRead, "RUDDER TRIM PCT", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<RudderTrimStruct>(DEFINITIONS.RudderTrimRead);
 
                 // Parking brake — definició pròpia i petita (no dins Struct1): amb ~119 camps compartits,
                 // SimConnect deixava de reflectir bé els camps afegits al final. Confirmat amb un mini-programa
@@ -6931,9 +6921,11 @@ namespace SimConnect3
         // (dobles denormalitzats tipus 1.4E-310, probablement un problema de marshaling/alineació
         // en mesclar camps dins una mateixa estructura) i no va millorar els FPS — tornem als 41
         // individuals (Struct1 + 40), que ja sabíem que funcionaven correctament.
+        // Request1/Struct1 ja no va aquí (prova de Pere, 2026-10-02): es el gros dels ~112-113 camps
+        // que encara hi queden (tot menys flaps, que ara té lectura pròpia — veure FlapsPosStruct), i
+        // de moment es demana molt més a poc a poc, cada 10s (provisional), via _structPollTimer.
         private static readonly (REQUESTS req, DEFINITIONS def)[] _lowFreqPolls = new (REQUESTS, DEFINITIONS)[]
         {
-            (REQUESTS.Request1, DEFINITIONS.Struct1),
             (REQUESTS.RequestParkingBrake, DEFINITIONS.ParkingBrakeRead),
             (REQUESTS.RequestBatteryVoltage, DEFINITIONS.BatteryVoltageRead),
             (REQUESTS.RequestFuelSelLeft, DEFINITIONS.FuelSelLeftRead),
@@ -6989,6 +6981,109 @@ namespace SimConnect3
             }
         }
 
+        private void PollStruct1()
+        {
+            if (simconnect == null) return;
+            try
+            {
+                simconnect.RequestDataOnSimObject(REQUESTS.Request1, DEFINITIONS.Struct1, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.ONCE, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+            }
+            catch { }
+        }
+
+        // Sync puntual de la posició de flaps: es crida en obrir connexió i en detectar canvi d'avió
+        // (veure crides). Fora d'això, la posició de flaps no es torna a llegir mai fins que l'usuari
+        // mogui el selector (StartFlapsActiveRead).
+        private void SyncFlapsPositionOnce()
+        {
+            if (simconnect == null) return;
+            try
+            {
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestFlapsPos, DEFINITIONS.FlapsPosRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.ONCE, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+            }
+            catch { }
+        }
+
+        // Crida's en enviar una comanda de flaps amunt/avall (selector). Engega (o allarga, si ja
+        // estava en marxa) una finestra de lectura activa de només aquest offset, cada 100ms, que es
+        // para sola als 2s sense cap canvi real (el handler de RequestFlapsPos allarga la finestra
+        // quan detecta un canvi — veure comentari allà).
+        private void StartFlapsActiveRead()
+        {
+            _flapsActiveReadUntilUtc = DateTime.UtcNow.AddSeconds(2);
+            _flapsActiveReadTimer?.Start();
+        }
+
+        // Sync puntual de trim: es criden en obrir connexió, en detectar canvi d'avió, i a cada tick
+        // dels timers actius respectius (veure StartXxxTrimActiveRead/StopXxxTrimActiveReadIfNotNeeded).
+        private void SyncElevatorTrimOnce()
+        {
+            if (simconnect == null) return;
+            try
+            {
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestElevatorTrimPos, DEFINITIONS.ElevatorTrimRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.ONCE, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+            }
+            catch { }
+        }
+        private void SyncRudderTrimOnce()
+        {
+            if (simconnect == null) return;
+            try
+            {
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestRudderTrimPos, DEFINITIONS.RudderTrimRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.ONCE, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+            }
+            catch { }
+        }
+
+        // Ritme de lectura activa de l'elevator trim: ràpid (33ms) mentre el dit arrossega la roda
+        // (cal màxima resposta, és un gest curt), molt més lent (150ms) quan només l'AP la mou sol
+        // (no hi ha dit a seguir, i en turbulència l'AP pot corregir contínuament durant minuts — a
+        // 33ms costava fins a 10 FPS volant de veritat, confirmat per Pere, 2026-10-02).
+        private void UpdateElevatorTrimActiveRate()
+        {
+            if (_elevatorTrimActiveReadTimer == null) return;
+            _elevatorTrimActiveReadTimer.Interval = (trimDragging || _g3kTrimDragging) ? 33 : 150;
+        }
+
+        // Mentre es mou la roda d'elevator trim amb el dit, o mentre l'AP està actiu, cal lectura
+        // activa perquè l'indicador (cercle) pugui seguir el valor real (confirmat per Pere,
+        // 2026-10-02: sense això l'indicador es queda congelat durant l'arrossegament).
+        private void StartElevatorTrimActiveRead()
+        {
+            UpdateElevatorTrimActiveRate();
+            // Un Timer no fa "tick" fins que passa tot l'interval — sense aquesta crida immediata,
+            // el primer moviment del dit no es veia reflectit fins més tard (confirmat per Pere,
+            // 2026-10-02: a MSFS es veia instantani, a l'app trigava).
+            SyncElevatorTrimOnce();
+            _elevatorTrimActiveReadTimer?.Start();
+        }
+
+        // Es crida en deixar anar el ratolí/dit. Només para si l'AP no està actiu ni cap de les dues
+        // rodes d'elevator trim (G1000/G3000) s'està arrossegant; si l'AP encara el necessita, el
+        // deixa en marxa però baixa el ritme (ja no cal seguir el dit).
+        private void StopElevatorTrimActiveReadIfNotNeeded()
+        {
+            if (_apMaster != 1 && !trimDragging && !_g3kTrimDragging)
+                _elevatorTrimActiveReadTimer?.Stop();
+            else
+                UpdateElevatorTrimActiveRate();
+        }
+
+        // Mateix mecanisme pel rudder trim, però MAI per l'AP (no és motoritzat) — només mentre
+        // s'arrossega la seva pròpia roda.
+        private void StartRudderTrimActiveRead()
+        {
+            // Mateix motiu que StartElevatorTrimActiveRead.
+            SyncRudderTrimOnce();
+            _rudderTrimActiveReadTimer?.Start();
+        }
+
+        private void StopRudderTrimActiveReadIfNotNeeded()
+        {
+            if (!rudderTrimDragging && !_g3kRudderTrimDragging)
+                _rudderTrimActiveReadTimer?.Stop();
+        }
+
         private void Simconnect_OnRecvOpen(SimConnect sender, SIMCONNECT_RECV_OPEN data)
         {
             Console.WriteLine("SimConnect connection established");
@@ -7003,12 +7098,26 @@ namespace SimConnect3
             // Restablim els flags perquè el primer paquet pinti immediatament
             
 
-            // Struct1 + els 40 switches ja no es tornen a subscriure aquí (period continu) — els
-            // demana PollLowFrequencySimData() cada 200ms via _dataPollTimer. Cridem-lo ja un cop,
-            // ara mateix, perquè la primera dada arribi de seguida en comptes d'esperar fins al
-            // primer tick del timer.
+            // Els 40 switches ja no es tornen a subscriure aquí (period continu) — els demana
+            // PollLowFrequencySimData() cada 200ms via _dataPollTimer. Cridem-lo ja un cop, ara
+            // mateix, perquè la primera dada arribi de seguida en comptes d'esperar fins al primer
+            // tick del timer.
             PollLowFrequencySimData();
             _dataPollTimer?.Start();
+
+            // Struct1 (~112-113 camps restants), cada 10s (provisional) via _structPollTimer.
+            PollStruct1();
+            _structPollTimer?.Start();
+
+            // Flaps: sync puntual aquí (connexió feta / MSFS ja actiu) — no es torna a llegir fins
+            // que es mogui el selector.
+            SyncFlapsPositionOnce();
+
+            // Trim: mateix sync puntual (elevator + rudder, independents). La lectura activa de
+            // l'elevator (100ms) només s'engega si l'AP ja està actiu quan arriba la primera dada
+            // (veure Simconnect_OnRecvSimobjectData, canvi d'_apMaster); la del rudder només amb drag.
+            SyncElevatorTrimOnce();
+            SyncRudderTrimOnce();
 
             simconnect.RequestDataOnSimObject(
                 REQUESTS.RequestAircraftTitle,
@@ -7032,6 +7141,10 @@ namespace SimConnect3
             _currentAircraftTitle = ""; // força re-detecció (i re-sync fuel pumps Baron) a la propera connexió
 
             _dataPollTimer?.Stop();
+            _structPollTimer?.Stop();
+            _flapsActiveReadTimer?.Stop();
+            _elevatorTrimActiveReadTimer?.Stop();
+            _rudderTrimActiveReadTimer?.Stop();
 
             simReconnectPending = true;
             simReconnectTimer.Start();
@@ -7053,6 +7166,7 @@ namespace SimConnect3
             {
                 var info = (AircraftInfoStruct)data.dwData[0];
                 string newTitle = info.title ?? "";
+                bool aircraftChanged = newTitle != _currentAircraftTitle;
                 bool wasBaron = IsBaronG58();
                 bool wasCaravanScheme = IsCaravan() || IsCirrusSR22();
                 bool wasBonanza = IsBonanzaG36();
@@ -7082,6 +7196,83 @@ namespace SimConnect3
                 if (isTBM930Now != wasTBM930 && _g3000Active != isTBM930Now && !calibrationMode)
                     SetG3000Active(isTBM930Now);
                 RefreshNoCompatibleAircraftMessage();
+                // Canvi d'avió real (no només una altra lectura del mateix títol cada segon): re-sync
+                // puntual de flaps (veure comentari a SyncFlapsPositionOnce).
+                if (aircraftChanged) { SyncFlapsPositionOnce(); SyncElevatorTrimOnce(); SyncRudderTrimOnce(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestFlapsPos)
+            {
+                var fp = (FlapsPosStruct)data.dwData[0];
+                if (flapsNumPositions != fp.numPositions)
+                {
+                    flapsNumPositions = fp.numPositions;
+                    pbMain.Invalidate();
+                }
+                if (flapsPoscPalanca != fp.handleIndex)
+                {
+                    flapsPoscPalanca = fp.handleIndex;
+                    // Hi ha hagut un canvi real: allarguem la finestra de lectura activa 2s més
+                    // (debounce — veure StartFlapsActiveRead).
+                    _flapsActiveReadUntilUtc = DateTime.UtcNow.AddSeconds(2);
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestElevatorTrimPos)
+            {
+                var et = (ElevatorTrimStruct)data.dwData[0];
+                if (elevatorTrim != et.value)
+                {
+                    double delta = et.value - elevatorTrim;
+                    elevatorTrim = et.value;
+                    // La roda només l'anima el dit (veure MouseMove) — aquesta lectura només arriba
+                    // en sincronitzar, quan l'AP està actiu, o mentre s'arrossega la pròpia roda (és
+                    // quan sí cal seguir el valor real).
+                    if (!trimDragging && !_g3kTrimDragging)
+                    {
+                        float frameDelta = (float)(delta / 2.0) * TRIM_FRAME_COUNT * 35f;
+                        trimFramePos -= frameDelta;
+                        trimFramePos = ((trimFramePos % TRIM_FRAME_COUNT) + TRIM_FRAME_COUNT) % TRIM_FRAME_COUNT;
+                    }
+                    // La dada es llegeix tan sovint com cal, però el repintat es retalla a la zona
+                    // de la roda i es limita de freqüència — un Invalidate() sencer sense límit a
+                    // cada lectura (fins a 30+/s durant el drag/AP) costava ~12 FPS reals (confirmat
+                    // per Pere, 2026-10-02; mateix problema que els flaps, mateixa solució). Llindar
+                    // més ample quan només l'AP la mou (sense dit a seguir, i en turbulència pot durar
+                    // minuts — a 50ms encara costava fins a 10 FPS volant de veritat).
+                    double elevatorRepaintThrottleMs = (trimDragging || _g3kTrimDragging) ? 50 : 200;
+                    if (pbMain.IsHandleCreated && (DateTime.UtcNow - _lastElevatorTrimInvalidate).TotalMilliseconds >= elevatorRepaintThrottleMs)
+                    {
+                        _lastElevatorTrimInvalidate = DateTime.UtcNow;
+                        var rect = Rectangle.Union(Rectangle.Inflate(trimZone, 80, 80), Rectangle.Inflate(_g3kTrimZone, 80, 80));
+                        pbMain.Invalidate(ToRealInvalidateRect(rect));
+                    }
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestRudderTrimPos)
+            {
+                var rt = (RudderTrimStruct)data.dwData[0];
+                double newRudderTrim = rt.value / 100.0;
+                if (rudderTrim != newRudderTrim)
+                {
+                    double delta = newRudderTrim - rudderTrim;
+                    rudderTrim = newRudderTrim;
+                    if (!rudderTrimDragging && !_g3kRudderTrimDragging)
+                    {
+                        float frameDelta = (float)(delta / 2.0) * RUDDER_TRIM_FRAME_COUNT * 35f;
+                        rudderTrimFramePos -= frameDelta;
+                        rudderTrimFramePos = ((rudderTrimFramePos % RUDDER_TRIM_FRAME_COUNT) + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
+                    }
+                    // Mateix motiu que l'elevator trim, veure comentari allà.
+                    if (pbMain.IsHandleCreated && (DateTime.UtcNow - _lastRudderTrimInvalidate).TotalMilliseconds >= 50)
+                    {
+                        _lastRudderTrimInvalidate = DateTime.UtcNow;
+                        var rect = Rectangle.Union(Rectangle.Inflate(rudderTrimZone, 80, 80), Rectangle.Inflate(_g3kRudderTrimZone, 80, 80));
+                        pbMain.Invalidate(ToRealInvalidateRect(rect));
+                    }
+                }
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestParkingBrake)
@@ -7802,55 +7993,10 @@ namespace SimConnect3
                 //System.Diagnostics.Debug.WriteLine($"DME SOUND raw={s1.dme_read}");
                 //System.Diagnostics.Debug.WriteLine(">>> OnRecvSimobjectData CALLED");
                 //bool newDmeActive = s1.dme_read == 1;
-                if (flapsNumPositions != s1.flaps_num_handle_positions)
-                {
-                    flapsNumPositions = s1.flaps_num_handle_positions;
-
-                    needsRepaint = true;
-                }
-                if (flapsPoscPalanca != s1.flaps_real_handle_position)
-                {
-                    flapsPoscPalanca = s1.flaps_real_handle_position;
-
-                    //flapsTimer.Start();
-                    needsRepaint = true;
-                }
-                if (elevatorTrim != s1.elevator_trim)
-                {
-                    double delta = s1.elevator_trim - elevatorTrim;
-                    elevatorTrim = s1.elevator_trim;
-
-                    // La roda només l'anima el dit (veure MouseMove) — l'única excepció és quan el
-                    // pilot automàtic la mou sol (AUTOPILOT MASTER actiu), que és quan sí cal seguir
-                    // el valor real de MSFS. Sense aquesta condició, qualsevol altra lectura de
-                    // Struct1 competia amb el dit i, com que ara només arriba cada 200ms (abans
-                    // gairebé contínua), es notava a salts durant l'arrossegament (confirmat per
-                    // Pere, 2026-10-01). Fora d'aquest cas, la roda es queda on l'ha deixat el dit.
-                    if (s1.apMaster == 1 && !trimDragging && !_g3kTrimDragging)
-                    {
-                        float frameDelta = (float)(delta / 2.0) * TRIM_FRAME_COUNT * 35f;
-                        trimFramePos -= frameDelta;
-                        trimFramePos = ((trimFramePos % TRIM_FRAME_COUNT) + TRIM_FRAME_COUNT) % TRIM_FRAME_COUNT;
-
-                        needsRepaint = true;
-                    }
-                }
-                double newRudderTrim = s1.rudder_trim / 100.0;
-                if (rudderTrim != newRudderTrim)
-                {
-                    double delta = newRudderTrim - rudderTrim;
-                    rudderTrim = newRudderTrim;
-
-                    // Mateix motiu que l'elevator trim, veure comentari allà.
-                    if (s1.apMaster == 1 && !rudderTrimDragging && !_g3kRudderTrimDragging)
-                    {
-                        float frameDelta = (float)(delta / 2.0) * RUDDER_TRIM_FRAME_COUNT * 35f;
-                        rudderTrimFramePos -= frameDelta;
-                        rudderTrimFramePos = ((rudderTrimFramePos % RUDDER_TRIM_FRAME_COUNT) + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
-
-                        needsRepaint = true;
-                    }
-                }
+                // flapsNumPositions/flapsPoscPalanca (RequestFlapsPos) i elevatorTrim/rudderTrim
+                // (RequestElevatorTrimPos/RequestRudderTrimPos) ja no es llegeixen aquí — tenen
+                // lectura pròpia independent (sync + activa només quan cal, veure els seus handlers
+                // respectius).
 
                 if (newCom1Active != com1Active)
                 {
@@ -8080,10 +8226,10 @@ namespace SimConnect3
                     altGen2Off = newAltGen2Off;
                     needsRepaint = true;
                 }
-                bool newStarter1 = s1.starter1 != 0;
+                bool newStarter1 = s1.ign1_starter != 0;
                 starter1Active = newStarter1;
                 needsRepaint = true;
-                bool newStarter2 = s1.starter2 != 0;
+                bool newStarter2 = s1.ign2_starter != 0;
                 starter2Active = newStarter2;
                 int newIgn1Pos;
                 if      (s1.ign1_left == 0 && s1.ign1_right == 0 && s1.ign1_starter == 0) newIgn1Pos = 0; // OFF
@@ -8331,9 +8477,18 @@ namespace SimConnect3
                 _apYawDamper = s1.apYawDamper;
                 _apMaxBank = s1.apMaxBank;
                 _apBcHold = s1.apBcHold;
-                _apMaster = s1.apMaster;
+                if (_apMaster != s1.apMaster)
+                {
+                    _apMaster = s1.apMaster;
+                    // L'elevator/vertical trim és l'únic motoritzat per l'AP (el rudder, mai) —
+                    // mentre estigui actiu, mantenim una lectura activa contínua a 33ms (veure
+                    // comentari del camp); en desactivar-se, parem (tret que s'estigui arrossegant
+                    // la roda en aquell moment).
+                    if (_apMaster == 1) StartElevatorTrimActiveRead();
+                    else StopElevatorTrimActiveReadIfNotNeeded();
+                }
                 _xfrPushL = s1.xfrPushL;
-                _headingIndicator = s1.headingIndicator;
+                _headingIndicator = s1.gyro;
                 _masterCautionActive = s1.masterCautionActive;
                 _masterWarningActive = s1.masterWarningActive;
                 _aileronTrimFrac = s1.aileronTrimFrac;
@@ -9076,33 +9231,14 @@ namespace SimConnect3
                     int g3kTrimYUp   = _g3kTrimZone.Y;
                     int g3kTrimYFull = _g3kTrimZone.Bottom;
                     float g3kTrimNorm = (float)((elevatorTrim + 1.0) / 2.0);
-                    _g3kTrimIndCircleY_Target = g3kTrimYUp + g3kTrimNorm * (g3kTrimYFull - g3kTrimYUp);
-                    if (float.IsNaN(_g3kTrimIndCircleY_Current))
-                    {
-                        _g3kTrimIndCircleY_Current = _g3kTrimIndCircleY_Target;
-                    }
-                    else if (_g3kTrimIndCircleY_Target != _g3kTrimIndCircleY_Last)
-                    {
-                        _g3kTrimIndCircleY_Start = _g3kTrimIndCircleY_Current;
-                        _g3kTrimIndAnimStartTime = DateTime.Now;
-                        float dist = Math.Abs(_g3kTrimIndCircleY_Target - _g3kTrimIndCircleY_Current);
-                        _g3kTrimIndAnimDurationSec = 8f * (dist / (g3kTrimYFull - g3kTrimYUp));
-                        _g3kTrimIndAnimTimer?.Start();
-                    }
-                    _g3kTrimIndCircleY_Last = _g3kTrimIndCircleY_Target;
-
-                    if (_g3kTrimIndAnimDurationSec > 0f)
-                    {
-                        float t = Math.Min((float)(DateTime.Now - _g3kTrimIndAnimStartTime).TotalSeconds / _g3kTrimIndAnimDurationSec, 1f);
-                        _g3kTrimIndCircleY_Current = _g3kTrimIndCircleY_Start + (_g3kTrimIndCircleY_Target - _g3kTrimIndCircleY_Start) * t;
-                        if (t >= 1f) _g3kTrimIndAnimDurationSec = 0f;
-                    }
-
-                    int g3kTrimY  = (int)Math.Round(_g3kTrimIndCircleY_Current) + _g3kTrimIndYOffset;
+                    int g3kTrimY  = g3kTrimYUp + (int)(g3kTrimNorm * (g3kTrimYFull - g3kTrimYUp)) + _g3kTrimIndYOffset;
                     int g3kMarkerY = g3kTrimYUp + (int)(0.5f * (g3kTrimYFull - g3kTrimYUp)) + _g3kTrimIndYOffset;
-                    using var g3kMarkerBr = new SolidBrush(Color.FromArgb(180, 180, 180));
-                    e.Graphics.FillRectangle(g3kMarkerBr, new Rectangle(_g3kTrimIndX - 27, g3kMarkerY, 17, 2));
-                    e.Graphics.FillEllipse(Brushes.White, new Rectangle(_g3kTrimIndX, g3kTrimY - 8, 17, 17));
+                    if (!DEBUG_DISABLE_TRIM_INDICATORS)
+                    {
+                        using var g3kMarkerBr = new SolidBrush(Color.FromArgb(180, 180, 180));
+                        e.Graphics.FillRectangle(g3kMarkerBr, new Rectangle(_g3kTrimIndX - 27, g3kMarkerY, 17, 2));
+                        e.Graphics.FillEllipse(Brushes.White, new Rectangle(_g3kTrimIndX, g3kTrimY - 8, 17, 17));
+                    }
                     if (calibrationMode)
                     {
                         using var triPen  = new Pen(Color.Lime, 2);
@@ -9136,33 +9272,14 @@ namespace SimConnect3
                     int rtXLeft  = _g3kRudderTrimZone.X;
                     int rtXRight = _g3kRudderTrimZone.Right;
                     float rtNorm = (float)((rudderTrim + 1.0) / 2.0);
-                    _g3kRudderTrimIndCircleX_Target = rtXLeft + rtNorm * (rtXRight - rtXLeft);
-                    if (float.IsNaN(_g3kRudderTrimIndCircleX_Current))
-                    {
-                        _g3kRudderTrimIndCircleX_Current = _g3kRudderTrimIndCircleX_Target;
-                    }
-                    else if (_g3kRudderTrimIndCircleX_Target != _g3kRudderTrimIndCircleX_Last)
-                    {
-                        _g3kRudderTrimIndCircleX_Start = _g3kRudderTrimIndCircleX_Current;
-                        _g3kRudderTrimIndAnimStartTime = DateTime.Now;
-                        float dist = Math.Abs(_g3kRudderTrimIndCircleX_Target - _g3kRudderTrimIndCircleX_Current);
-                        _g3kRudderTrimIndAnimDurationSec = 8f * (dist / (rtXRight - rtXLeft));
-                        _g3kRudderTrimIndAnimTimer?.Start();
-                    }
-                    _g3kRudderTrimIndCircleX_Last = _g3kRudderTrimIndCircleX_Target;
-
-                    if (_g3kRudderTrimIndAnimDurationSec > 0f)
-                    {
-                        float t = Math.Min((float)(DateTime.Now - _g3kRudderTrimIndAnimStartTime).TotalSeconds / _g3kRudderTrimIndAnimDurationSec, 1f);
-                        _g3kRudderTrimIndCircleX_Current = _g3kRudderTrimIndCircleX_Start + (_g3kRudderTrimIndCircleX_Target - _g3kRudderTrimIndCircleX_Start) * t;
-                        if (t >= 1f) _g3kRudderTrimIndAnimDurationSec = 0f;
-                    }
-
-                    int rtX = (int)Math.Round(_g3kRudderTrimIndCircleX_Current) + _g3kRudderTrimIndXOffset;
+                    int rtX = rtXLeft + (int)(rtNorm * (rtXRight - rtXLeft)) + _g3kRudderTrimIndXOffset;
                     int rtCenter = (rtXLeft + rtXRight) / 2 + _g3kRudderTrimIndXOffset;
-                    using var g3kRtCenterBr = new SolidBrush(Color.FromArgb(180, 180, 180));
-                    e.Graphics.FillRectangle(g3kRtCenterBr, new Rectangle(rtCenter - 1, _g3kRudderTrimIndY - 36, 2, 17));
-                    e.Graphics.FillEllipse(Brushes.White, new Rectangle(rtX - 8, _g3kRudderTrimIndY - 8, 17, 17));
+                    if (!DEBUG_DISABLE_TRIM_INDICATORS)
+                    {
+                        using var g3kRtCenterBr = new SolidBrush(Color.FromArgb(180, 180, 180));
+                        e.Graphics.FillRectangle(g3kRtCenterBr, new Rectangle(rtCenter - 1, _g3kRudderTrimIndY - 36, 2, 17));
+                        e.Graphics.FillEllipse(Brushes.White, new Rectangle(rtX - 8, _g3kRudderTrimIndY - 8, 17, 17));
+                    }
                     if (calibrationMode)
                     {
                         using var rriPen  = new Pen(Color.Lime, 2);
@@ -9428,30 +9545,9 @@ namespace SimConnect3
             int trimYUp = 1537;
             int trimYFull = 1976;
             float trimNorm = (float)((elevatorTrim + 1.0) / 2.0);
-            trimIndCircleY_Target = trimYUp + trimNorm * (trimYFull - trimYUp);
-            if (float.IsNaN(trimIndCircleY_Current))
-            {
-                trimIndCircleY_Current = trimIndCircleY_Target;
-            }
-            else if (trimIndCircleY_Target != trimIndCircleY_Last)
-            {
-                trimIndCircleY_Start = trimIndCircleY_Current;
-                trimIndAnimStartTime = DateTime.Now;
-                float trimIndDist = Math.Abs(trimIndCircleY_Target - trimIndCircleY_Current);
-                trimIndAnimDurationSec = 8f * (trimIndDist / (trimYFull - trimYUp));
-                _trimIndAnimTimer?.Start();
-            }
-            trimIndCircleY_Last = trimIndCircleY_Target;
-
-            if (trimIndAnimDurationSec > 0f)
-            {
-                float trimIndT = Math.Min((float)(DateTime.Now - trimIndAnimStartTime).TotalSeconds / trimIndAnimDurationSec, 1f);
-                trimIndCircleY_Current = trimIndCircleY_Start + (trimIndCircleY_Target - trimIndCircleY_Start) * trimIndT;
-                if (trimIndT >= 1f) trimIndAnimDurationSec = 0f;
-            }
-
-            int trimY = (int)Math.Round(trimIndCircleY_Current) + trimIndYOffset;
-            e.Graphics.FillEllipse(Brushes.White, new Rectangle(trimIndX, trimY - 10, 20, 20));
+            int trimY = trimYUp + (int)(trimNorm * (trimYFull - trimYUp)) + trimIndYOffset;
+            if (!DEBUG_DISABLE_TRIM_INDICATORS)
+                e.Graphics.FillEllipse(Brushes.White, new Rectangle(trimIndX, trimY - 10, 20, 20));
             if (calibrationMode)
             {
                 int trkTop = trimYUp + trimIndYOffset;
@@ -9493,35 +9589,16 @@ namespace SimConnect3
                 int rtXLeft  = 2760;
                 int rtXRight = 3210;
                 float rtNorm = (float)((rudderTrim + 1.0) / 2.0);
-                rudderTrimIndCircleX_Target = rtXLeft + rtNorm * (rtXRight - rtXLeft);
-                if (float.IsNaN(rudderTrimIndCircleX_Current))
-                {
-                    rudderTrimIndCircleX_Current = rudderTrimIndCircleX_Target;
-                }
-                else if (rudderTrimIndCircleX_Target != rudderTrimIndCircleX_Last)
-                {
-                    rudderTrimIndCircleX_Start = rudderTrimIndCircleX_Current;
-                    rudderTrimIndAnimStartTime = DateTime.Now;
-                    float dist = Math.Abs(rudderTrimIndCircleX_Target - rudderTrimIndCircleX_Current);
-                    rudderTrimIndAnimDurationSec = 8f * (dist / (rtXRight - rtXLeft));
-                    _rudderTrimIndAnimTimer?.Start();
-                }
-                rudderTrimIndCircleX_Last = rudderTrimIndCircleX_Target;
-
-                if (rudderTrimIndAnimDurationSec > 0f)
-                {
-                    float t = Math.Min((float)(DateTime.Now - rudderTrimIndAnimStartTime).TotalSeconds / rudderTrimIndAnimDurationSec, 1f);
-                    rudderTrimIndCircleX_Current = rudderTrimIndCircleX_Start + (rudderTrimIndCircleX_Target - rudderTrimIndCircleX_Start) * t;
-                    if (t >= 1f) rudderTrimIndAnimDurationSec = 0f;
-                }
-
-                int rtX = (int)Math.Round(rudderTrimIndCircleX_Current) + rudderTrimIndXOffset;
+                int rtX = rtXLeft + (int)(rtNorm * (rtXRight - rtXLeft)) + rudderTrimIndXOffset;
                 // marcador centre (línea vertical)
                 int rtCenter = (rtXLeft + rtXRight) / 2 + rudderTrimIndXOffset;
-                using var rtCenterBr = new SolidBrush(Color.FromArgb(180, 180, 180));
-                e.Graphics.FillRectangle(rtCenterBr, new Rectangle(rtCenter - 1, rudderTrimIndY - 42, 2, 20));
-                // cercle indicador
-                e.Graphics.FillEllipse(Brushes.White, new Rectangle(rtX - 10, rudderTrimIndY - 10, 20, 20));
+                if (!DEBUG_DISABLE_TRIM_INDICATORS)
+                {
+                    using var rtCenterBr = new SolidBrush(Color.FromArgb(180, 180, 180));
+                    e.Graphics.FillRectangle(rtCenterBr, new Rectangle(rtCenter - 1, rudderTrimIndY - 42, 2, 20));
+                    // cercle indicador
+                    e.Graphics.FillEllipse(Brushes.White, new Rectangle(rtX - 10, rudderTrimIndY - 10, 20, 20));
+                }
                 if (calibrationMode)
                 {
                     int trkLeft = rtXLeft + rudderTrimIndXOffset;
@@ -10265,11 +10342,13 @@ namespace SimConnect3
                 {
                     _g3kTrimDragging = true;
                     _g3kTrimLastMouseY = e.Y;
+                    StartElevatorTrimActiveRead();
                 }
                 if (_g3kRudderTrimZone.Contains(e.Location))
                 {
                     _g3kRudderTrimDragging = true;
                     _g3kRudderTrimLastMouseX = e.X;
+                    StartRudderTrimActiveRead();
                 }
                 return;
             }
@@ -10549,6 +10628,7 @@ namespace SimConnect3
             {
                 trimDragging = true;
                 trimLastMouseY = e.Y;
+                StartElevatorTrimActiveRead();
             }
             if (_g3000Active && g3kApSliderInputZone.Contains(e.Location))
             {
@@ -10559,6 +10639,7 @@ namespace SimConnect3
             {
                 rudderTrimDragging = true;
                 rudderTrimLastMouseX = e.X;
+                StartRudderTrimActiveRead();
             }
         }
 
@@ -10859,6 +10940,10 @@ namespace SimConnect3
             {
                 simconnect.TransmitClientEvent(0,SIMCONNECT_EVENTS.TRIM_UP,0,SIMCONNECT_GROUPS.GROUP0,SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             }
+            // Confirmació immediata (no esperar el pròxim tick del timer actiu, 33ms) — el primer
+            // "tick" real de trim és el que marca que de veritat comença a canviar (confirmat per
+            // Pere, 2026-10-02: el retard es notava just a l'inici del gest, no durant).
+            SyncElevatorTrimOnce();
         }
 
         private void SendRudderTrimTick(int dir)
@@ -10868,6 +10953,7 @@ namespace SimConnect3
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.RUDDER_TRIM_RIGHT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             else
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.RUDDER_TRIM_LEFT,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            SyncRudderTrimOnce();
         }
 
         private void SendAileronTrimSet(int axisVal)
@@ -11044,6 +11130,8 @@ namespace SimConnect3
             rudderTrimLastDir = 0;
             g3kApSliderDragging = false;
             g3kApSliderAccumDelta = 0;
+            StopElevatorTrimActiveReadIfNotNeeded();
+            StopRudderTrimActiveReadIfNotNeeded();
             pbMain.Invalidate();
         }
 
