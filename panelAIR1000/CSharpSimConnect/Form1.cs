@@ -57,9 +57,6 @@ namespace SimConnect3
         // G1000 abans de decidir res sobre flaps/trim.
         private System.Windows.Forms.Timer? _dataPollTimer;
 
-        // Struct1 (~112-113 camps restants, tot menys flaps) — prova de Pere, 2026-10-02: en lloc de
-        // 5 cops/segon com els switches, es demana cada 10s (provisional, no és el ritme final).
-        private System.Windows.Forms.Timer? _structPollTimer;
 
         // Flaps — lectura independent de tota la resta, i FLAPS NUM HANDLE POSITIONS / FLAPS HANDLE
         // INDEX separades l'una de l'altra (2026-10-03, Pere: no té sentit ajuntar-les; la primera és
@@ -722,8 +719,6 @@ namespace SimConnect3
 
         private bool b1WasPressed_COM = false;
 
-        private int previousNavSel = -1;
-        private bool firstNavSelReceived = false;
 
         [DllImport("user32.dll")]
         private static extern bool ReleaseCapture();
@@ -759,14 +754,11 @@ namespace SimConnect3
         private const byte VK_ESCAPE       = 0x1B;
         private const uint KEYEVENTF_KEYUP      = 0x0002;
 
-        private Struct1 lastData;
-
         private int nav1SwapCnt = 0; // comptador B5 (NAV1_SWAP)
         private int nav2SwapCnt = 0; // comptador B38 (NAV2_SWAP)
 
         enum DEFINITIONS
         {
-            Struct1,
             XPNDR_SET,
             CameraState,
             ElecSrcWrite,
@@ -866,6 +858,55 @@ namespace SimConnect3
             Nav1SoundRead,
             AdfSoundRead,
             Nav2SoundRead,
+            ApVsHoldRead,
+            ApFlcActiveRead,
+            ApWingLevelerRead,
+            ApHdgLockRead,
+            ApAprHoldRead,
+            ApGsHoldRead,
+            ApNav1LockRead,
+            ApFdActiveRead,
+            ApAltLockRead,
+            ApVnavBtnRead,
+            ApYawDamperRead,
+            ApBcHoldRead,
+            XfrPushLRead,
+            MasterCautionActiveRead,
+            MasterWarningActiveRead,
+            ElecStarterRead,
+            ElecIgnitionRead,
+            ApDisengagedRead,
+            RudderTrimDisabledRead,
+            AileronTrimDisabledRead,
+            PropDeiceRead,
+            WindshieldDeiceRead,
+            Pitot1Read,
+            Pitot2Read,
+            AntiIce1Read,
+            GearCenterRead,
+            GearLeftRead,
+            GearRightRead,
+            GearHandleRead,
+            DisplayBackupActiveRead,
+            ElecSourceSwitchRead,
+            ElecGeneratorSwitchRead,
+            ElecCrashbarStateRead,
+            Kap140StateRead,
+            ApMaxBankRead,
+            GyroRead,
+            DeiceRead,
+            PitotHeatSwitchRead,
+            NumEnginesRead,
+            CowlFlapLRead,
+            CowlFlapRRead,
+            CameraStateRead,
+            ElecFuelPumpRead,
+            PropLeverPosRead,
+            FuelValveRead,
+            ApMasterRead,
+            AileronTrimFracRead,
+            IsDeiceAirframeRead,
+            IsDeiceAirframe2Read,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -1029,7 +1070,6 @@ namespace SimConnect3
 
         enum REQUESTS
         {
-            Request1,
             RequestAircraftTitle,
             RequestFlapsNumPos,
             RequestFlapsHandleIndex,
@@ -1113,6 +1153,55 @@ namespace SimConnect3
             RequestNav1Sound,
             RequestAdfSound,
             RequestNav2Sound,
+            RequestApVsHold,
+            RequestApFlcActive,
+            RequestApWingLeveler,
+            RequestApHdgLock,
+            RequestApAprHold,
+            RequestApGsHold,
+            RequestApNav1Lock,
+            RequestApFdActive,
+            RequestApAltLock,
+            RequestApVnavBtn,
+            RequestApYawDamper,
+            RequestApBcHold,
+            RequestXfrPushL,
+            RequestMasterCautionActive,
+            RequestMasterWarningActive,
+            RequestElecStarter,
+            RequestElecIgnition,
+            RequestApDisengaged,
+            RequestRudderTrimDisabled,
+            RequestAileronTrimDisabled,
+            RequestPropDeice,
+            RequestWindshieldDeice,
+            RequestPitot1,
+            RequestPitot2,
+            RequestAntiIce1,
+            RequestGearCenter,
+            RequestGearLeft,
+            RequestGearRight,
+            RequestGearHandle,
+            RequestDisplayBackupActive,
+            RequestElecSourceSwitch,
+            RequestElecGeneratorSwitch,
+            RequestElecCrashbarState,
+            RequestKap140State,
+            RequestApMaxBank,
+            RequestGyro,
+            RequestDeice,
+            RequestPitotHeatSwitch,
+            RequestNumEngines,
+            RequestCowlFlapL,
+            RequestCowlFlapR,
+            RequestCameraState,
+            RequestElecFuelPump,
+            RequestPropLeverPos,
+            RequestFuelValve,
+            RequestApMaster,
+            RequestAileronTrimFrac,
+            RequestIsDeiceAirframe,
+            RequestIsDeiceAirframe2,
         }
         // Missatger genèric RPN — Client Data Area compartida amb el WASM (SFS_Link/Module.cpp).
         // Permet enviar qualsevol text RPN (K:, H:, B:, índexs, 'nom'_n, etc.) sense recompilar el
@@ -1637,6 +1726,7 @@ namespace SimConnect3
         private int _apMaster = 0;
         private int _xfrPushL = 0;
         private double _headingIndicator = 0;
+        private double _cameraState = 0;
         private int _masterCautionActive = 0;
         private int _masterWarningActive = 0;
         private int _rudderTrimDisabled = 0;
@@ -1847,111 +1937,6 @@ namespace SimConnect3
         private int flapsOffsetAtRelease   = 0;
 
 
-        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi, Pack = 1)]
-        struct Struct1
-        {
-            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 256)]
-            public string title; // Aircraft title
-            // DOUBLE (FLOAT64)
-            public double gyro; // GYRO directional
-            public double hdg; // HDG heading
-            public double crs1; // COURSE 1
-            public double crs2; // COURSE 2
-            public double adf_act; // ADF ACTIVE frequency
-            public double adf_stby; // ADF STANDBY frequency
-            public double baro_in; // KOHLSMAN SETTING HG, "inHg"
-            public double baro_hpa; // KOHLSMAN SETTING MB, "Millibars"
-            public double alt_sel; // AUTOPILOT ALTITUDE LOCK VAR", "feet"
-            public double displayBackupActive;
-            public double gear_center;
-            public double gear_left;
-            public double gear_right;
-
-            // INT (INT32)
-            public int xpdr_code;
-            public int xpdr_state; // TRANSPONDER STATE:1
-            public int xpdr_ident; // TRANSPONDER IDENT (Bool: 1 = active)
-            public int cdi_scr; // GPS DRIVES NAV1, 1 = GPS, 0 = NAV
-            public int nav_sel; // AUTOPILOT NAV1-2 SELECTED
-            public int read_deice;
-            public int read_pitotheat;
-            public int gear_handle; // GEAR HANDLE POSITION (Bool: 0=UP, 1=DN)
-            public int fuel_cross_feed; // FUEL CROSS FEED (Bool)
-            public int num_engines;         // NUMBER OF ENGINES
-            public double read_cowlflap_l;
-            public double read_cowlflap_r;
-            public double cameraState;
-            public double elecSourceSwitch; // L:XMLVAR_Elec_Source_Switch_State (0=OFF, 1=BATT, 2=GPU)
-            public double elecGeneratorSwitch; // L:XMLVAR_Elec_Generator_Switch_State
-            public double elecCrashbarState;   // L:XMLVAR_Elec_CrashBar_State (0=visible, 1=hidden)
-            public double elecStarter;         // L:XMLVAR_Starter (0=up, 1=center, 2=down)
-            public double elecIgnition;        // L:XMLVAR_Ignition (0=up, 1=center, 2=down)
-            public double elecFuelPump;        // L:XMLVAR_BoostFuelPump (0=up/auto, 1=center/on, 2=down/off)
-            public double apTrim;              // L:XMLVAR_APTrim (0=ON/up, 1=AP OFF/center, 2=OFF/dn)
-            public int apDisengaged;           // AUTOPILOT DISENGAGED (Bool)
-            public int rudderTrimDisabled;     // RUDDER TRIM DISABLED (Bool)
-            public int aileronTrimDisabled;    // AILERON TRIM DISABLED (Bool)
-            public int circuitConn17;          // CIRCUIT CONNECTION ON:17 (Bool)
-            public double fuelSelectionSet;    // L:TBM930_FUEL_SELECTION_SET (1=MANUAL, 2=AUTO)
-            public double propLeverPos;        // GENERAL ENG PROPELLER LEVER POSITION:1 (0-100%)
-            public double propRpm;             // PROP RPM:1
-            public int fuelValve;              // GENERAL ENG FUEL VALVE:1 (0=CUTOFF, 1=open)
-            public int kap140State;            // L:KAP140_State
-            public int apVsHold;               // AUTOPILOT VERTICAL HOLD (Bool)
-            public int apFlcActive;            // AUTOPILOT FLIGHT LEVEL CHANGE (Bool)
-            public int apWingLeveler;          // AUTOPILOT WING LEVELER (Bool)
-            public int apHdgLock;              // AUTOPILOT HEADING LOCK (Bool)
-            public int apAprHold;              // AUTOPILOT APPROACH HOLD (Bool)
-            public int apGsHold;               // AUTOPILOT GLIDESLOPE HOLD (Bool)
-            public int apNav1Lock;             // AUTOPILOT NAV1 LOCK (Bool)
-            public int apFdActive;             // AUTOPILOT FLIGHT DIRECTOR ACTIVE (Bool)
-            public int apAltLock;              // AUTOPILOT ALTITUDE LOCK (Bool)
-            public int apVnavBtn;              // L:XMLVAR_VNAVButtonValue
-            public int apYawDamper;            // AUTOPILOT YAW DAMPER (Bool)
-            public double apMaxBank;           // AUTOPILOT MAX BANK (Radians)
-            public int apBcHold;               // AUTOPILOT BACKCOURSE HOLD (Bool)
-            public int apMaster;               // AUTOPILOT MASTER (Bool)
-            public int xfrPushL;               // L:XMLVAR_PushXFR
-            public int masterCautionActive;    // L:Generic_Master_Caution_Active
-            public int masterWarningActive;    // L:Generic_Master_Warning_Active
-            public double aileronTrimFrac;     // AILERON TRIM PCT (-1..+1)
-            public int read_propdeice;         // PROP DEICE SWITCH:1 (Bool)
-            public int read_windshielddeice;   // WINDSHIELD DEICE SWITCH (Bool)
-            public int read_pitot1;            // L:DEICE_Pitot_1 (Bool)
-            public int read_pitot2;            // L:DEICE_Pitot_2 (Bool)
-            public int read_antiice1;          // ENG ANTI ICE:1 (Bool)
-            public double read_isDeiceAirframe; // L:XMLVAR_IsDeiceAirFrame (Number)
-            public double read_isDeiceAirframe2; // L:XMLVAR_IsDeiceAirFrame2 (Number)
-            public int read_fuelpump1_ex1; // GENERAL ENG FUEL PUMP SWITCH EX1:1 (Enum 0=HIGH,1=LOW,2=OFF) — Baron G58
-            public int read_fuelpump2_ex1; // GENERAL ENG FUEL PUMP SWITCH EX1:2 (Enum 0=HIGH,1=LOW,2=OFF) — Baron G58
-
-
-
-            public override bool Equals(object obj)
-            {
-                if (obj is Struct1 other)
-                {
-                    return this.hdg == other.hdg &&
-                           this.crs1 == other.crs1 &&
-                           this.crs2 == other.crs2 &&
-                           this.adf_act == other.adf_act &&
-                           this.adf_stby == other.adf_stby &&
-                           this.baro_in == other.baro_in &&
-                           this.baro_hpa == other.baro_hpa &&
-                           this.alt_sel == other.alt_sel &&
-                           this.xpdr_code == other.xpdr_code &&
-                           this.xpdr_state == other.xpdr_state &&
-                           this.xpdr_ident == other.xpdr_ident &&
-                           this.cdi_scr == other.cdi_scr &&
-                           this.nav_sel == other.nav_sel;
-                }
-                return false;
-            }
-
-
-
-
-        }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct XPNDRWrite
@@ -2573,8 +2558,8 @@ namespace SimConnect3
             {
                 if (calibrationMode) return;
                 if (simconnect == null) return;
-                int currentCam = (int)lastData.cameraState;
-                System.Diagnostics.Debug.WriteLine($"CAMERA STATE actual: {lastData.cameraState}");
+                int currentCam = (int)_cameraState;
+                System.Diagnostics.Debug.WriteLine($"CAMERA STATE actual: {_cameraState}");
                 int newCam = (currentCam == 2) ? 3 : 2;
                 var cs = new CameraStateWrite { value = (double)newCam };
                 simconnect.SetDataOnSimObject(DEFINITIONS.CameraState, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, cs);
@@ -4489,10 +4474,6 @@ namespace SimConnect3
             this.Region = formRegion;
         }
 
-        private bool HasDataChanged(Struct1 newData)
-        {
-            return !newData.Equals(lastData);
-        }
         private void frmMain_Load(object sender, EventArgs e)
         {
             if (IsDemoMode)
@@ -4638,10 +4619,6 @@ namespace SimConnect3
             _dataPollTimer = new System.Windows.Forms.Timer();
             _dataPollTimer.Interval = 200; // 5/s, fix — veure comentari del camp
             _dataPollTimer.Tick += (s3, ev3) => PollLowFrequencySimData();
-
-            _structPollTimer = new System.Windows.Forms.Timer();
-            _structPollTimer.Interval = 10000; // provisional, veure comentari del camp
-            _structPollTimer.Tick += (s3b, ev3b) => PollStruct1();
 
             _flapsActiveReadTimer = new System.Windows.Forms.Timer();
             _flapsActiveReadTimer.Interval = 100; // veure comentari del camp
@@ -4865,6 +4842,18 @@ namespace SimConnect3
                     new ElecCrashbarStruct { value = newVal });
             }
             if (newVal < 0.5)
+            {
+                SetElecSourceSwitch(0);
+                SetElecGeneratorSwitch(0);
+            }
+        }
+
+        // Xarxa de seguretat (abans vivia dins el handler de Struct1, cridada cada 10s): si el
+        // crashbar és visible (tapat) però source/generator encara marquen ON, els torna a 0. Ara que
+        // els 3 camps tenen lectura pròpia independent, es crida des de cadascun dels 3 handlers.
+        private void EnforceElecCrashbarConsistency()
+        {
+            if (_elecCrashbar < 0.5 && (_elecSourceSwitch > 0.5 || _elecGeneratorSwitch > 0.5))
             {
                 SetElecSourceSwitch(0);
                 SetElecGeneratorSwitch(0);
@@ -6509,108 +6498,13 @@ namespace SimConnect3
                 simconnect.SetNotificationGroupPriority(SIMCONNECT_GROUPS.GROUP0, SimConnect.SIMCONNECT_GROUP_PRIORITY_HIGHEST);
 
 
-                // DOUBLE (FLOAT64)
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "Title", null, SIMCONNECT_DATATYPE.STRING256, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "HEADING INDICATOR", "Degrees", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT HEADING LOCK DIR", "Degrees", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "NAV1 OBS", "Degrees", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "NAV2 OBS", "Degrees", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "ADF ACTIVE FREQUENCY:1", "Hz", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "ADF STANDBY FREQUENCY:1", "Hz", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "KOHLSMAN SETTING HG", "inHg", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "KOHLSMAN SETTING MB", "Millibars", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT ALTITUDE LOCK VAR", "feet", SIMCONNECT_DATATYPE.FLOAT64, 0.0f, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:AS1000_MID_Display_Backup_Active", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                // ELEVATOR TRIM INDICATOR / RUDDER TRIM PCT ja no van aquí — cada una té la seva pròpia
-                // definició (DEFINITIONS.ElevatorTrimRead / RudderTrimRead).
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GEAR CENTER POSITION", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GEAR LEFT POSITION", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GEAR right POSITION", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-
-                // INT (INT32)
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "TRANSPONDER CODE:1", "Enum", SIMCONNECT_DATATYPE.INT32, 0.0f, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "TRANSPONDER STATE:1", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "TRANSPONDER IDENT:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GPS DRIVES NAV1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT NAV SELECTED", "number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                //simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "SIMCONNECT VERSION", "number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                // COM TRANSMIT:1/2, COM RECEIVE ALL, DME SOUND, SPEAKER ACTIVE, MARKER BEACON TEST MUTE,
-                // NAV1/2 SOUND i ADF SOUND ja no van aquí — cada una té la seva pròpia definició
-                // (DEFINITIONS.Com1Read/Com2Read/ComReceiveAllRead/DmeSoundRead/SpkrSoundRead/
-                // MkrMuteRead/Nav1SoundRead/AdfSoundRead/Nav2SoundRead).
-                // LIGHT BEACON/LANDING/TAXI/NAV/STROBE/RECOGNITION/PANEL ja no van aquí — cada una té
-                // la seva pròpia definició (DEFINITIONS.LightXxxRead).
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "STRUCTURAL DEICE SWITCH", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "PITOT HEAT", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                // GENERAL ENG FUEL PUMP SWITCH:1/2 ja no van aquí — cada una té la seva pròpia definició
-                // (DEFINITIONS.FuelPump1Read / FuelPump2Read).
-                // FLAPS NUM HANDLE POSITIONS / FLAPS HANDLE INDEX ja no van aquí — cada una té la seva
-                // pròpia definició (DEFINITIONS.FlapsNumPosRead / FlapsHandleIndexRead).
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GEAR HANDLE POSITION", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                // RECIP ENG LEFT/RIGHT MAGNETO:1/2 i GENERAL ENG STARTER:1/2 ja no van aquí — cada una té
-                // la seva pròpia definició (DEFINITIONS.Ign1LeftRead/Ign1RightRead/Ign1StarterRead/
-                // Ign2LeftRead/Ign2RightRead/Ign2StarterRead).
-                // FUEL TANK SELECTOR:1/2 ja no van aquí — cada una té la seva pròpia definició
-                // (DEFINITIONS.FuelTankSelector1Read / FuelTankSelector2Read).
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUEL CROSS FEED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "NUMBER OF ENGINES", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG COWL FLAP POSITION:1", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG COWL FLAP POSITION:2", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                // ELECTRICAL MASTER BATTERY, AVIONICS MASTER SWITCH:1/2 i GENERAL ENG MASTER
-                // ALTERNATOR:1/2 ja no van aquí — cada una té la seva pròpia definició
-                // (DEFINITIONS.MasterBatteryRead/Avionics1Read/Avionics2Read/AltGen1Read/AltGen2Read).
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Elec_Source_Switch_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Elec_Generator_Switch_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Elec_CrashBar_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Starter", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Ignition", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_BoostFuelPump", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_APTrim", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT DISENGAGED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RUDDER TRIM DISABLED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AILERON TRIM DISABLED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                // L:LIGHTING_LOGO_1 / LIGHT LOGO ja no van aquí — cada una té la seva pròpia definició.
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "CIRCUIT CONNECTION ON:17", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:TBM930_FUEL_SELECTION_SET", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG PROPELLER LEVER POSITION:1", "Position 16k", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "PROP RPM:1", "Rpm", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                // GENERAL ENG THROTTLE LEVER POSITION:1 ja no va aquí — té la seva pròpia definició
-                // (DEFINITIONS.ThrottleLeverPosRead).
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL VALVE:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:KAP140_State", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT VERTICAL HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT FLIGHT LEVEL CHANGE", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT WING LEVELER", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT HEADING LOCK", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT APPROACH HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT GLIDESLOPE HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT NAV1 LOCK", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT FLIGHT DIRECTOR ACTIVE:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT ALTITUDE LOCK", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_VNAVButtonValue", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT YAW DAMPER", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT MAX BANK", "Radians", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT BACKCOURSE HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT MASTER", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_PushXFR", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                // HEADING INDICATOR ja es llegeix més amunt (gyro) — registre duplicat eliminat (veure
-                // comentari a GENERAL ENG STARTER:1/2); consolidat a gyro.
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:Generic_Master_Caution_Active", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:Generic_Master_Warning_Active", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AILERON TRIM PCT", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                // L:LIGHTING_WING_1 ja no va aquí — té la seva pròpia definició.
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "PROP DEICE SWITCH:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "WINDSHIELD DEICE SWITCH", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:DEICE_Pitot_1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:DEICE_Pitot_2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "ENG ANTI ICE:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_IsDeiceAirFrame", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_IsDeiceAirFrame2", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                // FUELSYSTEM PUMP SWITCH:1/2/3 (2024) ja no van aquí — cada una té la seva pròpia
-                // definició (DEFINITIONS.FuelPump1_2024Read/FuelPump2_2024Read/FuelPumpIdx3_2024Read).
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL PUMP SWITCH EX1:1", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL PUMP SWITCH EX1:2", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                // Struct1/Request1 ja no s'usa — tots els camps que hi quedaven (gyro, deice, pitot heat,
+                // num engines, cowl flaps, camera state, fuel pump elèctric, prop lever/fuel valve del
+                // throttle, AP master, aileron trim frac, deice airframe) han passat a definicions pròpies
+                // i separades (2026-10-03, Pere: "passa-les totes"). Els camps que no tenien cap consumidor
+                // real (title, hdg, crs1/2, adf act/stby, baro in/hpa, alt sel, xpdr code/state/ident,
+                // cdi_scr, nav_sel, fuel cross feed, apTrim, circuit conn 17, fuelSelectionSet —ja llegit
+                // per separat via TBM—, propRpm, fuel pump EX1:1/2) simplement s'han deixat de llegir.
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<CameraStateWrite>(DEFINITIONS.CameraState);
 
@@ -6703,8 +6597,6 @@ namespace SimConnect3
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.PROP_PITCH_SET, false);
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, "AXIS_THROTTLE_SET");
                 simconnect.AddClientEventToNotificationGroup(SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, false);
-
-                simconnect.RegisterDataDefineStruct<Struct1>(DEFINITIONS.Struct1);
 
                 // Avió carregat — mostrat a la pantalla AUX
                 simconnect.AddToDataDefinition(DEFINITIONS.AircraftTitle, "TITLE", null, SIMCONNECT_DATATYPE.STRING256, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -6812,6 +6704,113 @@ namespace SimConnect3
                 simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.AdfSoundRead);
                 simconnect.AddToDataDefinition(DEFINITIONS.Nav2SoundRead, "NAV2 SOUND", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Nav2SoundRead);
+                // Anunciadors de l'autopilot i llums d'avís (2026-10-03, Pere) — mateixa prova, definicions
+                // pròpies i separades. AUTOPILOT MASTER (DEFINITIONS.ApMasterRead, més avall) manté
+                // l'efecte secundari sobre la lectura activa del trim al seu propi handler.
+                simconnect.AddToDataDefinition(DEFINITIONS.ApVsHoldRead, "AUTOPILOT VERTICAL HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.ApVsHoldRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ApFlcActiveRead, "AUTOPILOT FLIGHT LEVEL CHANGE", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.ApFlcActiveRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ApWingLevelerRead, "AUTOPILOT WING LEVELER", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.ApWingLevelerRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ApHdgLockRead, "AUTOPILOT HEADING LOCK", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.ApHdgLockRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ApAprHoldRead, "AUTOPILOT APPROACH HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.ApAprHoldRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ApGsHoldRead, "AUTOPILOT GLIDESLOPE HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.ApGsHoldRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ApNav1LockRead, "AUTOPILOT NAV1 LOCK", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.ApNav1LockRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ApFdActiveRead, "AUTOPILOT FLIGHT DIRECTOR ACTIVE:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.ApFdActiveRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ApAltLockRead, "AUTOPILOT ALTITUDE LOCK", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.ApAltLockRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ApVnavBtnRead, "L:XMLVAR_VNAVButtonValue", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.ApVnavBtnRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ApYawDamperRead, "AUTOPILOT YAW DAMPER", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.ApYawDamperRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ApBcHoldRead, "AUTOPILOT BACKCOURSE HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.ApBcHoldRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.XfrPushLRead, "L:XMLVAR_PushXFR", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.XfrPushLRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.MasterCautionActiveRead, "L:Generic_Master_Caution_Active", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.MasterCautionActiveRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.MasterWarningActiveRead, "L:Generic_Master_Warning_Active", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.MasterWarningActiveRead);
+                // Starter/ignition (rotatius elèctrics), guardes AP/trim i deice/pitot (2026-10-03, Pere)
+                // — mateixa prova, definicions pròpies i separades.
+                simconnect.AddToDataDefinition(DEFINITIONS.ElecStarterRead, "L:XMLVAR_Starter", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.ElecStarterRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ElecIgnitionRead, "L:XMLVAR_Ignition", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.ElecIgnitionRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ApDisengagedRead, "AUTOPILOT DISENGAGED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.ApDisengagedRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.RudderTrimDisabledRead, "RUDDER TRIM DISABLED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.RudderTrimDisabledRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.AileronTrimDisabledRead, "AILERON TRIM DISABLED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.AileronTrimDisabledRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.PropDeiceRead, "PROP DEICE SWITCH:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.PropDeiceRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.WindshieldDeiceRead, "WINDSHIELD DEICE SWITCH", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.WindshieldDeiceRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.Pitot1Read, "L:DEICE_Pitot_1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Pitot1Read);
+                simconnect.AddToDataDefinition(DEFINITIONS.Pitot2Read, "L:DEICE_Pitot_2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Pitot2Read);
+                simconnect.AddToDataDefinition(DEFINITIONS.AntiIce1Read, "ENG ANTI ICE:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.AntiIce1Read);
+                // Gear, display backup, elèctric (source/generator/crashbar), KAP140 i AP max bank
+                // (2026-10-03, Pere) — mateixa prova, definicions pròpies i separades.
+                simconnect.AddToDataDefinition(DEFINITIONS.GearCenterRead, "GEAR CENTER POSITION", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.GearCenterRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.GearLeftRead, "GEAR LEFT POSITION", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.GearLeftRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.GearRightRead, "GEAR right POSITION", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.GearRightRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.GearHandleRead, "GEAR HANDLE POSITION", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.GearHandleRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.DisplayBackupActiveRead, "L:AS1000_MID_Display_Backup_Active", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.DisplayBackupActiveRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ElecSourceSwitchRead, "L:XMLVAR_Elec_Source_Switch_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.ElecSourceSwitchRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ElecGeneratorSwitchRead, "L:XMLVAR_Elec_Generator_Switch_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.ElecGeneratorSwitchRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ElecCrashbarStateRead, "L:XMLVAR_Elec_CrashBar_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.ElecCrashbarStateRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.Kap140StateRead, "L:KAP140_State", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Kap140StateRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ApMaxBankRead, "AUTOPILOT MAX BANK", "Radians", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.ApMaxBankRead);
+                // Últims camps de Struct1 (2026-10-03, Pere: "passa-les totes") — definicions pròpies i
+                // separades; Struct1/Request1 ja no existeix.
+                simconnect.AddToDataDefinition(DEFINITIONS.GyroRead, "HEADING INDICATOR", "Degrees", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.GyroRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.DeiceRead, "STRUCTURAL DEICE SWITCH", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.DeiceRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.PitotHeatSwitchRead, "PITOT HEAT", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.PitotHeatSwitchRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.NumEnginesRead, "NUMBER OF ENGINES", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.NumEnginesRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.CowlFlapLRead, "RECIP ENG COWL FLAP POSITION:1", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.CowlFlapLRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.CowlFlapRRead, "RECIP ENG COWL FLAP POSITION:2", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.CowlFlapRRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.CameraStateRead, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.CameraStateRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ElecFuelPumpRead, "L:XMLVAR_BoostFuelPump", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.ElecFuelPumpRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.PropLeverPosRead, "GENERAL ENG PROPELLER LEVER POSITION:1", "Position 16k", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.PropLeverPosRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.FuelValveRead, "GENERAL ENG FUEL VALVE:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.FuelValveRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.ApMasterRead, "AUTOPILOT MASTER", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.ApMasterRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.AileronTrimFracRead, "AILERON TRIM PCT", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.AileronTrimFracRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.IsDeiceAirframeRead, "L:XMLVAR_IsDeiceAirFrame", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.IsDeiceAirframeRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.IsDeiceAirframe2Read, "L:XMLVAR_IsDeiceAirFrame2", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.IsDeiceAirframe2Read);
 
                 // Parking brake — definició pròpia i petita (no dins Struct1): amb ~119 camps compartits,
                 // SimConnect deixava de reflectir bé els camps afegits al final. Confirmat amb un mini-programa
@@ -7183,9 +7182,8 @@ namespace SimConnect3
         // (dobles denormalitzats tipus 1.4E-310, probablement un problema de marshaling/alineació
         // en mesclar camps dins una mateixa estructura) i no va millorar els FPS — tornem als 41
         // individuals (Struct1 + 40), que ja sabíem que funcionaven correctament.
-        // Request1/Struct1 ja no va aquí (prova de Pere, 2026-10-02): es el gros dels ~112-113 camps
-        // que encara hi queden (tot menys flaps i trim, que ara tenen lectura pròpia), i
-        // de moment es demana molt més a poc a poc, cada 10s (provisional), via _structPollTimer.
+        // Struct1/Request1 (el paquet gran original) ja no existeix (2026-10-03, Pere: "passa-les
+        // totes") — tots els seus camps han passat a definicions pròpies dins aquest mateix array.
         private static readonly (REQUESTS req, DEFINITIONS def)[] _lowFreqPolls = new (REQUESTS, DEFINITIONS)[]
         {
             (REQUESTS.RequestParkingBrake, DEFINITIONS.ParkingBrakeRead),
@@ -7267,6 +7265,55 @@ namespace SimConnect3
             (REQUESTS.RequestNav1Sound, DEFINITIONS.Nav1SoundRead),
             (REQUESTS.RequestAdfSound, DEFINITIONS.AdfSoundRead),
             (REQUESTS.RequestNav2Sound, DEFINITIONS.Nav2SoundRead),
+            (REQUESTS.RequestApVsHold, DEFINITIONS.ApVsHoldRead),
+            (REQUESTS.RequestApFlcActive, DEFINITIONS.ApFlcActiveRead),
+            (REQUESTS.RequestApWingLeveler, DEFINITIONS.ApWingLevelerRead),
+            (REQUESTS.RequestApHdgLock, DEFINITIONS.ApHdgLockRead),
+            (REQUESTS.RequestApAprHold, DEFINITIONS.ApAprHoldRead),
+            (REQUESTS.RequestApGsHold, DEFINITIONS.ApGsHoldRead),
+            (REQUESTS.RequestApNav1Lock, DEFINITIONS.ApNav1LockRead),
+            (REQUESTS.RequestApFdActive, DEFINITIONS.ApFdActiveRead),
+            (REQUESTS.RequestApAltLock, DEFINITIONS.ApAltLockRead),
+            (REQUESTS.RequestApVnavBtn, DEFINITIONS.ApVnavBtnRead),
+            (REQUESTS.RequestApYawDamper, DEFINITIONS.ApYawDamperRead),
+            (REQUESTS.RequestApBcHold, DEFINITIONS.ApBcHoldRead),
+            (REQUESTS.RequestXfrPushL, DEFINITIONS.XfrPushLRead),
+            (REQUESTS.RequestMasterCautionActive, DEFINITIONS.MasterCautionActiveRead),
+            (REQUESTS.RequestMasterWarningActive, DEFINITIONS.MasterWarningActiveRead),
+            (REQUESTS.RequestElecStarter, DEFINITIONS.ElecStarterRead),
+            (REQUESTS.RequestElecIgnition, DEFINITIONS.ElecIgnitionRead),
+            (REQUESTS.RequestApDisengaged, DEFINITIONS.ApDisengagedRead),
+            (REQUESTS.RequestRudderTrimDisabled, DEFINITIONS.RudderTrimDisabledRead),
+            (REQUESTS.RequestAileronTrimDisabled, DEFINITIONS.AileronTrimDisabledRead),
+            (REQUESTS.RequestPropDeice, DEFINITIONS.PropDeiceRead),
+            (REQUESTS.RequestWindshieldDeice, DEFINITIONS.WindshieldDeiceRead),
+            (REQUESTS.RequestPitot1, DEFINITIONS.Pitot1Read),
+            (REQUESTS.RequestPitot2, DEFINITIONS.Pitot2Read),
+            (REQUESTS.RequestAntiIce1, DEFINITIONS.AntiIce1Read),
+            (REQUESTS.RequestGearCenter, DEFINITIONS.GearCenterRead),
+            (REQUESTS.RequestGearLeft, DEFINITIONS.GearLeftRead),
+            (REQUESTS.RequestGearRight, DEFINITIONS.GearRightRead),
+            (REQUESTS.RequestGearHandle, DEFINITIONS.GearHandleRead),
+            (REQUESTS.RequestDisplayBackupActive, DEFINITIONS.DisplayBackupActiveRead),
+            (REQUESTS.RequestElecSourceSwitch, DEFINITIONS.ElecSourceSwitchRead),
+            (REQUESTS.RequestElecGeneratorSwitch, DEFINITIONS.ElecGeneratorSwitchRead),
+            (REQUESTS.RequestElecCrashbarState, DEFINITIONS.ElecCrashbarStateRead),
+            (REQUESTS.RequestKap140State, DEFINITIONS.Kap140StateRead),
+            (REQUESTS.RequestApMaxBank, DEFINITIONS.ApMaxBankRead),
+            (REQUESTS.RequestGyro, DEFINITIONS.GyroRead),
+            (REQUESTS.RequestDeice, DEFINITIONS.DeiceRead),
+            (REQUESTS.RequestPitotHeatSwitch, DEFINITIONS.PitotHeatSwitchRead),
+            (REQUESTS.RequestNumEngines, DEFINITIONS.NumEnginesRead),
+            (REQUESTS.RequestCowlFlapL, DEFINITIONS.CowlFlapLRead),
+            (REQUESTS.RequestCowlFlapR, DEFINITIONS.CowlFlapRRead),
+            (REQUESTS.RequestCameraState, DEFINITIONS.CameraStateRead),
+            (REQUESTS.RequestElecFuelPump, DEFINITIONS.ElecFuelPumpRead),
+            (REQUESTS.RequestPropLeverPos, DEFINITIONS.PropLeverPosRead),
+            (REQUESTS.RequestFuelValve, DEFINITIONS.FuelValveRead),
+            (REQUESTS.RequestApMaster, DEFINITIONS.ApMasterRead),
+            (REQUESTS.RequestAileronTrimFrac, DEFINITIONS.AileronTrimFracRead),
+            (REQUESTS.RequestIsDeiceAirframe, DEFINITIONS.IsDeiceAirframeRead),
+            (REQUESTS.RequestIsDeiceAirframe2, DEFINITIONS.IsDeiceAirframe2Read),
         };
 
         private void PollLowFrequencySimData()
@@ -7352,14 +7399,14 @@ namespace SimConnect3
         }
 
         // Mou el "handle" visual del throttle (G3K_THR_HANDLE) segons _thrLeverPos/_propLeverPosCached/
-        // _fuelValveCached. El "carril dret" (comparació per valor exacte amb propLeverPos/fuelValve)
-        // només s'ha d'avaluar quan aquests 3 valors venen d'una lectura coherent entre ells — ara que
-        // thrLeverPos té lectura pròpia (fins a cada 50ms) i propLeverPos/fuelValve es queden dins
-        // Struct1 (cada 10s), si s'avaluava sempre, un thrLeverPos fresquíssim podia coincidir per
-        // casualitat amb un propLeverPos/fuelValve ja vell (fins a 10s) i disparar un salt fals sense
-        // que ningú hagués tocat res (confirmat per Pere, 2026-10-03). Per això includeRightRailCheck
-        // només és true quan ve de Struct1 (on els 3 valors acaben d'arribar junts); la lectura
-        // independent de thrLeverPos només fa el seguiment proporcional normal.
+        // _fuelValveCached — els 3 tenen lectura pròpia i independent (2026-10-03, Pere: "passa-les
+        // totes"). El "carril dret" (comparació per valor exacte amb propLeverPos/fuelValve) només
+        // s'avalua quan ve de RequestPropLeverPos/RequestFuelValve (includeRightRailCheck=true) —
+        // propLeverPos/fuelValve canvien poc, així que reavaluar-ho cada cop que arriben és barat.
+        // thrLeverPos (fins a cada 50ms durant un arrossegament) crida amb includeRightRailCheck=false:
+        // fer-ho a cada tick seu seria car i, abans de tenir lectura pròpia, ja vam confirmar que
+        // barrejar un thrLeverPos fresquíssim amb un propLeverPos/fuelValve vell (quan encara anava
+        // dins Struct1, cada 10s) podia disparar un salt fals sense que ningú hagués tocat res.
         private void UpdateThrHandleFromLeverPos(bool includeRightRailCheck)
         {
             if (!_g3000Active || !pbMain.IsHandleCreated) return;
@@ -7453,16 +7500,6 @@ namespace SimConnect3
                     }
                 }
             }));
-        }
-
-        private void PollStruct1()
-        {
-            if (simconnect == null) return;
-            try
-            {
-                simconnect.RequestDataOnSimObject(REQUESTS.Request1, DEFINITIONS.Struct1, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.ONCE, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
-            }
-            catch { }
         }
 
         // Sync puntual de FLAPS NUM HANDLE POSITIONS: pràcticament constant per avió, només cal en
@@ -7906,10 +7943,6 @@ namespace SimConnect3
             PollLowFrequencySimData();
             _dataPollTimer?.Start();
 
-            // Struct1 (~112-113 camps restants), cada 10s (provisional) via _structPollTimer.
-            PollStruct1();
-            _structPollTimer?.Start();
-
             // Flaps: sync puntual aquí (connexió feta / MSFS ja actiu), les dues per separat — no es
             // tornen a llegir fins que es mogui el selector (i, aleshores, només el handle index).
             SyncFlapsNumPosOnce();
@@ -7951,7 +7984,6 @@ namespace SimConnect3
             _currentAircraftTitle = ""; // força re-detecció (i re-sync fuel pumps Baron) a la propera connexió
 
             _dataPollTimer?.Stop();
-            _structPollTimer?.Stop();
             _flapsActiveReadTimer?.Stop();
             _elevatorTrimActiveReadTimer?.Stop();
             _rudderTrimActiveReadTimer?.Stop();
@@ -8388,6 +8420,323 @@ namespace SimConnect3
             {
                 bool newNav2Active = ((LightBoolStruct)data.dwData[0]).value != 0;
                 if (newNav2Active != nav2Active) { nav2Active = newNav2Active; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestApVsHold)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _apVsHold) { _apVsHold = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestApFlcActive)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _apFlcActive) { _apFlcActive = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestApWingLeveler)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _apWingLeveler) { _apWingLeveler = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestApHdgLock)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _apHdgLock) { _apHdgLock = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestApAprHold)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _apAprHold) { _apAprHold = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestApGsHold)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _apGsHold) { _apGsHold = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestApNav1Lock)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _apNav1Lock) { _apNav1Lock = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestApFdActive)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _apFdActive) { _apFdActive = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestApAltLock)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _apAltLock) { _apAltLock = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestApVnavBtn)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _apVnavBtn) { _apVnavBtn = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestApYawDamper)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _apYawDamper) { _apYawDamper = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestApBcHold)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _apBcHold) { _apBcHold = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestXfrPushL)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _xfrPushL) { _xfrPushL = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestMasterCautionActive)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _masterCautionActive) { _masterCautionActive = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestMasterWarningActive)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _masterWarningActive) { _masterWarningActive = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestElecStarter)
+            {
+                double newVal = ((LightNumberStruct)data.dwData[0]).value;
+                if (newVal != _elecStarter) { _elecStarter = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestElecIgnition)
+            {
+                double newVal = ((LightNumberStruct)data.dwData[0]).value;
+                if (newVal != _elecIgnition) { _elecIgnition = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestApDisengaged)
+            {
+                _apDisengaged = ((LightBoolStruct)data.dwData[0]).value;
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestRudderTrimDisabled)
+            {
+                _rudderTrimDisabled = ((LightBoolStruct)data.dwData[0]).value;
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestAileronTrimDisabled)
+            {
+                _aileronTrimDisabled = ((LightBoolStruct)data.dwData[0]).value;
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestPropDeice)
+            {
+                bool newPropDeice = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (newPropDeice != propDeiceActive) { propDeiceActive = newPropDeice; pbMain.Invalidate(); }
+                // Bonanza G36 a MSFS2024: BTN_DEICE/SW_DN_DEICE (deiceActive) fan servir el switch real
+                // de prop de-ice — veure comentari original a Simconnect_OnRecvSimobjectData (abans
+                // d'independitzar-lo).
+                if (IsBonanzaG36() && _isMsfs2024 && newPropDeice != deiceActive)
+                {
+                    deiceActive = newPropDeice;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestWindshieldDeice)
+            {
+                bool newVal = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (newVal != windshieldDeiceActive) { windshieldDeiceActive = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestPitot1)
+            {
+                bool newVal = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (newVal != pitotHeatLActive) { pitotHeatLActive = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestPitot2)
+            {
+                bool newVal = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (newVal != pitotHeatRActive) { pitotHeatRActive = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestAntiIce1)
+            {
+                bool newVal = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (!(IsTBM930() && _isMsfs2024) && newVal != antiIceEng1Active) { antiIceEng1Active = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestGearCenter)
+            {
+                int newVal = (int)((LightNumberStruct)data.dwData[0]).value;
+                if (newVal != gearNosePercent) { gearNosePercent = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestGearLeft)
+            {
+                int newVal = (int)((LightNumberStruct)data.dwData[0]).value;
+                if (newVal != gearLeftPercent) { gearLeftPercent = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestGearRight)
+            {
+                int newVal = (int)((LightNumberStruct)data.dwData[0]).value;
+                if (newVal != gearRightPercent) { gearRightPercent = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestGearHandle)
+            {
+                bool newGearHandleUp = (((LightBoolStruct)data.dwData[0]).value & 1) == 0; // 0=UP, 1=DN
+                if (newGearHandleUp != lgearHandleUp) { lgearHandleUp = newGearHandleUp; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestDisplayBackupActive)
+            {
+                bool newVal = ((LightNumberStruct)data.dwData[0]).value > 0.5;
+                if (newVal != displayBackupActive_bool) { displayBackupActive_bool = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            // TBM930 (2024): igual que el crashbar, _elecSourceSwitch el porta SetElecSourceSwitch()
+            // fins que tinguem la L: real de lectura.
+            if (data.dwRequestID == (uint)REQUESTS.RequestElecSourceSwitch)
+            {
+                double newVal = ((LightNumberStruct)data.dwData[0]).value;
+                if (!(IsTBM930() && _isMsfs2024) && newVal != _elecSourceSwitch) { _elecSourceSwitch = newVal; pbMain.Invalidate(); }
+                EnforceElecCrashbarConsistency();
+                return;
+            }
+            // TBM930 (2024): _elecGeneratorSwitch el porta RequestTbmElecGenerator2024 (L: real).
+            if (data.dwRequestID == (uint)REQUESTS.RequestElecGeneratorSwitch)
+            {
+                double newVal = ((LightNumberStruct)data.dwData[0]).value;
+                if (!(IsTBM930() && _isMsfs2024) && newVal != _elecGeneratorSwitch) { _elecGeneratorSwitch = newVal; pbMain.Invalidate(); }
+                EnforceElecCrashbarConsistency();
+                return;
+            }
+            // TBM930 (2024): no llegim L:XMLVAR_Elec_CrashBar_State (pot no aplicar-se), _elecCrashbar
+            // el porta el toggle local de ToggleElecCrashbar().
+            if (data.dwRequestID == (uint)REQUESTS.RequestElecCrashbarState)
+            {
+                double newVal = ((LightNumberStruct)data.dwData[0]).value;
+                if (!(IsTBM930() && _isMsfs2024) && newVal != _elecCrashbar) { _elecCrashbar = newVal; pbMain.Invalidate(); }
+                EnforceElecCrashbarConsistency();
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestKap140State)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _kap140State) { _kap140State = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestApMaxBank)
+            {
+                double newVal = ((LightNumberStruct)data.dwData[0]).value;
+                if (newVal != _apMaxBank) { _apMaxBank = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestGyro)
+            {
+                double newVal = ((LightNumberStruct)data.dwData[0]).value;
+                if (newVal != _headingIndicator) { _headingIndicator = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestDeice)
+            {
+                bool newVal = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (!IsCirrusSR22() && !IsBonanzaG36() && !IsCaravan() && newVal != deiceActive) { deiceActive = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestPitotHeatSwitch)
+            {
+                bool newVal = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (newVal != pitotheatActive) { pitotheatActive = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestNumEngines)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != numEngines) { numEngines = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestCowlFlapL)
+            {
+                double raw = ((LightNumberStruct)data.dwData[0]).value;
+                int newVal = raw < 10 ? 0 : raw < 70 ? 1 : 2;
+                if (newVal != cowlFlapL) { cowlFlapL = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestCowlFlapR)
+            {
+                double raw = ((LightNumberStruct)data.dwData[0]).value;
+                int newVal = raw < 10 ? 0 : raw < 70 ? 1 : 2;
+                if (newVal != cowlFlapR) { cowlFlapR = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestCameraState)
+            {
+                _cameraState = ((LightNumberStruct)data.dwData[0]).value;
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestElecFuelPump)
+            {
+                double newVal = ((LightNumberStruct)data.dwData[0]).value;
+                if (newVal != _elecFuelPump) { _elecFuelPump = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestPropLeverPos)
+            {
+                _propLeverPosCached = ((LightNumberStruct)data.dwData[0]).value;
+                UpdateThrHandleFromLeverPos(includeRightRailCheck: true);
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestFuelValve)
+            {
+                _fuelValveCached = ((LightBoolStruct)data.dwData[0]).value;
+                UpdateThrHandleFromLeverPos(includeRightRailCheck: true);
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestApMaster)
+            {
+                int newVal = ((LightBoolStruct)data.dwData[0]).value;
+                if (newVal != _apMaster)
+                {
+                    _apMaster = newVal;
+                    // L'elevator/vertical trim és l'únic motoritzat per l'AP (el rudder, mai) — mentre
+                    // estigui actiu, mantenim una lectura activa contínua a 33ms; en desactivar-se,
+                    // parem (tret que s'estigui arrossegant la roda en aquell moment).
+                    if (_apMaster == 1) StartElevatorTrimActiveRead();
+                    else StopElevatorTrimActiveReadIfNotNeeded();
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestAileronTrimFrac)
+            {
+                double newVal = ((LightNumberStruct)data.dwData[0]).value;
+                if (newVal != _aileronTrimFrac) { _aileronTrimFrac = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestIsDeiceAirframe)
+            {
+                double newVal = ((LightNumberStruct)data.dwData[0]).value;
+                if (!(IsTBM930() && _isMsfs2024) && newVal != _isDeiceAirframe) { _isDeiceAirframe = newVal; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestIsDeiceAirframe2)
+            {
+                double newVal = ((LightNumberStruct)data.dwData[0]).value;
+                if (!(IsTBM930() && _isMsfs2024) && newVal != _isDeiceAirframe2) { _isDeiceAirframe2 = newVal; pbMain.Invalidate(); }
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestParkingBrake)
@@ -9028,220 +9377,6 @@ namespace SimConnect3
                     }
                 }
                 return;
-            }
-            if (data.dwRequestID == (uint)REQUESTS.Request1)
-            {
-                Struct1 s1 = (Struct1)data.dwData[0];
-                bool needsRepaint = false;
-                // COM1/COM2/COM RECEIVE ALL/DME/NAV1/SPKR/MKR/ADF/NAV2 ja no es llegeixen aquí — cada
-                // una té la seva pròpia definició (veure handlers de RequestCom1/Com2/ComReceiveAll/
-                // DmeSound/SpkrSound/MkrMute/Nav1Sound/AdfSound/Nav2Sound).
-                // Les 7 llums (BEACON/LANDING/TAXI/NAV/STROBE/RECOGNITION/PANEL) ja no es llegeixen
-                // aquí — cada una té la seva pròpia definició (veure handlers de RequestLightXxx).
-                bool newPitotheat = (s1.read_pitotheat & 1) != 0;
-                // fuelpump1Active/2Active (GENERAL ENG FUEL PUMP SWITCH:1/2, FUELSYSTEM PUMP SWITCH:1/2/3)
-                // i el hook del selector C408 ja no es decideixen aquí — lectura pròpia independent,
-                // veure UpdateFuelPumpState() i els handlers de RequestFuelPump1/2/1_2024/2_2024/Idx3_2024.
-                gearNosePercent = (int)s1.gear_center;
-                gearLeftPercent = (int)s1.gear_left;
-                gearRightPercent = (int)s1.gear_right;
-                bool newGearHandleUp = (s1.gear_handle & 1) == 0; // 0=UP, 1=DN
-                if (newGearHandleUp != lgearHandleUp)
-                {
-                    lgearHandleUp = newGearHandleUp;
-                    needsRepaint = true;
-                }
-                // El p.brake es llegeix ara amb una petita definició dedicada (veure REQUESTS.RequestParkingBrake)
-                // en lloc de dins d'aquest Struct1 — amb ~119 camps compartits en una sola data definition,
-                // SimConnect deixava de reflectir correctament els camps afegits al final (confirmat provant-ho
-                // aïllat amb un mini-programa: BRAKE PARKING POSITION i BRAKE PARKING INDICATOR llegien bé
-                // sols, però no dins d'aquest struct tan gran).
-
-
-                //System.Diagnostics.Debug.WriteLine($"DME SOUND raw={s1.dme_read}");
-                //System.Diagnostics.Debug.WriteLine(">>> OnRecvSimobjectData CALLED");
-                //bool newDmeActive = s1.dme_read == 1;
-                // flapsNumPositions/flapsPoscPalanca (RequestFlapsNumPos/RequestFlapsHandleIndex) i
-                // elevatorTrim/rudderTrim (RequestElevatorTrimPos/RequestRudderTrimPos) ja no es llegeixen aquí — tenen
-                // lectura pròpia independent (sync + activa només quan cal, veure els seus handlers
-                // respectius).
-
-                // BEACON/LAND/TAXI/NAV/STROBE/RECOGNITION/PANEL ja no s'apliquen aquí — lectura pròpia.
-                // Caravan: exclosa del tot, independent del sim — 2024 fa servir L:XMLVAR_DEICE_MASTER,
-                // 2020 fa servir L:DEICE_Airframe_1 (RequestCaravanDeice, més precisa que aquest booleà
-                // genèric perquè distingeix HIGH/NORM, no només ON/OFF). Igual que amb els fuel selectors,
-                // deixar-la aquí també competiria amb la lectura dedicada i causaria rebots.
-                if (!IsCirrusSR22() && !IsBonanzaG36() && !IsCaravan())
-                {
-                    bool newDeice = (s1.read_deice & 1) != 0;
-                    if (newDeice != deiceActive)
-                    {
-                        deiceActive = newDeice;
-                        needsRepaint = true;
-                    }
-                }
-                bool newPropDeice = (s1.read_propdeice & 1) != 0;
-                if (newPropDeice != propDeiceActive)
-                {
-                    propDeiceActive = newPropDeice;
-                    needsRepaint = true;
-                }
-                if (IsBonanzaG36() && _isMsfs2024 && newPropDeice != deiceActive)
-                {
-                    // Bonanza G36 a MSFS2024: BTN_DEICE/SW_DN_DEICE (deiceActive) fan servir el switch real
-                    // de prop de-ice. Llegir B:DEICE_Propeller_1 directe via AddToDataDefinition no funciona
-                    // (les B: no són llegibles per aquesta via, només escrivibles pel missatger genèric) —
-                    // el "PROP DEICE SWITCH:1" clàssic (ja llegit a Struct1 com read_propdeice) sí que
-                    // reflecteix bé l'estat real, així que reutilitzem aquest valor en lloc de la lectura B:
-                    // dedicada. A MSFS2020 aquest switch ja no s'usa (ens hem passat a "Defrost Pull ON",
-                    // llegit via el bloc genèric STRUCTURAL DEICE SWITCH de més amunt).
-                    deiceActive = newPropDeice;
-                    needsRepaint = true;
-                }
-                bool newPitotL = (s1.read_pitot1 & 1) != 0;
-                if (newPitotL != pitotHeatLActive)
-                {
-                    pitotHeatLActive = newPitotL;
-                    needsRepaint = true;
-                }
-                bool newPitotR = (s1.read_pitot2 & 1) != 0;
-                if (newPitotR != pitotHeatRActive)
-                {
-                    pitotHeatRActive = newPitotR;
-                    needsRepaint = true;
-                }
-                bool newAntiIce1 = (s1.read_antiice1 & 1) != 0;
-                // TBM930 (2024): antiIceEng1Active (Inert Sep) el porta RequestTbmInertSep2024 (L:1: real).
-                if (!(IsTBM930() && _isMsfs2024) && newAntiIce1 != antiIceEng1Active)
-                {
-                    antiIceEng1Active = newAntiIce1;
-                    needsRepaint = true;
-                }
-                // TBM930 (2024): els LEDs els porten RequestTbmDeiceCycle1_2024/_2 (L:1:TBM_Airframe_Deice_Cycle_x_Active).
-                if (!(IsTBM930() && _isMsfs2024))
-                {
-                    _isDeiceAirframe = s1.read_isDeiceAirframe;
-                    _isDeiceAirframe2 = s1.read_isDeiceAirframe2;
-                }
-                bool newWindshieldDeice = (s1.read_windshielddeice & 1) != 0;
-                if (newWindshieldDeice != windshieldDeiceActive)
-                {
-                    windshieldDeiceActive = newWindshieldDeice;
-                    needsRepaint = true;
-                }
-                int newCowlL = s1.read_cowlflap_l < 10 ? 0 : s1.read_cowlflap_l < 70 ? 1 : 2;
-                int newCowlR = s1.read_cowlflap_r < 10 ? 0 : s1.read_cowlflap_r < 70 ? 1 : 2;
-                if (newCowlL != cowlFlapL || newCowlR != cowlFlapR)
-                {
-                    cowlFlapL = newCowlL;
-                    cowlFlapR = newCowlR;
-                    needsRepaint = true;
-                }
-                if (newPitotheat != pitotheatActive)
-                {
-                    pitotheatActive = newPitotheat;
-
-                    needsRepaint = true;
-                }
-                // fuelpump1Active/2Active, masterBatteryOff, avionics1Off/2Off, altGen1Off/2Off,
-                // starter1Active/2Active i ign1Pos/ign2Pos ja no es decideixen aquí — lectura pròpia
-                // independent per a cada camp (veure UpdateFuelPumpState/UpdateIgnition1State/
-                // UpdateIgnition2State i els handlers RequestMasterBattery/Avionics1/Avionics2/AltGen1/
-                // AltGen2/Ign1Left/Ign1Right/Ign1Starter/Ign2Left/Ign2Right/Ign2Starter).
-                numEngines = s1.num_engines;
-
-                // fuel1Pos/fuel2Pos (FUEL TANK SELECTOR:1/2) ja no es decideixen aquí — tenen lectura
-                // pròpia independent, veure UpdateFuelSelectorState() i els handlers de
-                // RequestFuelTankSelector1/2.
-                //dmeActive = s1.dme_read == 1; // o la variable que ja estàs llegint
-
-                // com1Tx/com2Tx ja no es decideixen aquí — veure RequestCom1/RequestCom2.
-
-                displayBackupActive_bool = s1.displayBackupActive > 0.5;
-                // TBM930 (2024): igual que el crashbar, _elecSourceSwitch el porta SetElecSourceSwitch()
-                // fins que tinguem la L: real de lectura.
-                if (!(IsTBM930() && _isMsfs2024) && _elecSourceSwitch != s1.elecSourceSwitch) { _elecSourceSwitch = s1.elecSourceSwitch; needsRepaint = true; }
-                // TBM930 (2024): _elecGeneratorSwitch el porta RequestTbmElecGenerator2024 (L: real).
-                if (!(IsTBM930() && _isMsfs2024) && _elecGeneratorSwitch != s1.elecGeneratorSwitch) { _elecGeneratorSwitch = s1.elecGeneratorSwitch; needsRepaint = true; }
-                // TBM930 (2024): no llegim L:XMLVAR_Elec_CrashBar_State (pot no aplicar-se), _elecCrashbar
-                // el porta el toggle local de ToggleElecCrashbar().
-                if (!(IsTBM930() && _isMsfs2024) && _elecCrashbar != s1.elecCrashbarState) { _elecCrashbar = s1.elecCrashbarState; needsRepaint = true; }
-                if (_elecStarter != s1.elecStarter) { _elecStarter = s1.elecStarter; needsRepaint = true; }
-                if (_elecIgnition != s1.elecIgnition) { _elecIgnition = s1.elecIgnition; needsRepaint = true; }
-                if (_elecFuelPump != s1.elecFuelPump) { _elecFuelPump = s1.elecFuelPump; needsRepaint = true; }
-                // _apTrim es gestiona localment, no es llegeix de MSFS
-                _apDisengaged = s1.apDisengaged;
-                _kap140State = s1.kap140State;
-                _apVsHold = s1.apVsHold;
-                _apFlcActive = s1.apFlcActive;
-                _apWingLeveler = s1.apWingLeveler;
-                _apHdgLock = s1.apHdgLock;
-                _apAprHold = s1.apAprHold;
-                _apGsHold = s1.apGsHold;
-                _apNav1Lock = s1.apNav1Lock;
-                _apFdActive = s1.apFdActive;
-                _apAltLock = s1.apAltLock;
-                _apVnavBtn = s1.apVnavBtn;
-                _apYawDamper = s1.apYawDamper;
-                _apMaxBank = s1.apMaxBank;
-                _apBcHold = s1.apBcHold;
-                if (_apMaster != s1.apMaster)
-                {
-                    _apMaster = s1.apMaster;
-                    // L'elevator/vertical trim és l'únic motoritzat per l'AP (el rudder, mai) —
-                    // mentre estigui actiu, mantenim una lectura activa contínua a 33ms (veure
-                    // comentari del camp); en desactivar-se, parem (tret que s'estigui arrossegant
-                    // la roda en aquell moment).
-                    if (_apMaster == 1) StartElevatorTrimActiveRead();
-                    else StopElevatorTrimActiveReadIfNotNeeded();
-                }
-                _xfrPushL = s1.xfrPushL;
-                _headingIndicator = s1.gyro;
-                _masterCautionActive = s1.masterCautionActive;
-                _masterWarningActive = s1.masterWarningActive;
-                _aileronTrimFrac = s1.aileronTrimFrac;
-                // L'animació del rotatiu de combustible (G3K_FSEL_SW) ja no es decideix aquí — veure
-                // UpdateFuelSelectorState().
-                _rudderTrimDisabled = s1.rudderTrimDisabled;
-                _aileronTrimDisabled = s1.aileronTrimDisabled;
-                // LIGHT LOGO / L:LIGHTING_LOGO_1 / L:LIGHTING_WING_1 ja no es llegeixen aquí — lectura pròpia.
-                _circuitConn17 = s1.circuitConn17;
-                // GENERAL ENG THROTTLE LEVER POSITION:1 ja no es llegeix aquí — té lectura pròpia
-                // independent (veure UpdateThrHandleFromLeverPos). propLeverPos/fuelValve es queden
-                // dins Struct1 (canvien poc) i es guarden en una còpia perquè aquell mètode hi pugui
-                // accedir sense dependre de Struct1.
-                _propLeverPosCached = s1.propLeverPos;
-                _fuelValveCached = s1.fuelValve;
-                UpdateThrHandleFromLeverPos(includeRightRailCheck: true);
-                // _fuelSelectionSet es gestiona localment, no es llegeix de MSFS
-                if (_elecCrashbar < 0.5 && (_elecSourceSwitch > 0.5 || _elecGeneratorSwitch > 0.5))
-                {
-                    SetElecSourceSwitch(0);
-                    SetElecGeneratorSwitch(0);
-                }
-
-                bool hasChanged = HasDataChanged(s1);
-
-                if (hasChanged)
-                {
-
-
-
-
-
-                }
-
-                if (needsRepaint && pbMain.IsHandleCreated && (DateTime.UtcNow - _lastRepaint).TotalMilliseconds > 200)
-                {
-                    _lastRepaint = DateTime.UtcNow;
-                    pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
-                }
-
-                lastData = s1;
-
-                previousNavSel = s1.nav_sel;
-                firstNavSelReceived = true;             
-
             }
         }
 
@@ -12488,7 +12623,7 @@ namespace SimConnect3
                                     bool b2 = (byte1 & 0x02) != 0;   // Botó2
                                     if (b2 && !prevB2)
                                     {
-                                        double hdgReal = lastData.gyro; // ja tens HEADING INDICATOR
+                                        double hdgReal = _headingIndicator; // ja tens HEADING INDICATOR
                                         uint param = (uint)((((int)Math.Round(hdgReal)) % 360 + 360) % 360);
 
                                         simconnect?.TransmitClientEvent
