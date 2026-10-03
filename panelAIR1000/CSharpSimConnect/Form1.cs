@@ -61,13 +61,15 @@ namespace SimConnect3
         // 5 cops/segon com els switches, es demana cada 10s (provisional, no és el ritme final).
         private System.Windows.Forms.Timer? _structPollTimer;
 
-        // Flaps (FLAPS NUM HANDLE POSITIONS + FLAPS HANDLE INDEX) — lectura independent de tota la
-        // resta (prova de Pere, 2026-10-02): es llegeix 1 cop en sincronitzar (obertura de connexió o
-        // canvi d'avió, veure SyncFlapsPositionOnce) i, fora d'això, NO es torna a llegir mai més fins
-        // que nosaltres enviem una comanda de flaps amunt/avall (StartFlapsActiveRead) — llavors es
-        // llegeix activament cada 100ms, allargant 2s la finestra cada cop que el valor canvia de
-        // veritat (debounce), i es para sola quan passen 2s sense cap canvi (idea de Pere: evita que
-        // es quedi llegint per sempre si els flaps ja són al límit i no hi pot haver canvi).
+        // Flaps — lectura independent de tota la resta, i FLAPS NUM HANDLE POSITIONS / FLAPS HANDLE
+        // INDEX separades l'una de l'altra (2026-10-03, Pere: no té sentit ajuntar-les; la primera és
+        // pràcticament constant per avió, la segona és la posició real). Totes dues es llegeixen 1
+        // cop en sincronitzar (connexió o canvi d'avió, veure SyncFlapsNumPosOnce/SyncFlapsHandleIndexOnce);
+        // fora d'això, NOMÉS el handle index es torna a llegir, i només quan nosaltres enviem una
+        // comanda de flaps amunt/avall (StartFlapsActiveRead) — llavors activament cada 100ms,
+        // allargant 2s la finestra cada cop que el valor canvia de veritat (debounce), i es para sola
+        // quan passen 2s sense cap canvi (idea de Pere: evita que es quedi llegint per sempre si els
+        // flaps ja són al límit i no hi pot haver canvi).
         private System.Windows.Forms.Timer? _flapsActiveReadTimer;
         private DateTime _flapsActiveReadUntilUtc = DateTime.MinValue;
 
@@ -337,10 +339,29 @@ namespace SimConnect3
         double _daFuelTankSelector2 = double.MinValue; // A:FUEL TANK SELECTOR:2 — idem, per si l'índex real no és l'1
         double _daFuelTankSelector3 = double.MinValue; // A:FUEL TANK SELECTOR:3 — idem (la bomba de la DA-40 fa servir índex 3)
         double _daFuelTankSelector4 = double.MinValue; // A:FUELSYSTEM VALVE SWITCH:4 — hipòtesi: vàlvula dreta de la Caravan
-        int _bonanzaFuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la Bonanza (veure Output/Debug de VS)
-        int _cirrusFuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la Cirrus SR22T (veure Output/Debug de VS)
-        int _da40FuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la DA-40 (2020, veure Output/Debug de VS)
-        int _c172FuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de s1.fuel_selector_1 vist per la C172 Skyhawk (2020, veure Output/Debug de VS)
+        // FUEL TANK SELECTOR:1/2 — lectura pròpia i independent (2026-10-03, Pere: separar-les d'1 a
+        // 1, no té sentit ajuntar-les), fora de Struct1 i del grup de flaps/trim. Fan servir aquest
+        // simvar genèric: Bonanza, Cirrus SR22T, DA-40 (2020), C172 Skyhawk (2020), Baron (2020),
+        // Caravan (2020), DA-62 (2020), i el "fallback" SINGLE/TWIN ENGINE genèric (resta d'avions
+        // G1000) + el rotatiu animat del TBM930/G3000 — són 11-12 consumidors del mateix camp.
+        private int _fuelTankSelector1 = 0;
+        private int _fuelTankSelector2 = 0;
+
+        // Excepció pel TBM930 (2026-10-03, Pere): la TBM té un sistema automàtic que gira el selector
+        // de combustible sol (L a R i viceversa cada x segons) — igual que l'AP mou el trim vertical
+        // sol. Per això, mentre la TBM és l'avió actiu, aquest timer és qui llegeix FUEL TANK
+        // SELECTOR:1/2 en lloc del ritme fix de 200ms (veure PollLowFrequencySimData): normalment a
+        // 1000ms (prou per detectar el canvi automàtic), però a 100ms durant 2s just després que
+        // NOSALTRES cliquem L/R/OFF (StartTbmFuelSelectorActiveRead) — sense això, un clic trigava
+        // fins a 1s a veure's (confirmat per Pere, 2026-10-03: regressió greu, "ja funcionava bé").
+        // S'engega/para del tot quan es detecta entrar/sortir de la TBM.
+        private System.Windows.Forms.Timer? _tbmFuelSelectorPollTimer;
+        private DateTime _tbmFuelSelectorFastUntilUtc = DateTime.MinValue;
+
+        int _bonanzaFuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de _fuelTankSelector1 vist per la Bonanza (veure Output/Debug de VS)
+        int _cirrusFuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de _fuelTankSelector1 vist per la Cirrus SR22T (veure Output/Debug de VS)
+        int _da40FuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de _fuelTankSelector1 vist per la DA-40 (2020, veure Output/Debug de VS)
+        int _c172FuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de _fuelTankSelector1 vist per la C172 Skyhawk (2020, veure Output/Debug de VS)
         double _da62AvionicsLineConn = double.MinValue; // A:LINE CONNECTION ON:rh_main_bustoavionics_bus — estat real del bus d'avionics de la DA-62
         double _c172Avionics1LineConn = double.MinValue; // A:LINE CONNECTION ON:BUS_1_To_AVIONICS_BUS_1
         double _c172Avionics2LineConn = double.MinValue; // A:LINE CONNECTION ON:BUS_2_To_AVIONICS_BUS_2
@@ -367,6 +388,16 @@ namespace SimConnect3
         bool altGen2Off;
         bool starter1Active;
         bool starter2Active;
+        // Magnetos/starter — lectures pròpies i independents (2026-10-03, Pere), fora de Struct1. Cadascun
+        // dels 3 camps per motor (left/right/starter) arriba per separat; es guarden aquí i ign1Pos/ign2Pos
+        // es recalculen junts a cada arribada (UpdateIgnition1State/UpdateIgnition2State).
+        int _ign1Left = 0, _ign1Right = 0, _ign1Starter = 0;
+        int _ign2Left = 0, _ign2Right = 0, _ign2Starter = 0;
+        // Fuel pump 1/2 — mateix tractament (2026-10-03, Pere). Es guarden els 5 camps crus (2020 i 2024,
+        // incloent l'índex 3 compartit amb el selector de la C408) i fuelpump1Active/2Active es recalculen
+        // junts a UpdateFuelPumpState().
+        int _readFuelpump1 = 0, _readFuelpump2 = 0;
+        int _readFuelpump1_2024 = 0, _readFuelpump2_2024 = 0, _readFuelpumpIdx3_2024 = 0;
         bool ignition1Active;
         bool ignition2Active;
         // Caravan IGNITION (NORM/ON) — estat LOCAL, no derivat de la lectura d'A:TURB ENG IGNITION
@@ -753,9 +784,23 @@ namespace SimConnect3
             LtsTestWrite,
             GenericRpnClientDataDef,
             AircraftTitle,
-            FlapsPosRead,
+            FlapsNumPosRead,
+            FlapsHandleIndexRead,
             ElevatorTrimRead,
             RudderTrimRead,
+            FuelTankSelector1Read,
+            FuelTankSelector2Read,
+            ThrottleLeverPosRead,
+            LightBeaconRead,
+            LightLandRead,
+            LightTaxiRead,
+            LightNavRead,
+            LightStrobeRead,
+            LightRecognRead,
+            LightPanelRead,
+            LightLogoRead,
+            LightingLogo1Read,
+            LightingWing1Read,
             ParkingBrakeRead,
             BatteryVoltageRead,
             FuelSelLeftRead,
@@ -796,6 +841,31 @@ namespace SimConnect3
             TbmDeiceCycle1_2024Read,
             TbmDeiceCycle2_2024Read,
             TbmInertSep2024Read,
+            MasterBatteryRead,
+            Avionics1Read,
+            Avionics2Read,
+            AltGen1Read,
+            AltGen2Read,
+            Ign1LeftRead,
+            Ign1RightRead,
+            Ign1StarterRead,
+            Ign2LeftRead,
+            Ign2RightRead,
+            Ign2StarterRead,
+            FuelPump1Read,
+            FuelPump2Read,
+            FuelPump1_2024Read,
+            FuelPump2_2024Read,
+            FuelPumpIdx3_2024Read,
+            Com1Read,
+            Com2Read,
+            ComReceiveAllRead,
+            DmeSoundRead,
+            SpkrSoundRead,
+            MkrMuteRead,
+            Nav1SoundRead,
+            AdfSoundRead,
+            Nav2SoundRead,
         }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -832,12 +902,14 @@ namespace SimConnect3
             public string title;
         }
 
-        // Flaps (FLAPS NUM HANDLE POSITIONS + FLAPS HANDLE INDEX), lectura independent de Struct1
-        // (2026-10-02, prova de Pere): es llegeix un cop en sincronitzar (obertura de connexió / canvi
-        // d'avió) i, després, només activament mentre el selector de flaps es mou — veure
-        // StartFlapsActiveRead() i _flapsActiveReadTimer.
+        // Flaps, lectura independent de Struct1 i separades l'una de l'altra (2026-10-03, Pere: no té
+        // sentit ajuntar-les): FLAPS NUM HANDLE POSITIONS és pràcticament constant per avió, es
+        // llegeix només en sincronitzar; FLAPS HANDLE INDEX és la posició real, es llegeix també
+        // activament mentre el selector es mou — veure StartFlapsActiveRead() i _flapsActiveReadTimer.
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
-        struct FlapsPosStruct { public int numPositions; public int handleIndex; }
+        struct FlapsNumPosStruct { public int value; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct FlapsHandleIndexStruct { public int value; }
 
         // Trim (ELEVATOR TRIM INDICATOR / RUDDER TRIM PCT), lectura independent de Struct1 i, a més,
         // independent l'una de l'altra (2026-10-02, prova de Pere): cada una es llegeix un cop en
@@ -849,6 +921,26 @@ namespace SimConnect3
         struct ElevatorTrimStruct { public double value; }
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct RudderTrimStruct { public double value; }
+
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct FuelTankSelector1Struct { public int value; } // FUEL TANK SELECTOR:1 (Enum)
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct FuelTankSelector2Struct { public int value; } // FUEL TANK SELECTOR:2 (Enum)
+
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct ThrottleLeverPosStruct { public double value; } // GENERAL ENG THROTTLE LEVER POSITION:1
+
+        // Llums — 10 interruptors independitzats d'1 a 1 (2026-10-03, Pere), fora de Struct1. Cap
+        // llum canvia sola, així que no els cal cap "terra" de lectura de fons com el trim/fuel
+        // selector de la TBM: sync 1 cop (connexió/canvi d'avió) i, en enviar nosaltres la comanda,
+        // una lectura immediata + una altra ~300ms després per confirmar — no calen 2s d'animació
+        // activa, una llum és ON/OFF, no té cap recorregut a seguir. Dos structs compartits (mateix
+        // layout, registrats per separat a cada definició — "1 a 1" vol dir cap SimVar compartint
+        // petició amb una altra, no que cada una necessiti un tipus C# diferent).
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct LightBoolStruct { public int value; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct LightNumberStruct { public double value; }
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct ParkingBrakeStruct { public int value; } // BRAKE PARKING POSITION (Bool)
@@ -939,9 +1031,23 @@ namespace SimConnect3
         {
             Request1,
             RequestAircraftTitle,
-            RequestFlapsPos,
+            RequestFlapsNumPos,
+            RequestFlapsHandleIndex,
             RequestElevatorTrimPos,
             RequestRudderTrimPos,
+            RequestFuelTankSelector1,
+            RequestFuelTankSelector2,
+            RequestThrottleLeverPos,
+            RequestLightBeacon,
+            RequestLightLand,
+            RequestLightTaxi,
+            RequestLightNav,
+            RequestLightStrobe,
+            RequestLightRecogn,
+            RequestLightPanel,
+            RequestLightLogo,
+            RequestLightingLogo1,
+            RequestLightingWing1,
             RequestParkingBrake,
             RequestBatteryVoltage,
             RequestFuelSelLeft,
@@ -982,6 +1088,31 @@ namespace SimConnect3
             RequestTbmDeiceCycle1_2024,
             RequestTbmDeiceCycle2_2024,
             RequestTbmInertSep2024,
+            RequestMasterBattery,
+            RequestAvionics1,
+            RequestAvionics2,
+            RequestAltGen1,
+            RequestAltGen2,
+            RequestIgn1Left,
+            RequestIgn1Right,
+            RequestIgn1Starter,
+            RequestIgn2Left,
+            RequestIgn2Right,
+            RequestIgn2Starter,
+            RequestFuelPump1,
+            RequestFuelPump2,
+            RequestFuelPump1_2024,
+            RequestFuelPump2_2024,
+            RequestFuelPumpIdx3_2024,
+            RequestCom1,
+            RequestCom2,
+            RequestComReceiveAll,
+            RequestDmeSound,
+            RequestSpkrSound,
+            RequestMkrMute,
+            RequestNav1Sound,
+            RequestAdfSound,
+            RequestNav2Sound,
         }
         // Missatger genèric RPN — Client Data Area compartida amb el WASM (SFS_Link/Module.cpp).
         // Permet enviar qualsevol text RPN (K:, H:, B:, índexs, 'nom'_n, etc.) sense recompilar el
@@ -1577,6 +1708,22 @@ namespace SimConnect3
         // problema dels flaps d'abans, confirmat per Pere amb mesura real (~12/8 FPS perduts).
         private DateTime _lastElevatorTrimInvalidate = DateTime.MinValue;
         private DateTime _lastRudderTrimInvalidate = DateTime.MinValue;
+        // Timer dedicat pel rotatiu de combustible animat del TBM/G3000 (G3K_FSEL_SW) — trobat
+        // 2026-10-03 (Pere): primer ho vaig arreglar amb retallat+llindar dins del mateix Paint
+        // (com la primera prova dels flaps), però és el mateix patró fràgil que ja vam descartar
+        // allà: si un cicle de Paint arriba abans del llindar, no programa el següent i la cadena
+        // es trenca en silenci — l'únic que feia avançar la rotació eren repintats incidentals
+        // d'altres llocs de l'app (d'aquí els salts de 5-10° cada 1-4s que notava Pere). Mateixa
+        // solució definitiva que els flaps: un Timer propi, no lligat al Paint.
+        private System.Windows.Forms.Timer? _g3kFuelSelAnimTimer;
+        // Trobat 2026-10-03 (Pere): SendTrimTick/SendRudderTrimTick feien una lectura immediata a
+        // CADA tic (cada 8/48px de dit), sense cap límit — això s'executa moltes vegades per cada
+        // MouseMove si el dit es mou ràpid, ignorant per complet l'interval del timer actiu (per
+        // això canviar-lo de 33 a 100ms no feia res: el coll d'ampolla real era aquest, no el
+        // timer). Ara només es fa la immediata al primer tic de cada arrossegament; la resta els
+        // porta el timer actiu al seu ritme.
+        private bool _elevatorTrimAwaitingFirstTick = false;
+        private bool _rudderTrimAwaitingFirstTick = false;
 
         private Form? _popoutReminderForm;
         private Label? _popoutReminderMsgLbl;
@@ -1602,6 +1749,39 @@ namespace SimConnect3
         private int _thrHandleDragOffsetY;
         private int _thrHandleDragOffsetX;
         private int _thrHandleDefaultY = -1;
+
+        // GENERAL ENG THROTTLE LEVER POSITION:1 — lectura pròpia i independent de Struct1
+        // (2026-10-03, Pere: abans anava dins Struct1, cada 10s; un joystick extern movent el
+        // throttle només es veia 1 cop cada 10s). Model unificat: 1Hz de fons sempre (cal per
+        // detectar moviments d'un joystick extern, que no passen per cap OnClick nostre) i, en
+        // detectar un canvi real, activa a 50ms amb la regla dels 2s (com els flaps): s'allarga 2s
+        // cada cop que torna a canviar, es para sola als 2s sense cap canvi.
+        private double _thrLeverPos = 0;
+        // Llindar de repintat pel handle visual del throttle (2026-10-03, Pere: moure la palanca
+        // costava ~10 FPS) — mateix bug que flaps/trim/rotatiu de combustible: el codi original
+        // (d'abans d'avui) feia pbMain.Invalidate() sencer sense cap límit a cada lectura; abans no
+        // es notava perquè thrLeverPos només arribava cada 10s, ara que arriba cada 50ms calia
+        // retallar-ho i limitar-ho igual que a tot arreu més avui.
+        private DateTime _lastThrHandleInvalidate = DateTime.MinValue;
+        // Mateix llindar per als 2 últims "arrossegables" trobats sense retallar/limitar (2026-10-03,
+        // Pere): la roda FLC/VS de l'AP (purament visual, no llegeix res de MSFS) i el handle del
+        // throttle quan s'arrossega directament amb el dit (diferent del cas ja arreglat, que era
+        // la lectura des de MSFS).
+        private DateTime _lastG3kApSliderInvalidate = DateTime.MinValue;
+        private DateTime _lastThrHandleDragInvalidate = DateTime.MinValue;
+        // Rotatius de clic (2026-10-03, Pere): claus d'ignició i selectors de combustible — cada clic
+        // repintava el panell sencer sense cap retall ni llindar; igual que la resta, invisible amb un
+        // clic sol però car si el maquinari físic envia molts clics ràpids seguits en girar.
+        private DateTime _lastIgn1Invalidate = DateTime.MinValue;
+        private DateTime _lastIgn2Invalidate = DateTime.MinValue;
+        private DateTime _lastFuel1Invalidate = DateTime.MinValue;
+        private DateTime _lastFuel2Invalidate = DateTime.MinValue;
+        private DateTime _lastSeSelectorInvalidate = DateTime.MinValue;
+        private double _propLeverPosCached = 0;   // mirall de s1.propLeverPos, només per aquest ús
+        private int _fuelValveCached = 0;          // mirall de s1.fuelValve, només per aquest ús
+        private System.Windows.Forms.Timer? _thrLeverIdlePollTimer;
+        private System.Windows.Forms.Timer? _thrLeverActiveReadTimer;
+        private DateTime _thrLeverActiveReadUntilUtc = DateTime.MinValue;
         private bool _thrHandleLeftRail = false;
         private int _thrHandleRightRailX = 3734;
         private int _thrHandleLeftRailCenterY;
@@ -1693,44 +1873,13 @@ namespace SimConnect3
             public int xpdr_ident; // TRANSPONDER IDENT (Bool: 1 = active)
             public int cdi_scr; // GPS DRIVES NAV1, 1 = GPS, 0 = NAV
             public int nav_sel; // AUTOPILOT NAV1-2 SELECTED
-            public int com_transmit_1;   // COM TRANSMIT:1 (Bool)
-            public int com_transmit_2;   // COM TRANSMIT:2 (Bool)
-            public int com_receive_all;
-            public int dme_sound;   // DME audio enabled (Bool: 0/1)
-            public int spkr_sound;
-            public int mkr_mute;
-            public int nav1_sound;
-            public int adf_sound;
-            public int nav2_sound;
-            public int read_beacon;
-            public int read_land;
-            public int read_taxi;
-            public int read_nav;
-            public int read_strobe;
-            public int read_recogn;
-            public int read_panellight;
             public int read_deice;
             public int read_pitotheat;
-            public int read_fuelpump1;
-            public int read_fuelpump2;
             public int gear_handle; // GEAR HANDLE POSITION (Bool: 0=UP, 1=DN)
-            public int ign1_left;    // RECIP ENG LEFT MAGNETO:1
-            public int ign1_right;   // RECIP ENG RIGHT MAGNETO:1
-            public int ign1_starter; // GENERAL ENG STARTER:1
-            public int ign2_left;
-            public int ign2_right;
-            public int ign2_starter;
-            public int fuel_selector_1; // FUEL TANK SELECTOR:1 (enum)
-            public int fuel_selector_2; // FUEL TANK SELECTOR:2 (enum)
             public int fuel_cross_feed; // FUEL CROSS FEED (Bool)
             public int num_engines;         // NUMBER OF ENGINES
             public double read_cowlflap_l;
             public double read_cowlflap_r;
-            public int elec_master_battery; // ELECTRICAL MASTER BATTERY (Bool)
-            public int avionics_master_1;   // AVIONICS MASTER SWITCH:1 (Bool)
-            public int avionics_master_2;   // AVIONICS MASTER SWITCH:2 (Bool)
-            public int gen_master_alt_1;    // GENERAL ENG MASTER ALTERNATOR:1 (Bool)
-            public int gen_master_alt_2;    // GENERAL ENG MASTER ALTERNATOR:2 (Bool)
             public double cameraState;
             public double elecSourceSwitch; // L:XMLVAR_Elec_Source_Switch_State (0=OFF, 1=BATT, 2=GPU)
             public double elecGeneratorSwitch; // L:XMLVAR_Elec_Generator_Switch_State
@@ -1742,13 +1891,10 @@ namespace SimConnect3
             public int apDisengaged;           // AUTOPILOT DISENGAGED (Bool)
             public int rudderTrimDisabled;     // RUDDER TRIM DISABLED (Bool)
             public int aileronTrimDisabled;    // AILERON TRIM DISABLED (Bool)
-            public double lightingLogo1;       // L:LIGHTING_LOGO_1 (0=OFF, 1=ON)
-            public int lightLogo;              // LIGHT LOGO (Bool)
             public int circuitConn17;          // CIRCUIT CONNECTION ON:17 (Bool)
             public double fuelSelectionSet;    // L:TBM930_FUEL_SELECTION_SET (1=MANUAL, 2=AUTO)
             public double propLeverPos;        // GENERAL ENG PROPELLER LEVER POSITION:1 (0-100%)
             public double propRpm;             // PROP RPM:1
-            public double thrLeverPos;         // GENERAL ENG THROTTLE LEVER POSITION:1
             public int fuelValve;              // GENERAL ENG FUEL VALVE:1 (0=CUTOFF, 1=open)
             public int kap140State;            // L:KAP140_State
             public int apVsHold;               // AUTOPILOT VERTICAL HOLD (Bool)
@@ -1769,7 +1915,6 @@ namespace SimConnect3
             public int masterCautionActive;    // L:Generic_Master_Caution_Active
             public int masterWarningActive;    // L:Generic_Master_Warning_Active
             public double aileronTrimFrac;     // AILERON TRIM PCT (-1..+1)
-            public double lightingWing1;       // L:LIGHTING_WING_1 (0=OFF, 1=ON)
             public int read_propdeice;         // PROP DEICE SWITCH:1 (Bool)
             public int read_windshielddeice;   // WINDSHIELD DEICE SWITCH (Bool)
             public int read_pitot1;            // L:DEICE_Pitot_1 (Bool)
@@ -1777,9 +1922,6 @@ namespace SimConnect3
             public int read_antiice1;          // ENG ANTI ICE:1 (Bool)
             public double read_isDeiceAirframe; // L:XMLVAR_IsDeiceAirFrame (Number)
             public double read_isDeiceAirframe2; // L:XMLVAR_IsDeiceAirFrame2 (Number)
-            public int read_fuelpump1_2024; // FUELSYSTEM PUMP SWITCH:1 (Bool) — MSFS2024
-            public int read_fuelpump2_2024; // FUELSYSTEM PUMP SWITCH:2 (Bool) — MSFS2024
-            public int read_fuelpump_idx3_2024; // FUELSYSTEM PUMP SWITCH:3 (Bool) — MSFS2024, DA-40 (bomba real d'aquest avió)
             public int read_fuelpump1_ex1; // GENERAL ENG FUEL PUMP SWITCH EX1:1 (Enum 0=HIGH,1=LOW,2=OFF) — Baron G58
             public int read_fuelpump2_ex1; // GENERAL ENG FUEL PUMP SWITCH EX1:2 (Enum 0=HIGH,1=LOW,2=OFF) — Baron G58
 
@@ -2815,26 +2957,26 @@ namespace SimConnect3
                 OnClick = () => {
                     if (ign1Pos >= 4) return;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.MAGNETO1_INCR, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                    pbMain.Invalidate();
+                    InvalidateRotarySwitch("SW_IGNITION", ref _lastIgn1Invalidate);
                 }});
             // IGN1 rotate left (counter-clockwise = DECR)
             cockpitRight.Buttons.Add(new UiButton { Name="IGN1-LEFT", BasePos=new Point(1880, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
                     if (ign1Pos <= 0) return;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.MAGNETO1_DECR, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                    pbMain.Invalidate();
+                    InvalidateRotarySwitch("SW_IGNITION", ref _lastIgn1Invalidate);
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="IGN2-RIGHT", BasePos=new Point(2170, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
                     if (ign2Pos >= 4) return;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.MAGNETO2_INCR, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                    pbMain.Invalidate();
+                    InvalidateRotarySwitch("SW_IGNITION2", ref _lastIgn2Invalidate);
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="IGN2-LEFT", BasePos=new Point(2080, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 OnClick = () => {
                     if (ign2Pos <= 0) return;
                     simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.MAGNETO2_DECR, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                    pbMain.Invalidate();
+                    InvalidateRotarySwitch("SW_IGNITION2", ref _lastIgn2Invalidate);
                 }});
             // SW_FUEL1 — left and right areas
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-LEFT", BasePos=new Point(1620, 1080), W=80, H=120, Resizable=true, NoShadow=true,
@@ -2909,7 +3051,7 @@ namespace SimConnect3
                             _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                         }
                     }
-                    pbMain.Invalidate();
+                    InvalidateRotarySwitch("SW_FUEL1", ref _lastFuel1Invalidate);
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL1-RIGHT", BasePos=new Point(1720, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36() && !IsCirrusSR22() && !IsC408(),
@@ -2972,7 +3114,7 @@ namespace SimConnect3
                             _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                         }
                     }
-                    pbMain.Invalidate();
+                    InvalidateRotarySwitch("SW_FUEL1", ref _lastFuel1Invalidate);
                 }});
             // SW_FUEL2 — left and right areas
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-LEFT", BasePos=new Point(2120, 1080), W=80, H=120, Resizable=true, NoShadow=true,
@@ -2983,7 +3125,7 @@ namespace SimConnect3
                         // ara ENCÉN. MSFS2020: sense branca pròpia, cau al fallback genèric de més avall.
                         if (fuel2Pos >= 1) return;
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_ON, 4, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        pbMain.Invalidate();
+                        InvalidateRotarySwitch("SW_FUEL2", ref _lastFuel2Invalidate);
                         return;
                     }
                     // Caravan: 2 posicions reals (ON/OFF), sense CROSSFEED — el seu ON és 1, no 0
@@ -3044,7 +3186,7 @@ namespace SimConnect3
                             _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                         }
                     }
-                    pbMain.Invalidate();
+                    InvalidateRotarySwitch("SW_FUEL2", ref _lastFuel2Invalidate);
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="FUEL2-RIGHT", BasePos=new Point(2220, 1080), W=80, H=120, Resizable=true, NoShadow=true,
                 ShowWhen = () => !IsDA40() && !IsC400() && !IsC172() && !IsBonanzaG36() && !IsCirrusSR22() && !IsC408(),
@@ -3054,7 +3196,7 @@ namespace SimConnect3
                         // APAGA. MSFS2020: sense branca pròpia, cau al fallback genèric de més avall.
                         if (fuel2Pos <= 0) return;
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUELSYSTEM_TRIGGER_OFF, 4, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        pbMain.Invalidate();
+                        InvalidateRotarySwitch("SW_FUEL2", ref _lastFuel2Invalidate);
                         return;
                     }
                     if (fuel2Pos >= 2) return;
@@ -3108,7 +3250,7 @@ namespace SimConnect3
                             _fuelSel1IgnoreFollowUntil = DateTime.UtcNow.AddMilliseconds(400);
                         }
                     }
-                    pbMain.Invalidate();
+                    InvalidateRotarySwitch("SW_FUEL2", ref _lastFuel2Invalidate);
                 }});
 
             // SW_SE_SELECTOR — selector únic de 3 posicions per monomotors (DA-40 de moment).
@@ -3120,7 +3262,7 @@ namespace SimConnect3
                     if (seSelectorPos <= 0) return;
                     seSelectorPos--;
                     SendSeSelectorCommand(seSelectorPos);
-                    pbMain.Invalidate();
+                    InvalidateRotarySwitch("SW_SE_SELECTOR", ref _lastSeSelectorInvalidate);
                 }});
             cockpitRight.Buttons.Add(new UiButton { Name="SE_SELECTOR-RIGHT", BasePos=new Point(1772, 1967), W=177, H=255, Resizable=true, NoShadow=true,
                 ShowWhen = () => IsDA40() || IsC400() || IsC172() || IsBonanzaG36() || IsCirrusSR22() || IsC408(),
@@ -3128,7 +3270,7 @@ namespace SimConnect3
                     if (seSelectorPos >= 2) return;
                     seSelectorPos++;
                     SendSeSelectorCommand(seSelectorPos);
-                    pbMain.Invalidate();
+                    InvalidateRotarySwitch("SW_SE_SELECTOR", ref _lastSeSelectorInvalidate);
                 }});
 
             cockpitRight.Buttons.Add(new UiButton { Name="BTN_STARTER1", BasePos=new Point(1564, 1653), W=75, H=75, Resizable=true, NoShadow=true,
@@ -4183,9 +4325,9 @@ namespace SimConnect3
                         Task.Delay(150).ContinueWith(_ => this.BeginInvoke(() => { _g3kFlapsAnimDir = 0; pbMain.Invalidate(); })); } },
             new() { Name="G3K_CAUT_LIGHT", TypeKey="G3K Caut Light", BasePos=new Point(900, 200), ZoomWidth=108, ZoomHeight=105, NoResize=true, Img=LoadOverlayImage("MASTER CAUTION LIGHT.png"), ShowWhen=() => _masterCautionActive != 0 },
             new() { Name="G3K_WARN_LIGHT", TypeKey="G3K Warn Light", BasePos=new Point(1020, 200), ZoomWidth=111, ZoomHeight=107, NoResize=true, Img=LoadOverlayImage("MASTER WARNING LIGHT.png"), ShowWhen=() => _masterWarningActive != 0 },
-            new() { Name="G3K_FSEL_L", TypeKey="G3K Fuel Sel L", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 2, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
-            new() { Name="G3K_FSEL_R", TypeKey="G3K Fuel Sel R", BasePos=new Point(300, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 3, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
-            new() { Name="G3K_FSEL_OFF", TypeKey="G3K Fuel Sel Off", BasePos=new Point(400, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_FSEL_L", TypeKey="G3K Fuel Sel L", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 2, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); StartTbmFuelSelectorActiveRead(); } },
+            new() { Name="G3K_FSEL_R", TypeKey="G3K Fuel Sel R", BasePos=new Point(300, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 3, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); StartTbmFuelSelectorActiveRead(); } },
+            new() { Name="G3K_FSEL_OFF", TypeKey="G3K Fuel Sel Off", BasePos=new Point(400, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); StartTbmFuelSelectorActiveRead(); } },
             new() { Name="G3K_FSEL_SW", TypeKey="G3K Fuel Sel SW", BasePos=new Point(500, 100), ZoomWidth=244, ZoomHeight=244, Img=LoadOverlayImage("FUEL SEL SW.png") },
             new() { Name="G3K_AP_NOSE_UP", TypeKey="G3K AP NOSE UP", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => {
                 if (_kap140State != 0 && _apVsHold == 1)
@@ -4239,8 +4381,14 @@ namespace SimConnect3
 
             uiSurfaceTimer.Start();
 
-            _thrSyncTimer.Tick += (s, e) => SyncThrHandleFromMsfs();
-            _thrSyncTimer.Start();
+            // _thrSyncTimer/SyncThrHandleFromMsfs() ja no s'engega (2026-10-03, Pere: "rebots" quan el
+            // throttle ja estava al carril esquerre en obrir l'app) — feia servir _lastThrLeverPos,
+            // que es queda congelat en entrar al carril esquerre (mai es torna a actualitzar), i cada
+            // 3s reposicionava el handle amb aquell valor vell, barallant-se amb UpdateThrHandleFromLeverPos
+            // (que ara té dades fresques, independents de Struct1). Abans no es notava perquè
+            // thrLeverPos tampoc s'actualitzava gaire més sovint; ara sí, i xocaven. Cicles manuals
+            // taxi/idle/taxi "arreglaven" accidentalment el problema posant _lastThrLeverPos a NaN
+            // (el que fa aturar-se SyncThrHandleFromMsfs), però la causa real era aquesta duplicitat.
 
         }
         private void closeButton_Click(object sender, EventArgs e)
@@ -4504,15 +4652,15 @@ namespace SimConnect3
                     _flapsActiveReadTimer!.Stop();
                     return;
                 }
-                SyncFlapsPositionOnce();
+                SyncFlapsHandleIndexOnce(); // num_positions no cal re-llegir-lo activament, és constant
             };
 
             _elevatorTrimActiveReadTimer = new System.Windows.Forms.Timer();
-            _elevatorTrimActiveReadTimer.Interval = 33; // 2026-10-02: 100ms feia salts massa grossos sense la interpolació treta abans
+            _elevatorTrimActiveReadTimer.Interval = 50; // sobreescrit per UpdateElevatorTrimActiveRate() en Start()
             _elevatorTrimActiveReadTimer.Tick += (s3d, ev3d) => SyncElevatorTrimOnce();
 
             _rudderTrimActiveReadTimer = new System.Windows.Forms.Timer();
-            _rudderTrimActiveReadTimer.Interval = 33; // veure comentari del camp
+            _rudderTrimActiveReadTimer.Interval = 50; // prova 2026-10-03
             _rudderTrimActiveReadTimer.Tick += (s3e, ev3e) => SyncRudderTrimOnce();
 
             _flapsAnimTimerG1000 = new System.Windows.Forms.Timer();
@@ -4558,6 +4706,50 @@ namespace SimConnect3
                 pbMain.Invalidate(ToRealInvalidateRect(g3kFlapsIndRect));
             };
 
+            _g3kFuelSelAnimTimer = new System.Windows.Forms.Timer();
+            _g3kFuelSelAnimTimer.Interval = 33; // veure comentari del camp
+            _g3kFuelSelAnimTimer.Tick += (s10, ev10) =>
+            {
+                if (_g3kFuelSelAngle == _g3kFuelSelTargetAngle)
+                {
+                    _g3kFuelSelAnimTimer!.Stop();
+                    return;
+                }
+                var sw = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_FSEL_SW");
+                if (sw?.Img == null) { _g3kFuelSelAnimTimer!.Stop(); return; }
+                int margin = Math.Max(sw.Img.Width, sw.Img.Height) / 2;
+                var swRect = new Rectangle(
+                    sw.BasePos.X - margin,
+                    sw.BasePos.Y - margin,
+                    sw.Img.Width + margin * 2,
+                    sw.Img.Height + margin * 2);
+                pbMain.Invalidate(ToRealInvalidateRect(swRect));
+            };
+
+            _tbmFuelSelectorPollTimer = new System.Windows.Forms.Timer();
+            _tbmFuelSelectorPollTimer.Interval = 1000; // veure comentari del camp
+            _tbmFuelSelectorPollTimer.Tick += (s11, ev11) =>
+            {
+                PollFuelTankSelectors();
+                if (_tbmFuelSelectorPollTimer!.Interval != 1000 && DateTime.UtcNow >= _tbmFuelSelectorFastUntilUtc)
+                    _tbmFuelSelectorPollTimer.Interval = 1000; // torna al ritme lent (ja no cal seguir el clic)
+            };
+
+            _thrLeverIdlePollTimer = new System.Windows.Forms.Timer();
+            _thrLeverIdlePollTimer.Interval = 1000; // sempre actiu, veure comentari del camp
+            _thrLeverIdlePollTimer.Tick += (s12, ev12) => SyncThrLeverPosOnce();
+
+            _thrLeverActiveReadTimer = new System.Windows.Forms.Timer();
+            _thrLeverActiveReadTimer.Interval = 50; // veure comentari del camp
+            _thrLeverActiveReadTimer.Tick += (s13, ev13) =>
+            {
+                if (DateTime.UtcNow >= _thrLeverActiveReadUntilUtc)
+                {
+                    _thrLeverActiveReadTimer!.Stop();
+                    return;
+                }
+                SyncThrLeverPosOnce();
+            };
 
             ConnectToSimConnect();
 
@@ -6342,50 +6534,31 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GPS DRIVES NAV1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT NAV SELECTED", "number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 //simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "SIMCONNECT VERSION", "number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "COM TRANSMIT:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "COM TRANSMIT:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "COM RECEIVE ALL", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "DME SOUND", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "SPEAKER ACTIVE", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "MARKER BEACON TEST MUTE", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "NAV1 SOUND", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "ADF SOUND", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "NAV2 SOUND", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT BEACON",      "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT LANDING",     "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT TAXI",        "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT NAV",         "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT STROBE",      "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT RECOGNITION", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT PANEL",       "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                // COM TRANSMIT:1/2, COM RECEIVE ALL, DME SOUND, SPEAKER ACTIVE, MARKER BEACON TEST MUTE,
+                // NAV1/2 SOUND i ADF SOUND ja no van aquí — cada una té la seva pròpia definició
+                // (DEFINITIONS.Com1Read/Com2Read/ComReceiveAllRead/DmeSoundRead/SpkrSoundRead/
+                // MkrMuteRead/Nav1SoundRead/AdfSoundRead/Nav2SoundRead).
+                // LIGHT BEACON/LANDING/TAXI/NAV/STROBE/RECOGNITION/PANEL ja no van aquí — cada una té
+                // la seva pròpia definició (DEFINITIONS.LightXxxRead).
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "STRUCTURAL DEICE SWITCH", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "PITOT HEAT", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL PUMP SWITCH:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL PUMP SWITCH:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                // FLAPS NUM HANDLE POSITIONS / FLAPS HANDLE INDEX ja no van aquí — tenen la seva pròpia
-                // definició (DEFINITIONS.FlapsPosRead, veure comentari a FlapsPosStruct).
+                // GENERAL ENG FUEL PUMP SWITCH:1/2 ja no van aquí — cada una té la seva pròpia definició
+                // (DEFINITIONS.FuelPump1Read / FuelPump2Read).
+                // FLAPS NUM HANDLE POSITIONS / FLAPS HANDLE INDEX ja no van aquí — cada una té la seva
+                // pròpia definició (DEFINITIONS.FlapsNumPosRead / FlapsHandleIndexRead).
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GEAR HANDLE POSITION", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG LEFT MAGNETO:1",  "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG RIGHT MAGNETO:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG STARTER:1",     "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG LEFT MAGNETO:2",  "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG RIGHT MAGNETO:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG STARTER:2",     "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUEL TANK SELECTOR:1", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUEL TANK SELECTOR:2", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                // RECIP ENG LEFT/RIGHT MAGNETO:1/2 i GENERAL ENG STARTER:1/2 ja no van aquí — cada una té
+                // la seva pròpia definició (DEFINITIONS.Ign1LeftRead/Ign1RightRead/Ign1StarterRead/
+                // Ign2LeftRead/Ign2RightRead/Ign2StarterRead).
+                // FUEL TANK SELECTOR:1/2 ja no van aquí — cada una té la seva pròpia definició
+                // (DEFINITIONS.FuelTankSelector1Read / FuelTankSelector2Read).
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUEL CROSS FEED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "NUMBER OF ENGINES", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG COWL FLAP POSITION:1", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RECIP ENG COWL FLAP POSITION:2", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "ELECTRICAL MASTER BATTERY", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AVIONICS MASTER SWITCH:1",   "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AVIONICS MASTER SWITCH:2",   "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG MASTER ALTERNATOR:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG MASTER ALTERNATOR:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                // GENERAL ENG STARTER:1/2 ja es llegeixen més amunt (ign1_starter/ign2_starter) — aquí
-                // hi havia un registre duplicat del mateix simvar (detectat 2026-10-02, confirmat per
-                // Pere); eliminat junt amb els camps starter1/starter2 de l'struct, consolidant l'ús a
-                // ign1_starter/ign2_starter.
+                // ELECTRICAL MASTER BATTERY, AVIONICS MASTER SWITCH:1/2 i GENERAL ENG MASTER
+                // ALTERNATOR:1/2 ja no van aquí — cada una té la seva pròpia definició
+                // (DEFINITIONS.MasterBatteryRead/Avionics1Read/Avionics2Read/AltGen1Read/AltGen2Read).
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Elec_Source_Switch_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_Elec_Generator_Switch_State", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -6397,13 +6570,13 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT DISENGAGED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "RUDDER TRIM DISABLED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AILERON TRIM DISABLED", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:LIGHTING_LOGO_1", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "LIGHT LOGO", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                // L:LIGHTING_LOGO_1 / LIGHT LOGO ja no van aquí — cada una té la seva pròpia definició.
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "CIRCUIT CONNECTION ON:17", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:TBM930_FUEL_SELECTION_SET", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG PROPELLER LEVER POSITION:1", "Position 16k", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "PROP RPM:1", "Rpm", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG THROTTLE LEVER POSITION:1", "Position 16k", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                // GENERAL ENG THROTTLE LEVER POSITION:1 ja no va aquí — té la seva pròpia definició
+                // (DEFINITIONS.ThrottleLeverPosRead).
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL VALVE:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:KAP140_State", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AUTOPILOT VERTICAL HOLD", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -6426,7 +6599,7 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:Generic_Master_Caution_Active", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:Generic_Master_Warning_Active", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "AILERON TRIM PCT", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:LIGHTING_WING_1", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                // L:LIGHTING_WING_1 ja no va aquí — té la seva pròpia definició.
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "PROP DEICE SWITCH:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "WINDSHIELD DEICE SWITCH", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:DEICE_Pitot_1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -6434,9 +6607,8 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "ENG ANTI ICE:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_IsDeiceAirFrame", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "L:XMLVAR_IsDeiceAirFrame2", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUELSYSTEM PUMP SWITCH:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUELSYSTEM PUMP SWITCH:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "FUELSYSTEM PUMP SWITCH:3", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                // FUELSYSTEM PUMP SWITCH:1/2/3 (2024) ja no van aquí — cada una té la seva pròpia
+                // definició (DEFINITIONS.FuelPump1_2024Read/FuelPump2_2024Read/FuelPumpIdx3_2024Read).
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL PUMP SWITCH EX1:1", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.Struct1, "GENERAL ENG FUEL PUMP SWITCH EX1:2", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.AddToDataDefinition(DEFINITIONS.CameraState, "CAMERA STATE", "number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -6539,17 +6711,107 @@ namespace SimConnect3
                 simconnect.RegisterDataDefineStruct<AircraftInfoStruct>(DEFINITIONS.AircraftTitle);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestAircraftTitle, DEFINITIONS.AircraftTitle, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SECOND, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
 
-                // Flaps — definició pròpia (veure comentari a FlapsPosStruct): es llegeix un cop en
-                // sincronitzar i després activament només mentre el selector es mou (StartFlapsActiveRead).
-                simconnect.AddToDataDefinition(DEFINITIONS.FlapsPosRead, "FLAPS NUM HANDLE POSITIONS", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.AddToDataDefinition(DEFINITIONS.FlapsPosRead, "FLAPS HANDLE INDEX", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
-                simconnect.RegisterDataDefineStruct<FlapsPosStruct>(DEFINITIONS.FlapsPosRead);
+                // Flaps — definicions pròpies i separades (veure comentari a FlapsNumPosStruct).
+                simconnect.AddToDataDefinition(DEFINITIONS.FlapsNumPosRead, "FLAPS NUM HANDLE POSITIONS", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<FlapsNumPosStruct>(DEFINITIONS.FlapsNumPosRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.FlapsHandleIndexRead, "FLAPS HANDLE INDEX", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<FlapsHandleIndexStruct>(DEFINITIONS.FlapsHandleIndexRead);
 
                 // Trim — definicions pròpies i independents (veure comentari a ElevatorTrimStruct).
                 simconnect.AddToDataDefinition(DEFINITIONS.ElevatorTrimRead, "ELEVATOR TRIM INDICATOR", "Position", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<ElevatorTrimStruct>(DEFINITIONS.ElevatorTrimRead);
                 simconnect.AddToDataDefinition(DEFINITIONS.RudderTrimRead, "RUDDER TRIM PCT", "Percent", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<RudderTrimStruct>(DEFINITIONS.RudderTrimRead);
+
+                // FUEL TANK SELECTOR:1/2 — definicions pròpies i separades (veure comentari al camp
+                // _fuelTankSelector1/2). Continuen al ritme fix de 200ms (_lowFreqPolls), com els altres
+                // switches — no els cal el patró "sync + actiu" dels flaps/trim.
+                simconnect.AddToDataDefinition(DEFINITIONS.FuelTankSelector1Read, "FUEL TANK SELECTOR:1", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<FuelTankSelector1Struct>(DEFINITIONS.FuelTankSelector1Read);
+                simconnect.AddToDataDefinition(DEFINITIONS.FuelTankSelector2Read, "FUEL TANK SELECTOR:2", "Enum", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<FuelTankSelector2Struct>(DEFINITIONS.FuelTankSelector2Read);
+
+                // Throttle lever — definició pròpia (veure comentari al camp _thrLeverPos).
+                simconnect.AddToDataDefinition(DEFINITIONS.ThrottleLeverPosRead, "GENERAL ENG THROTTLE LEVER POSITION:1", "Position 16k", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<ThrottleLeverPosStruct>(DEFINITIONS.ThrottleLeverPosRead);
+
+                // Llums — definicions pròpies i separades (veure comentari a LightBoolStruct).
+                simconnect.AddToDataDefinition(DEFINITIONS.LightBeaconRead, "LIGHT BEACON", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.LightBeaconRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.LightLandRead, "LIGHT LANDING", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.LightLandRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.LightTaxiRead, "LIGHT TAXI", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.LightTaxiRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.LightNavRead, "LIGHT NAV", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.LightNavRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.LightStrobeRead, "LIGHT STROBE", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.LightStrobeRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.LightRecognRead, "LIGHT RECOGNITION", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.LightRecognRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.LightPanelRead, "LIGHT PANEL", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.LightPanelRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.LightLogoRead, "LIGHT LOGO", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.LightLogoRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.LightingLogo1Read, "L:LIGHTING_LOGO_1", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.LightingLogo1Read);
+                simconnect.AddToDataDefinition(DEFINITIONS.LightingWing1Read, "L:LIGHTING_WING_1", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightNumberStruct>(DEFINITIONS.LightingWing1Read);
+
+                // Bateria, avionics, alternators, magnetos/starter i fuel pump — definicions pròpies i
+                // separades (2026-10-03, Pere: prova de treure més camps del paquet gran de Struct1 cap
+                // al ritme fix de 200ms, reutilitzant LightBoolStruct com a estructura compartida).
+                simconnect.AddToDataDefinition(DEFINITIONS.MasterBatteryRead, "ELECTRICAL MASTER BATTERY", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.MasterBatteryRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.Avionics1Read, "AVIONICS MASTER SWITCH:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Avionics1Read);
+                simconnect.AddToDataDefinition(DEFINITIONS.Avionics2Read, "AVIONICS MASTER SWITCH:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Avionics2Read);
+                simconnect.AddToDataDefinition(DEFINITIONS.AltGen1Read, "GENERAL ENG MASTER ALTERNATOR:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.AltGen1Read);
+                simconnect.AddToDataDefinition(DEFINITIONS.AltGen2Read, "GENERAL ENG MASTER ALTERNATOR:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.AltGen2Read);
+                simconnect.AddToDataDefinition(DEFINITIONS.Ign1LeftRead, "RECIP ENG LEFT MAGNETO:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Ign1LeftRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.Ign1RightRead, "RECIP ENG RIGHT MAGNETO:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Ign1RightRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.Ign1StarterRead, "GENERAL ENG STARTER:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Ign1StarterRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.Ign2LeftRead, "RECIP ENG LEFT MAGNETO:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Ign2LeftRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.Ign2RightRead, "RECIP ENG RIGHT MAGNETO:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Ign2RightRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.Ign2StarterRead, "GENERAL ENG STARTER:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Ign2StarterRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.FuelPump1Read, "GENERAL ENG FUEL PUMP SWITCH:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.FuelPump1Read);
+                simconnect.AddToDataDefinition(DEFINITIONS.FuelPump2Read, "GENERAL ENG FUEL PUMP SWITCH:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.FuelPump2Read);
+                simconnect.AddToDataDefinition(DEFINITIONS.FuelPump1_2024Read, "FUELSYSTEM PUMP SWITCH:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.FuelPump1_2024Read);
+                simconnect.AddToDataDefinition(DEFINITIONS.FuelPump2_2024Read, "FUELSYSTEM PUMP SWITCH:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.FuelPump2_2024Read);
+                simconnect.AddToDataDefinition(DEFINITIONS.FuelPumpIdx3_2024Read, "FUELSYSTEM PUMP SWITCH:3", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.FuelPumpIdx3_2024Read);
+                // Interruptors d'àudio del panell de ràdio (2026-10-03, Pere) — mateixa prova, definicions
+                // pròpies i separades.
+                simconnect.AddToDataDefinition(DEFINITIONS.Com1Read, "COM TRANSMIT:1", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Com1Read);
+                simconnect.AddToDataDefinition(DEFINITIONS.Com2Read, "COM TRANSMIT:2", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Com2Read);
+                simconnect.AddToDataDefinition(DEFINITIONS.ComReceiveAllRead, "COM RECEIVE ALL", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.ComReceiveAllRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.DmeSoundRead, "DME SOUND", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.DmeSoundRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.SpkrSoundRead, "SPEAKER ACTIVE", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.SpkrSoundRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.MkrMuteRead, "MARKER BEACON TEST MUTE", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.MkrMuteRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.Nav1SoundRead, "NAV1 SOUND", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Nav1SoundRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.AdfSoundRead, "ADF SOUND", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.AdfSoundRead);
+                simconnect.AddToDataDefinition(DEFINITIONS.Nav2SoundRead, "NAV2 SOUND", "Bool", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<LightBoolStruct>(DEFINITIONS.Nav2SoundRead);
 
                 // Parking brake — definició pròpia i petita (no dins Struct1): amb ~119 camps compartits,
                 // SimConnect deixava de reflectir bé els camps afegits al final. Confirmat amb un mini-programa
@@ -6922,7 +7184,7 @@ namespace SimConnect3
         // en mesclar camps dins una mateixa estructura) i no va millorar els FPS — tornem als 41
         // individuals (Struct1 + 40), que ja sabíem que funcionaven correctament.
         // Request1/Struct1 ja no va aquí (prova de Pere, 2026-10-02): es el gros dels ~112-113 camps
-        // que encara hi queden (tot menys flaps, que ara té lectura pròpia — veure FlapsPosStruct), i
+        // que encara hi queden (tot menys flaps i trim, que ara tenen lectura pròpia), i
         // de moment es demana molt més a poc a poc, cada 10s (provisional), via _structPollTimer.
         private static readonly (REQUESTS req, DEFINITIONS def)[] _lowFreqPolls = new (REQUESTS, DEFINITIONS)[]
         {
@@ -6966,6 +7228,45 @@ namespace SimConnect3
             (REQUESTS.RequestTbmDeiceCycle1_2024, DEFINITIONS.TbmDeiceCycle1_2024Read),
             (REQUESTS.RequestTbmDeiceCycle2_2024, DEFINITIONS.TbmDeiceCycle2_2024Read),
             (REQUESTS.RequestTbmInertSep2024, DEFINITIONS.TbmInertSep2024Read),
+            // Lights (2026-10-03, Pere): provades fora de Struct1 amb sync+confirmació puntual, ara
+            // passades al ritme fix de 200ms com la resta d'aquest grup, sense cap tractament especial.
+            (REQUESTS.RequestLightBeacon, DEFINITIONS.LightBeaconRead),
+            (REQUESTS.RequestLightLand, DEFINITIONS.LightLandRead),
+            (REQUESTS.RequestLightTaxi, DEFINITIONS.LightTaxiRead),
+            (REQUESTS.RequestLightNav, DEFINITIONS.LightNavRead),
+            (REQUESTS.RequestLightStrobe, DEFINITIONS.LightStrobeRead),
+            (REQUESTS.RequestLightRecogn, DEFINITIONS.LightRecognRead),
+            (REQUESTS.RequestLightPanel, DEFINITIONS.LightPanelRead),
+            (REQUESTS.RequestLightLogo, DEFINITIONS.LightLogoRead),
+            (REQUESTS.RequestLightingLogo1, DEFINITIONS.LightingLogo1Read),
+            (REQUESTS.RequestLightingWing1, DEFINITIONS.LightingWing1Read),
+            // Bateria, avionics, alternators, magnetos/starter, fuel pump (2026-10-03, Pere): mateixa
+            // prova que els llums, treure'ls del paquet gran de Struct1 cap al ritme fix de 200ms.
+            (REQUESTS.RequestMasterBattery, DEFINITIONS.MasterBatteryRead),
+            (REQUESTS.RequestAvionics1, DEFINITIONS.Avionics1Read),
+            (REQUESTS.RequestAvionics2, DEFINITIONS.Avionics2Read),
+            (REQUESTS.RequestAltGen1, DEFINITIONS.AltGen1Read),
+            (REQUESTS.RequestAltGen2, DEFINITIONS.AltGen2Read),
+            (REQUESTS.RequestIgn1Left, DEFINITIONS.Ign1LeftRead),
+            (REQUESTS.RequestIgn1Right, DEFINITIONS.Ign1RightRead),
+            (REQUESTS.RequestIgn1Starter, DEFINITIONS.Ign1StarterRead),
+            (REQUESTS.RequestIgn2Left, DEFINITIONS.Ign2LeftRead),
+            (REQUESTS.RequestIgn2Right, DEFINITIONS.Ign2RightRead),
+            (REQUESTS.RequestIgn2Starter, DEFINITIONS.Ign2StarterRead),
+            (REQUESTS.RequestFuelPump1, DEFINITIONS.FuelPump1Read),
+            (REQUESTS.RequestFuelPump2, DEFINITIONS.FuelPump2Read),
+            (REQUESTS.RequestFuelPump1_2024, DEFINITIONS.FuelPump1_2024Read),
+            (REQUESTS.RequestFuelPump2_2024, DEFINITIONS.FuelPump2_2024Read),
+            (REQUESTS.RequestFuelPumpIdx3_2024, DEFINITIONS.FuelPumpIdx3_2024Read),
+            (REQUESTS.RequestCom1, DEFINITIONS.Com1Read),
+            (REQUESTS.RequestCom2, DEFINITIONS.Com2Read),
+            (REQUESTS.RequestComReceiveAll, DEFINITIONS.ComReceiveAllRead),
+            (REQUESTS.RequestDmeSound, DEFINITIONS.DmeSoundRead),
+            (REQUESTS.RequestSpkrSound, DEFINITIONS.SpkrSoundRead),
+            (REQUESTS.RequestMkrMute, DEFINITIONS.MkrMuteRead),
+            (REQUESTS.RequestNav1Sound, DEFINITIONS.Nav1SoundRead),
+            (REQUESTS.RequestAdfSound, DEFINITIONS.AdfSoundRead),
+            (REQUESTS.RequestNav2Sound, DEFINITIONS.Nav2SoundRead),
         };
 
         private void PollLowFrequencySimData()
@@ -6979,6 +7280,179 @@ namespace SimConnect3
                 }
                 catch { }
             }
+            // FUEL TANK SELECTOR:1/2 ja no van al ritme fix de 200ms per tothom (2026-10-03, Pere):
+            // la TBM té un sistema automàtic que gira aquest selector sol, de L a R i viceversa, cada
+            // x segons, igual que l'AP mou el trim vertical sol — per això, quan la TBM és l'avió
+            // actiu, es llegeix cada 1000ms via _tbmFuelSelectorPollTimer (veure comentari del camp),
+            // no aquí. Per a la resta d'avions (que només canvien aquest selector si nosaltres hi
+            // clicem), es queda al ritme fix de 200ms, igual que abans.
+            if (!IsTBM930()) PollFuelTankSelectors();
+        }
+
+        private void PollFuelTankSelectors()
+        {
+            if (simconnect == null) return;
+            try
+            {
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestFuelTankSelector1, DEFINITIONS.FuelTankSelector1Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.ONCE, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestFuelTankSelector2, DEFINITIONS.FuelTankSelector2Read, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.ONCE, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+            }
+            catch { }
+        }
+
+        // Crida's en clicar L/R/OFF del selector de combustible de la TBM. Lectura immediata (no
+        // esperar el timer) + puja el ritme a 100ms durant 2s perquè es vegi començar a l'instant —
+        // mateix motiu que StartElevatorTrimActiveRead.
+        private void StartTbmFuelSelectorActiveRead()
+        {
+            _tbmFuelSelectorFastUntilUtc = DateTime.UtcNow.AddSeconds(2);
+            if (_tbmFuelSelectorPollTimer != null) _tbmFuelSelectorPollTimer.Interval = 100;
+            PollFuelTankSelectors();
+        }
+
+        // Sync puntual del throttle lever: en obrir connexió, canvi d'avió, i a cada tick dels
+        // timers (_thrLeverIdlePollTimer 1Hz sempre actiu, _thrLeverActiveReadTimer 50ms mentre hi
+        // ha moviment en curs — veure comentari del camp).
+        private void SyncThrLeverPosOnce()
+        {
+            if (simconnect == null) return;
+            try
+            {
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestThrottleLeverPos, DEFINITIONS.ThrottleLeverPosRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.ONCE, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+            }
+            catch { }
+        }
+
+        // Lectura genèrica d'1 llum (veure comentari a LightBoolStruct) — un sol mètode per no
+        // repetir 10 cops el mateix try/catch; cada llum continua tenint la seva pròpia definició
+        // SimConnect, això només evita duplicar el codi C# que la demana.
+        private void SyncLightOnce(REQUESTS req, DEFINITIONS def)
+        {
+            if (simconnect == null) return;
+            try
+            {
+                simconnect.RequestDataOnSimObject(req, def, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.ONCE, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+            }
+            catch { }
+        }
+
+        // Crida's en obrir connexió i en canvi d'avió — sync puntual de les 10 llums.
+        private void SyncAllLightsOnce()
+        {
+            SyncLightOnce(REQUESTS.RequestLightBeacon, DEFINITIONS.LightBeaconRead);
+            SyncLightOnce(REQUESTS.RequestLightLand, DEFINITIONS.LightLandRead);
+            SyncLightOnce(REQUESTS.RequestLightTaxi, DEFINITIONS.LightTaxiRead);
+            SyncLightOnce(REQUESTS.RequestLightNav, DEFINITIONS.LightNavRead);
+            SyncLightOnce(REQUESTS.RequestLightStrobe, DEFINITIONS.LightStrobeRead);
+            SyncLightOnce(REQUESTS.RequestLightRecogn, DEFINITIONS.LightRecognRead);
+            SyncLightOnce(REQUESTS.RequestLightPanel, DEFINITIONS.LightPanelRead);
+            SyncLightOnce(REQUESTS.RequestLightLogo, DEFINITIONS.LightLogoRead);
+            SyncLightOnce(REQUESTS.RequestLightingLogo1, DEFINITIONS.LightingLogo1Read);
+            SyncLightOnce(REQUESTS.RequestLightingWing1, DEFINITIONS.LightingWing1Read);
+        }
+
+        // Mou el "handle" visual del throttle (G3K_THR_HANDLE) segons _thrLeverPos/_propLeverPosCached/
+        // _fuelValveCached. El "carril dret" (comparació per valor exacte amb propLeverPos/fuelValve)
+        // només s'ha d'avaluar quan aquests 3 valors venen d'una lectura coherent entre ells — ara que
+        // thrLeverPos té lectura pròpia (fins a cada 50ms) i propLeverPos/fuelValve es queden dins
+        // Struct1 (cada 10s), si s'avaluava sempre, un thrLeverPos fresquíssim podia coincidir per
+        // casualitat amb un propLeverPos/fuelValve ja vell (fins a 10s) i disparar un salt fals sense
+        // que ningú hagués tocat res (confirmat per Pere, 2026-10-03). Per això includeRightRailCheck
+        // només és true quan ve de Struct1 (on els 3 valors acaben d'arribar junts); la lectura
+        // independent de thrLeverPos només fa el seguiment proporcional normal.
+        private void UpdateThrHandleFromLeverPos(bool includeRightRailCheck)
+        {
+            if (!_g3000Active || !pbMain.IsHandleCreated) return;
+            pbMain.BeginInvoke(new Action(() =>
+            {
+                // Sync inicial directe: amb dades fresques i coherents (Struct1) podem saber del
+                // tot si hauríem d'estar al carril esquerre (power) encara que el throttle no s'hagi
+                // mogut MAI des que l'app ha arrencat — sense això, si l'app arrenca amb el throttle
+                // ja quiet al carril esquerre, mai es detecta cap "salt" i es queda per sempre a la
+                // posició per defecte del carril dret (confirmat per Pere, 2026-10-03).
+                if (includeRightRailCheck && !_thrHandleLeftRail && _thrQuadrantVisible && !_thrHandleDragging && DateTime.UtcNow > _thrIgnoreFollowUntil)
+                {
+                    bool looksLikeRightRail = _fuelValveCached == 0
+                        || ((int)_propLeverPosCached == -4096 && ((int)_thrLeverPos == 4915 || (int)_thrLeverPos == 0));
+                    if (!looksLikeRightRail)
+                    {
+                        var taxiA6 = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_TAXI");
+                        var thrH6 = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
+                        if (taxiA6 != null && thrH6 != null)
+                        {
+                            _thrHandleLeftRailCenterY = taxiA6.BasePos.Y + taxiA6.Bounds.Height / 2 - thrH6.Bounds.Height / 2;
+                            _thrHandleLeftRail = true;
+                            _taxiPropActive = true;
+                            _lastThrLeverPos = _thrLeverPos;
+                        }
+                    }
+                }
+                if (!_thrHandleLeftRail && _thrQuadrantVisible && !_thrHandleDragging && DateTime.UtcNow > _thrIgnoreFollowUntil)
+                {
+                    if (!double.IsNaN(_lastThrLeverPos) && Math.Abs(_thrLeverPos - _lastThrLeverPos) > 200)
+                    {
+                        var taxiA5 = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_TAXI");
+                        var thrH5 = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
+                        if (taxiA5 != null && thrH5 != null)
+                            _thrHandleLeftRailCenterY = taxiA5.BasePos.Y + taxiA5.Bounds.Height / 2 - thrH5.Bounds.Height / 2;
+                        _thrHandleLeftRail = true;
+                        _taxiPropActive = true;
+                    }
+                    _lastThrLeverPos = _thrLeverPos;
+                }
+                if (_thrQuadrantVisible && !_thrHandleDragging && DateTime.UtcNow > _thrIgnoreFollowUntil && _thrHandleLeftRail)
+                {
+                    var thrH4 = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
+                    if (thrH4 != null)
+                    {
+                        int read = (int)_thrLeverPos;
+                        int centerY = _thrHandleLeftRailCenterY;
+                        int handleY;
+                        if (read >= 0)
+                            handleY = centerY - (int)((long)read * 375 / 16383);
+                        else
+                            handleY = centerY - (int)((long)read * 250 / 2048);
+                        handleY = Math.Max(centerY - 375, Math.Min(centerY + 250, handleY));
+                        thrH4.BasePos = new Point(3694, handleY);
+                        if ((DateTime.UtcNow - _lastThrHandleInvalidate).TotalMilliseconds >= 50)
+                        {
+                            _lastThrHandleInvalidate = DateTime.UtcNow;
+                            const int margin = 30;
+                            var thrRect = new Rectangle(
+                                3694 - margin,
+                                centerY - 375 - margin,
+                                thrH4.Bounds.Width + margin * 2,
+                                625 + thrH4.Bounds.Height + margin * 2);
+                            pbMain.BeginInvoke(new Action(() => pbMain.Invalidate(ToRealInvalidateRect(thrRect))));
+                        }
+                    }
+                }
+                // Seguiment carril dret des de MSFS (fuel valve / prop+thr) — només amb valors coherents
+                // entre ells (veure comentari del mètode).
+                if (includeRightRailCheck && _thrQuadrantVisible && !_thrHandleDragging && DateTime.UtcNow > _thrIgnoreRightRailUntil) // anti-rebot
+                {
+                    if (_fuelValveCached == 0)
+                    {
+                        if (_thrHandleLeftRail) { _thrHandleLeftRail = false; _lastThrLeverPos = double.NaN; }
+                        MoveThrHandle(_thrHandleDefaultY + 150);
+                    }
+                    else if ((int)_propLeverPosCached == -4096 && (int)_thrLeverPos == 4915)
+                    {
+                        if (_thrHandleLeftRail) { _thrHandleLeftRail = false; _lastThrLeverPos = double.NaN; }
+                        MoveThrHandle(_thrHandleDefaultY - 170);
+                    }
+                    else if ((int)_propLeverPosCached == -4096 && (int)_thrLeverPos == 0)
+                    {
+                        if (_thrHandleLeftRail) { _thrHandleLeftRail = false; _lastThrLeverPos = double.NaN; }
+                        var liArea2 = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_LOWIDLE");
+                        var thrHli2 = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
+                        if (liArea2 != null && thrHli2 != null)
+                            MoveThrHandle(liArea2.BasePos.Y + liArea2.Bounds.Height / 2 - thrHli2.Bounds.Height / 2);
+                        else
+                            MoveThrHandle(_thrHandleDefaultY);
+                    }
+                }
+            }));
         }
 
         private void PollStruct1()
@@ -6991,23 +7465,34 @@ namespace SimConnect3
             catch { }
         }
 
-        // Sync puntual de la posició de flaps: es crida en obrir connexió i en detectar canvi d'avió
-        // (veure crides). Fora d'això, la posició de flaps no es torna a llegir mai fins que l'usuari
-        // mogui el selector (StartFlapsActiveRead).
-        private void SyncFlapsPositionOnce()
+        // Sync puntual de FLAPS NUM HANDLE POSITIONS: pràcticament constant per avió, només cal en
+        // obrir connexió i en detectar canvi d'avió — mai activament (veure SyncFlapsHandleIndexOnce).
+        private void SyncFlapsNumPosOnce()
         {
             if (simconnect == null) return;
             try
             {
-                simconnect.RequestDataOnSimObject(REQUESTS.RequestFlapsPos, DEFINITIONS.FlapsPosRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.ONCE, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestFlapsNumPos, DEFINITIONS.FlapsNumPosRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.ONCE, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+            }
+            catch { }
+        }
+
+        // Sync de FLAPS HANDLE INDEX (la posició real): en obrir connexió, en canvi d'avió, i
+        // activament mentre el selector es mou (StartFlapsActiveRead).
+        private void SyncFlapsHandleIndexOnce()
+        {
+            if (simconnect == null) return;
+            try
+            {
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestFlapsHandleIndex, DEFINITIONS.FlapsHandleIndexRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.ONCE, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
             }
             catch { }
         }
 
         // Crida's en enviar una comanda de flaps amunt/avall (selector). Engega (o allarga, si ja
         // estava en marxa) una finestra de lectura activa de només aquest offset, cada 100ms, que es
-        // para sola als 2s sense cap canvi real (el handler de RequestFlapsPos allarga la finestra
-        // quan detecta un canvi — veure comentari allà).
+        // para sola als 2s sense cap canvi real (el handler de RequestFlapsHandleIndex allarga la
+        // finestra quan detecta un canvi — veure comentari allà).
         private void StartFlapsActiveRead()
         {
             _flapsActiveReadUntilUtc = DateTime.UtcNow.AddSeconds(2);
@@ -7042,7 +7527,7 @@ namespace SimConnect3
         private void UpdateElevatorTrimActiveRate()
         {
             if (_elevatorTrimActiveReadTimer == null) return;
-            _elevatorTrimActiveReadTimer.Interval = (trimDragging || _g3kTrimDragging) ? 33 : 150;
+            _elevatorTrimActiveReadTimer.Interval = (trimDragging || _g3kTrimDragging) ? 50 : 150; // prova 2026-10-03
         }
 
         // Mentre es mou la roda d'elevator trim amb el dit, o mentre l'AP està actiu, cal lectura
@@ -7051,10 +7536,9 @@ namespace SimConnect3
         private void StartElevatorTrimActiveRead()
         {
             UpdateElevatorTrimActiveRate();
-            // Un Timer no fa "tick" fins que passa tot l'interval — sense aquesta crida immediata,
-            // el primer moviment del dit no es veia reflectit fins més tard (confirmat per Pere,
-            // 2026-10-02: a MSFS es veia instantani, a l'app trigava).
-            SyncElevatorTrimOnce();
+            // La lectura immediata de debò la fa SendTrimTick en el primer tic real (veure
+            // _elevatorTrimAwaitingFirstTick) — aquí, en tocar la roda, encara no ha canviat res.
+            _elevatorTrimAwaitingFirstTick = true;
             _elevatorTrimActiveReadTimer?.Start();
         }
 
@@ -7074,7 +7558,7 @@ namespace SimConnect3
         private void StartRudderTrimActiveRead()
         {
             // Mateix motiu que StartElevatorTrimActiveRead.
-            SyncRudderTrimOnce();
+            _rudderTrimAwaitingFirstTick = true;
             _rudderTrimActiveReadTimer?.Start();
         }
 
@@ -7082,6 +7566,323 @@ namespace SimConnect3
         {
             if (!rudderTrimDragging && !_g3kRudderTrimDragging)
                 _rudderTrimActiveReadTimer?.Stop();
+        }
+
+        // Decideix fuel1Pos/fuel2Pos (ganivets) i l'angle objectiu del rotatiu G3K_FSEL_SW (TBM) a
+        // partir de _fuelTankSelector1/2 (FUEL TANK SELECTOR:1/2, lectura pròpia — veure comentari
+        // del camp). Es crida des dels handlers de RequestFuelTankSelector1/2 quan qualsevol dels
+        // dos canvia; abans aquesta lògica vivia dins del handler de Struct1.
+        private void UpdateFuelSelectorState()
+        {
+            bool needsRepaint = false;
+            int newFuel1Pos, newFuel2Pos;
+
+            if (IsBonanzaG36())
+            {
+                // Selector únic (SW_SE_SELECTOR), no els 2 ganivets fuel1Pos/fuel2Pos.
+                // ASIMETRIA confirmada: escriure (K:FUEL_SELECTOR_SET) i llegir (FUEL TANK SELECTOR:1)
+                // fan servir codis DIFERENTS per Right — escriure 1 mou a Right, però llegit torna 3
+                // (verificat movent el selector a mà al VC): lectura real 0=Off, 2=Left, 3=Right.
+                if (_fuelTankSelector1 != _bonanzaFuelSelectorRawLast)
+                {
+                    Debug.WriteLine($"[BONANZA FUEL TANK SELECTOR:1] {_bonanzaFuelSelectorRawLast} -> {_fuelTankSelector1}");
+                    _bonanzaFuelSelectorRawLast = _fuelTankSelector1;
+                }
+                int newPosFromRead = _fuelTankSelector1 switch { 0 => 0, 2 => 1, 3 => 2, _ => seSelectorPos };
+                if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
+                {
+                    seSelectorPos = newPosFromRead;
+                    needsRepaint = true;
+                }
+                newFuel1Pos = fuel1Pos;
+                newFuel2Pos = fuel2Pos;
+            }
+            else if (IsCirrusSR22())
+            {
+                // Selector únic, mateixa lectura reutilitzada que Bonanza/C400. ASIMETRIA confirmada
+                // per Pere movent el selector a mà al VC i mirant el Debug Output (igual que la
+                // Bonanza: escriptura i lectura NO fan servir el mateix codi): raw 0=OFF, raw 2=LEFT,
+                // raw 3=RIGHT (valors reals confirmats, no coincideixen amb els d'escriptura 0/1/2).
+                if (_fuelTankSelector1 != _cirrusFuelSelectorRawLast)
+                {
+                    Debug.WriteLine($"[CIRRUS FUEL TANK SELECTOR:1] {_cirrusFuelSelectorRawLast} -> {_fuelTankSelector1}");
+                    _cirrusFuelSelectorRawLast = _fuelTankSelector1;
+                }
+                int newPosFromRead = _fuelTankSelector1 switch { 0 => 0, 2 => 1, 3 => 2, _ => seSelectorPos };
+                if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
+                {
+                    seSelectorPos = newPosFromRead;
+                    needsRepaint = true;
+                }
+                newFuel1Pos = fuel1Pos;
+                newFuel2Pos = fuel2Pos;
+            }
+            else if (IsDA40() && !_isMsfs2024)
+            {
+                // DA-40 (2020 NOMÉS) — mateix patró que Bonanza/Cirrus: selector únic (SW_SE_SELECTOR).
+                // Aquí escriptura (K:FUEL_SELECTOR_SET) i lectura fan servir la MATEIXA codificació
+                // (0=OFF, 2=LEFT, 3=RIGHT), confirmada via revòlver SEND (2026-08-28).
+                if (_fuelTankSelector1 != _da40FuelSelectorRawLast)
+                {
+                    Debug.WriteLine($"[DA40 FUEL TANK SELECTOR:1] {_da40FuelSelectorRawLast} -> {_fuelTankSelector1}");
+                    _da40FuelSelectorRawLast = _fuelTankSelector1;
+                }
+                int newPosFromRead = _fuelTankSelector1 switch { 0 => 0, 2 => 1, 3 => 2, _ => seSelectorPos };
+                if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
+                {
+                    seSelectorPos = newPosFromRead;
+                    needsRepaint = true;
+                }
+                newFuel1Pos = fuel1Pos;
+                newFuel2Pos = fuel2Pos;
+            }
+            else if (IsC172() && !_isMsfs2024)
+            {
+                // C172 Skyhawk (2020 NOMÉS, 2026-09-01) — mateix patró que Bonanza/Cirrus/DA40-2020.
+                // Enum clàssic (0=Off, 1=All, 2=Left, 3=Right) — el Skyhawk no té Off, per això
+                // qualsevol valor que no sigui 2(Left)/3(Right) es tracta com a BOTH.
+                if (_fuelTankSelector1 != _c172FuelSelectorRawLast)
+                {
+                    Debug.WriteLine($"[C172 SKYHAWK 2020 FUEL TANK SELECTOR:1] {_c172FuelSelectorRawLast} -> {_fuelTankSelector1}");
+                    _c172FuelSelectorRawLast = _fuelTankSelector1;
+                }
+                int newPosFromRead = _fuelTankSelector1 switch { 2 => 0, 3 => 2, _ => 1 };
+                if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
+                {
+                    seSelectorPos = newPosFromRead;
+                    needsRepaint = true;
+                }
+                newFuel1Pos = fuel1Pos;
+                newFuel2Pos = fuel2Pos;
+            }
+            else if (IsDA40() && _isMsfs2024)
+            {
+                // DA-40 (2024 NOMÉS, 2026-08-30) — feedback real: FUELSYSTEM VALVE SWITCH:1 (=1 quan
+                // NORMAL/Left actiu) i SWITCH:2 (=1 quan EMERGENCY/Right actiu), ja llegits per
+                // RequestDA40FuelTankSelector/2 (registrats a Simconnect_OnRecvOpen). Ambdós a 0 = OFF.
+                int newPosFromRead = _daFuelTankSelector2 >= 0.5 ? 2 : (_daFuelTankSelector >= 0.5 ? 1 : 0);
+                if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
+                {
+                    seSelectorPos = newPosFromRead;
+                    needsRepaint = true;
+                }
+                newFuel1Pos = fuel1Pos;
+                newFuel2Pos = fuel2Pos;
+            }
+            else if (IsCaravan() && _isMsfs2024)
+            {
+                // Caravan (MSFS2024 NOMÉS): monomotor (numEngines==1), per això cauria al bloc "SINGLE
+                // ENGINE" de sota, que sobreescriu fuel1Pos/fuel2Pos amb la SimVar legacy "FUEL TANK
+                // SELECTOR:1" — irrellevant per aquest avió a 2024 (fa servir FUELSYSTEM VALVE
+                // SWITCH:1/4). Exclòs: fuel1Pos/fuel2Pos ja els actualitzen aquells handlers dedicats.
+                // MSFS2020 (confirmat 2026-08-26): la Caravan NO té lectura dedicada — cau al bloc
+                // "SINGLE ENGINE" de sota, que SÍ és la lectura real correcta.
+                newFuel1Pos = fuel1Pos;
+                newFuel2Pos = fuel2Pos;
+            }
+            else if (IsDA62() && !_isMsfs2024)
+            {
+                // DA-62 (2020, 2026-08-28) — preset MobiFlight/HubHop real (Imadunatic) confirma que
+                // l'enum de A:FUEL TANK SELECTOR:1/2 per aquestes palanques NO és el 0/2/3 genèric
+                // d'altres bimotors. Esquerra (selector:1): 0=OFF, 19=ON(Left Main), 20=CROSSFEED
+                // (Right Main). Dreta (selector:2): 20=ON(Right Main, confirmat), 0=OFF i 19=CROSSFEED
+                // (Left Main) inferits per simetria — pendent de confirmar del tot.
+                if (_fuelTankSelector1 == 0)       newFuel1Pos = 0; // OFF
+                else if (_fuelTankSelector1 == 19) newFuel1Pos = 1; // ON (Left Main)
+                else if (_fuelTankSelector1 == 20) newFuel1Pos = 2; // CROSSFEED (Right Main)
+                else                                newFuel1Pos = fuel1Pos;
+                if (_fuelTankSelector2 == 19)       newFuel2Pos = 0; // CROSSFEED (Left Main)
+                else if (_fuelTankSelector2 == 20)  newFuel2Pos = 1; // ON (Right Main)
+                else if (_fuelTankSelector2 == 0)   newFuel2Pos = 2; // OFF
+                else                                 newFuel2Pos = fuel2Pos;
+            }
+            else if (_isMsfs2024 && numEngines >= 2)
+            {
+                // Bimotors MSFS2024: estat actualitzat pels handlers dedicats RequestFuelSelLeft/Right
+                // (L:FUEL_Switch_Cutoff_Crossfeed_1/_2) — la SimVar "FUEL TANK SELECTOR" no reflecteix
+                // el sistema de junctions (FUELSYSTEM_JUNCTION_SET). Confirmat al Baron G58; si un altre
+                // bimotor 2024 no es sincronitza bé, probablement necessita el seu propi nom de L:Var
+                // i/o número de junction — no assumir que són els mateixos sense verificar-ho.
+                newFuel1Pos = fuel1Pos;
+                newFuel2Pos = fuel2Pos;
+            }
+            else if (numEngines >= 2)
+            {
+                // TWIN ENGINE — selectors independents
+                if (IsBaronG58() && !_isMsfs2024 && DateTime.UtcNow < _fuelSel1IgnoreFollowUntil)
+                {
+                    // Baron G58 (2020, confirmat 2026-08-26): mateix rebot transitori just després
+                    // del clic que ja vam veure a la Caravan — ignorem la lectura una finestra curta.
+                    newFuel1Pos = fuel1Pos;
+                }
+                else if (_fuelTankSelector1 == 0 || _fuelTankSelector1 == 20) newFuel1Pos = 0; // OFF
+                else if (_fuelTankSelector1 == 2)                              newFuel1Pos = 1; // ON
+                else if (_fuelTankSelector1 == 3)                              newFuel1Pos = 2; // CF
+                else                                                            newFuel1Pos = fuel1Pos;
+
+                if (IsBaronG58() && !_isMsfs2024 && DateTime.UtcNow < _fuelSel2IgnoreFollowUntil)
+                {
+                    newFuel2Pos = fuel2Pos;
+                }
+                else if (_fuelTankSelector2 == 2)                              newFuel2Pos = 0; // CF
+                else if (_fuelTankSelector2 == 3)                              newFuel2Pos = 1; // ON
+                else if (_fuelTankSelector2 == 0 || _fuelTankSelector2 == 20) newFuel2Pos = 2; // OFF
+                else                                                            newFuel2Pos = fuel2Pos;
+            }
+            else if (IsCaravan() && DateTime.UtcNow < _fuelSel1IgnoreFollowUntil)
+            {
+                // Caravan (2020, confirmat 2026-08-26): just després d'un clic, la lectura real
+                // "rebota" per un instant abans d'assentar-se (mateix patró que STARTER/IGNITION) —
+                // ignorem la lectura durant una finestra curta, mantenint l'estat local del clic.
+                newFuel1Pos = fuel1Pos;
+                newFuel2Pos = fuel2Pos;
+            }
+            else
+            {
+                // SINGLE ENGINE — 1 selector, 2 knobs sincronitzats
+                // MSFS: 0=OFF, 1=ALL/BOTH, 2=LEFT, 3=RIGHT, 16=BOTH
+                switch (_fuelTankSelector1)
+                {
+                    case 0: case 20:                    // OFF → ambdós OFF
+                        newFuel1Pos = 0; newFuel2Pos = 2; break;
+                    case 2:                             // LEFT → esquerre ON, dret OFF
+                        newFuel1Pos = 1; newFuel2Pos = 2; break;
+                    case 3:                             // RIGHT → esquerre OFF, dret ON
+                        newFuel1Pos = 0; newFuel2Pos = 1; break;
+                    case 1: case 16:                    // BOTH → ambdós ON
+                        newFuel1Pos = 1; newFuel2Pos = 1; break;
+                    default:
+                        newFuel1Pos = fuel1Pos; newFuel2Pos = fuel2Pos; break;
+                }
+            }
+
+            if (newFuel1Pos != fuel1Pos) { fuel1Pos = newFuel1Pos; needsRepaint = true; }
+            if (newFuel2Pos != fuel2Pos) { fuel2Pos = newFuel2Pos; needsRepaint = true; }
+
+            // Rotatiu animat G3K_FSEL_SW (TBM930/G3000) — només l'objectiu canvia aquí; el pas de
+            // l'angle es calcula al Paint, però qui el repinta és _g3kFuelSelAnimTimer (timer
+            // dedicat, no un auto-repintat des de dins del mateix Paint — aquell patró es podia
+            // trencar en silenci, veure comentari del camp).
+            float fselTarget = _fuelTankSelector1 == 2 ? 245f : (_fuelTankSelector1 == 3 ? 113f : 0f);
+            if (_g3kFuelSelAngle < 0f)
+            {
+                _g3kFuelSelAngle = fselTarget;
+                _g3kFuelSelTargetAngle = fselTarget;
+            }
+            else if (fselTarget != _g3kFuelSelTargetAngle)
+            {
+                _g3kFuelSelTargetAngle = fselTarget;
+                _g3kFuelSelLastPaint = DateTime.MinValue;
+                _g3kFuelSelAnimTimer?.Start();
+                needsRepaint = true;
+            }
+
+            if (needsRepaint && pbMain.IsHandleCreated && (DateTime.UtcNow - _lastRepaint).TotalMilliseconds > 200)
+            {
+                _lastRepaint = DateTime.UtcNow;
+                pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
+            }
+        }
+
+        // Magnetos/starter del motor 1 (RECIP ENG LEFT/RIGHT MAGNETO:1, GENERAL ENG STARTER:1) — 3
+        // lectures independents, recalculem ign1Pos i starter1Active junts cada cop que n'arriba una.
+        private void UpdateIgnition1State()
+        {
+            bool newStarter1 = _ign1Starter != 0;
+            if (newStarter1 != starter1Active)
+            {
+                starter1Active = newStarter1;
+                pbMain.Invalidate();
+            }
+            int newIgn1Pos;
+            if      (_ign1Left == 0 && _ign1Right == 0 && _ign1Starter == 0) newIgn1Pos = 0; // OFF
+            else if (_ign1Left == 0 && _ign1Right == 1 && _ign1Starter == 0) newIgn1Pos = 1; // RIGHT
+            else if (_ign1Left == 1 && _ign1Right == 0 && _ign1Starter == 0) newIgn1Pos = 2; // LEFT
+            else if (_ign1Left == 1 && _ign1Right == 1 && _ign1Starter == 0) newIgn1Pos = 3; // BOTH
+            else if (_ign1Left == 1 && _ign1Right == 1 && _ign1Starter == 1) newIgn1Pos = 4; // START
+            else newIgn1Pos = ign1Pos; // mantenim l'últim valor conegut
+            if (newIgn1Pos != ign1Pos) { ign1Pos = newIgn1Pos; pbMain.Invalidate(); }
+        }
+
+        // Idem motor 2.
+        private void UpdateIgnition2State()
+        {
+            bool newStarter2 = _ign2Starter != 0;
+            if (newStarter2 != starter2Active)
+            {
+                starter2Active = newStarter2;
+                pbMain.Invalidate();
+            }
+            int newIgn2Pos;
+            if      (_ign2Left == 0 && _ign2Right == 0 && _ign2Starter == 0) newIgn2Pos = 0;
+            else if (_ign2Left == 0 && _ign2Right == 1 && _ign2Starter == 0) newIgn2Pos = 1;
+            else if (_ign2Left == 1 && _ign2Right == 0 && _ign2Starter == 0) newIgn2Pos = 2;
+            else if (_ign2Left == 1 && _ign2Right == 1 && _ign2Starter == 0) newIgn2Pos = 3;
+            else if (_ign2Left == 1 && _ign2Right == 1 && _ign2Starter == 1) newIgn2Pos = 4;
+            else newIgn2Pos = ign2Pos;
+            if (newIgn2Pos != ign2Pos) { ign2Pos = newIgn2Pos; pbMain.Invalidate(); }
+        }
+
+        // Fuel pump 1/2 (GENERAL ENG FUEL PUMP SWITCH:1/2 a 2020, FUELSYSTEM PUMP SWITCH:1/2/3 a 2024)
+        // — 5 lectures independents (2 de 2020, 3 de 2024, l'índex 3 compartit amb el selector C408),
+        // recalculem fuelpump1Active/2Active junts cada cop que n'arriba una.
+        private void UpdateFuelPumpState()
+        {
+            bool newFuelpump1, newFuelpump2;
+            if (UsesPump1_3StateUi())
+            {
+                // Estat gestionat localment pels clics (StepFuelPumpBaron), no per lectura del simulador.
+                newFuelpump1 = _fuelPump1State3 != 2; // != OFF
+                newFuelpump2 = _fuelPump2State3 != 2;
+            }
+            else if (_isMsfs2024)
+            {
+                newFuelpump1 = IsDA40() ? (_readFuelpumpIdx3_2024 & 1) != 0 : (_readFuelpump1_2024 & 1) != 0;
+                newFuelpump2 = (_readFuelpump2_2024 & 1) != 0;
+            }
+            else
+            {
+                newFuelpump1 = (_readFuelpump1 & 1) != 0;
+                newFuelpump2 = (_readFuelpump2 & 1) != 0;
+            }
+            if (newFuelpump1 != fuelpump1Active)
+            {
+                fuelpump1Active = newFuelpump1;
+                pbMain.Invalidate();
+            }
+            if (newFuelpump2 != fuelpump2Active)
+            {
+                fuelpump2Active = newFuelpump2;
+                pbMain.Invalidate();
+            }
+            if (IsC408())
+            {
+                int newIdx3 = (_readFuelpumpIdx3_2024 & 1) != 0 ? 1 : 0;
+                if (newIdx3 != _c408Idx3)
+                {
+                    Debug.WriteLine($"[C408 FUELSYSTEM PUMP SWITCH:3] {_c408Idx3} -> {newIdx3}");
+                    _c408Idx3 = newIdx3;
+                    UpdateC408SeSelectorFromPumpSwitches();
+                }
+            }
+        }
+
+        // Repaint retallat i llindat (2026-10-03, Pere) per als rotatius de clic (claus d'ignició,
+        // selectors de combustible): en lloc de pbMain.Invalidate() sencer a cada clic, només la zona
+        // de l'overlay que gira, i com a màxim un repaint cada 50ms — igual que la resta d'elements
+        // arrossegables arreglats avui. overlayName és el nom de l'OverlayImage que es dibuixa rotat
+        // (p.ex. "SW_IGNITION", "SW_FUEL1"); lastInvalidateUtc és el camp de llindar propi de cada switch.
+        private void InvalidateRotarySwitch(string overlayName, ref DateTime lastInvalidateUtc)
+        {
+            if ((DateTime.UtcNow - lastInvalidateUtc).TotalMilliseconds < 50) return;
+            lastInvalidateUtc = DateTime.UtcNow;
+            var sw = overlayImages.FirstOrDefault(o => o.Name == overlayName);
+            if (sw?.Img == null) { pbMain.Invalidate(); return; }
+            float baseW = sw.ZoomWidth;
+            float baseH = baseW / sw.AspectRatio;
+            int margin = (int)Math.Max(baseW, baseH) / 2 + 10;
+            var rect = new Rectangle((int)sw.BasePos.X - margin, (int)sw.BasePos.Y - margin, (int)baseW + margin * 2, (int)baseH + margin * 2);
+            pbMain.Invalidate(ToRealInvalidateRect(rect));
         }
 
         private void Simconnect_OnRecvOpen(SimConnect sender, SIMCONNECT_RECV_OPEN data)
@@ -7109,15 +7910,24 @@ namespace SimConnect3
             PollStruct1();
             _structPollTimer?.Start();
 
-            // Flaps: sync puntual aquí (connexió feta / MSFS ja actiu) — no es torna a llegir fins
-            // que es mogui el selector.
-            SyncFlapsPositionOnce();
+            // Flaps: sync puntual aquí (connexió feta / MSFS ja actiu), les dues per separat — no es
+            // tornen a llegir fins que es mogui el selector (i, aleshores, només el handle index).
+            SyncFlapsNumPosOnce();
+            SyncFlapsHandleIndexOnce();
 
             // Trim: mateix sync puntual (elevator + rudder, independents). La lectura activa de
             // l'elevator (100ms) només s'engega si l'AP ja està actiu quan arriba la primera dada
             // (veure Simconnect_OnRecvSimobjectData, canvi d'_apMaster); la del rudder només amb drag.
             SyncElevatorTrimOnce();
             SyncRudderTrimOnce();
+
+            // Throttle lever: sync puntual + engega el timer de fons de 1Hz (sempre actiu, veure
+            // comentari del camp — cal per detectar moviments d'un joystick extern).
+            SyncThrLeverPosOnce();
+            _thrLeverIdlePollTimer?.Start();
+
+            // Llums: sync puntual de les 10.
+            SyncAllLightsOnce();
 
             simconnect.RequestDataOnSimObject(
                 REQUESTS.RequestAircraftTitle,
@@ -7145,6 +7955,9 @@ namespace SimConnect3
             _flapsActiveReadTimer?.Stop();
             _elevatorTrimActiveReadTimer?.Stop();
             _rudderTrimActiveReadTimer?.Stop();
+            _tbmFuelSelectorPollTimer?.Stop();
+            _thrLeverIdlePollTimer?.Stop();
+            _thrLeverActiveReadTimer?.Stop();
 
             simReconnectPending = true;
             simReconnectTimer.Start();
@@ -7195,23 +8008,35 @@ namespace SimConnect3
                 bool isTBM930Now = IsTBM930();
                 if (isTBM930Now != wasTBM930 && _g3000Active != isTBM930Now && !calibrationMode)
                     SetG3000Active(isTBM930Now);
+                if (isTBM930Now != wasTBM930)
+                {
+                    // FUEL TANK SELECTOR:1/2 passa del ritme fix de 200ms (resta d'avions) al timer
+                    // dedicat de 1000ms (veure comentari del camp) en entrar/sortir de la TBM.
+                    if (isTBM930Now) { _tbmFuelSelectorPollTimer?.Start(); PollFuelTankSelectors(); }
+                    else _tbmFuelSelectorPollTimer?.Stop();
+                }
                 RefreshNoCompatibleAircraftMessage();
                 // Canvi d'avió real (no només una altra lectura del mateix títol cada segon): re-sync
-                // puntual de flaps (veure comentari a SyncFlapsPositionOnce).
-                if (aircraftChanged) { SyncFlapsPositionOnce(); SyncElevatorTrimOnce(); SyncRudderTrimOnce(); }
+                // puntual de flaps (veure comentari a SyncFlapsNumPosOnce/SyncFlapsHandleIndexOnce).
+                if (aircraftChanged) { SyncFlapsNumPosOnce(); SyncFlapsHandleIndexOnce(); SyncElevatorTrimOnce(); SyncRudderTrimOnce(); SyncThrLeverPosOnce(); SyncAllLightsOnce(); }
                 return;
             }
-            if (data.dwRequestID == (uint)REQUESTS.RequestFlapsPos)
+            if (data.dwRequestID == (uint)REQUESTS.RequestFlapsNumPos)
             {
-                var fp = (FlapsPosStruct)data.dwData[0];
-                if (flapsNumPositions != fp.numPositions)
+                var fnp = (FlapsNumPosStruct)data.dwData[0];
+                if (flapsNumPositions != fnp.value)
                 {
-                    flapsNumPositions = fp.numPositions;
+                    flapsNumPositions = fnp.value;
                     pbMain.Invalidate();
                 }
-                if (flapsPoscPalanca != fp.handleIndex)
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestFlapsHandleIndex)
+            {
+                var fhi = (FlapsHandleIndexStruct)data.dwData[0];
+                if (flapsPoscPalanca != fhi.value)
                 {
-                    flapsPoscPalanca = fp.handleIndex;
+                    flapsPoscPalanca = fhi.value;
                     // Hi ha hagut un canvi real: allarguem la finestra de lectura activa 2s més
                     // (debounce — veure StartFlapsActiveRead).
                     _flapsActiveReadUntilUtc = DateTime.UtcNow.AddSeconds(2);
@@ -7241,7 +8066,7 @@ namespace SimConnect3
                     // per Pere, 2026-10-02; mateix problema que els flaps, mateixa solució). Llindar
                     // més ample quan només l'AP la mou (sense dit a seguir, i en turbulència pot durar
                     // minuts — a 50ms encara costava fins a 10 FPS volant de veritat).
-                    double elevatorRepaintThrottleMs = (trimDragging || _g3kTrimDragging) ? 50 : 200;
+                    double elevatorRepaintThrottleMs = (trimDragging || _g3kTrimDragging) ? 50 : 200; // prova 2026-10-03
                     if (pbMain.IsHandleCreated && (DateTime.UtcNow - _lastElevatorTrimInvalidate).TotalMilliseconds >= elevatorRepaintThrottleMs)
                     {
                         _lastElevatorTrimInvalidate = DateTime.UtcNow;
@@ -7265,7 +8090,7 @@ namespace SimConnect3
                         rudderTrimFramePos -= frameDelta;
                         rudderTrimFramePos = ((rudderTrimFramePos % RUDDER_TRIM_FRAME_COUNT) + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
                     }
-                    // Mateix motiu que l'elevator trim, veure comentari allà.
+                    // Mateix motiu que l'elevator trim, veure comentari allà. Prova 2026-10-03: 50->33.
                     if (pbMain.IsHandleCreated && (DateTime.UtcNow - _lastRudderTrimInvalidate).TotalMilliseconds >= 50)
                     {
                         _lastRudderTrimInvalidate = DateTime.UtcNow;
@@ -7273,6 +8098,296 @@ namespace SimConnect3
                         pbMain.Invalidate(ToRealInvalidateRect(rect));
                     }
                 }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestFuelTankSelector1)
+            {
+                var fts1 = (FuelTankSelector1Struct)data.dwData[0];
+                if (_fuelTankSelector1 != fts1.value)
+                {
+                    _fuelTankSelector1 = fts1.value;
+                    UpdateFuelSelectorState();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestFuelTankSelector2)
+            {
+                var fts2 = (FuelTankSelector2Struct)data.dwData[0];
+                if (_fuelTankSelector2 != fts2.value)
+                {
+                    _fuelTankSelector2 = fts2.value;
+                    UpdateFuelSelectorState();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestThrottleLeverPos)
+            {
+                var tlp = (ThrottleLeverPosStruct)data.dwData[0];
+                if (_thrLeverPos != tlp.value)
+                {
+                    _thrLeverPos = tlp.value;
+                    // Hi ha hagut un canvi real: allarguem la finestra de lectura activa 2s més
+                    // (debounce — mateixa regla que els flaps).
+                    _thrLeverActiveReadUntilUtc = DateTime.UtcNow.AddSeconds(2);
+                    _thrLeverActiveReadTimer?.Start();
+                    UpdateThrHandleFromLeverPos(includeRightRailCheck: false);
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestLightBeacon)
+            {
+                bool newBeacon = (((LightBoolStruct)data.dwData[0]).value & 1) != 0;
+                if (newBeacon != beaconActive) { beaconActive = newBeacon; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestLightLand)
+            {
+                bool newLand = (((LightBoolStruct)data.dwData[0]).value & 1) != 0;
+                if (newLand != landActive) { landActive = newLand; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestLightTaxi)
+            {
+                bool newTaxi = (((LightBoolStruct)data.dwData[0]).value & 1) != 0;
+                if (newTaxi != taxiActive) { taxiActive = newTaxi; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestLightNav)
+            {
+                bool newNav = (((LightBoolStruct)data.dwData[0]).value & 1) != 0;
+                if (newNav != navActive) { navActive = newNav; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestLightStrobe)
+            {
+                bool newStrobe = (((LightBoolStruct)data.dwData[0]).value & 1) != 0;
+                if (newStrobe != strobeActive) { strobeActive = newStrobe; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestLightRecogn)
+            {
+                bool newRecogn = (((LightBoolStruct)data.dwData[0]).value & 1) != 0;
+                if (newRecogn != recognActive) { recognActive = newRecogn; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestLightPanel)
+            {
+                // Mateixa asimetria que abans (Baron 2020 invertida; C172 2020 exclosa, fa servir el
+                // potenciòmetre RequestC172PanelLightPot) — veure comentari original més avall.
+                int raw = ((LightBoolStruct)data.dwData[0]).value;
+                bool newPanelLight = (IsC172() && !_isMsfs2024)
+                    ? panelLightActive
+                    : (IsBaronG58() && !_isMsfs2024)
+                        ? (raw & 1) == 0
+                        : (raw & 1) != 0;
+                if (newPanelLight != panelLightActive) { panelLightActive = newPanelLight; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestLightLogo)
+            {
+                _lightLogo = ((LightBoolStruct)data.dwData[0]).value;
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestLightingLogo1)
+            {
+                double newLogo1 = ((LightNumberStruct)data.dwData[0]).value;
+                if (newLogo1 != _lightingLogo1) { _lightingLogo1 = newLogo1; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestLightingWing1)
+            {
+                _lightingWing1 = ((LightNumberStruct)data.dwData[0]).value;
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestMasterBattery)
+            {
+                bool newMasterBatteryOff = ((LightBoolStruct)data.dwData[0]).value == 0;
+                if (newMasterBatteryOff != masterBatteryOff)
+                {
+                    masterBatteryOff = newMasterBatteryOff;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            // DA-62/C172/Caravan (MSFS2024): exclosos — "AVIONICS MASTER SWITCH:1/2" no reflecteix el
+            // seu sistema elèctric modular (LINE CONNECTION); cadascun té la seva pròpia lectura
+            // dedicada (mateix bug recurrent que ja ha passat amb els selectors de combustible).
+            if (data.dwRequestID == (uint)REQUESTS.RequestAvionics1)
+            {
+                if (!(IsDA62() && _isMsfs2024) && !(IsC172() && _isMsfs2024) && !(IsCaravan() && _isMsfs2024))
+                {
+                    bool newAvionics1Off = ((LightBoolStruct)data.dwData[0]).value == 0;
+                    if (newAvionics1Off != avionics1Off)
+                    {
+                        avionics1Off = newAvionics1Off;
+                        pbMain.Invalidate();
+                    }
+                }
+                return;
+            }
+            // Cirrus SR22 / DA-40 (2020): l'avió només té UN interruptor d'avionics físic — exclosa la
+            // lectura del 2 perquè no mogui l'interruptor dret, que aquí no existeix.
+            if (data.dwRequestID == (uint)REQUESTS.RequestAvionics2)
+            {
+                if (!(IsC172() && _isMsfs2024) && !(IsCaravan() && _isMsfs2024) && !(IsCirrusSR22() && !_isMsfs2024) && !(IsDA40() && !_isMsfs2024))
+                {
+                    bool newAvionics2Off = ((LightBoolStruct)data.dwData[0]).value == 0;
+                    if (newAvionics2Off != avionics2Off)
+                    {
+                        avionics2Off = newAvionics2Off;
+                        pbMain.Invalidate();
+                    }
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestAltGen1)
+            {
+                bool newAltGen1Off = ((LightBoolStruct)data.dwData[0]).value == 0;
+                if (newAltGen1Off != altGen1Off)
+                {
+                    altGen1Off = newAltGen1Off;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestAltGen2)
+            {
+                bool newAltGen2Off = ((LightBoolStruct)data.dwData[0]).value == 0;
+                if (!(IsCaravan() && _isMsfs2024) && !IsDA40() && newAltGen2Off != altGen2Off)
+                {
+                    altGen2Off = newAltGen2Off;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestIgn1Left)
+            {
+                _ign1Left = ((LightBoolStruct)data.dwData[0]).value;
+                UpdateIgnition1State();
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestIgn1Right)
+            {
+                _ign1Right = ((LightBoolStruct)data.dwData[0]).value;
+                UpdateIgnition1State();
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestIgn1Starter)
+            {
+                _ign1Starter = ((LightBoolStruct)data.dwData[0]).value;
+                UpdateIgnition1State();
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestIgn2Left)
+            {
+                _ign2Left = ((LightBoolStruct)data.dwData[0]).value;
+                UpdateIgnition2State();
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestIgn2Right)
+            {
+                _ign2Right = ((LightBoolStruct)data.dwData[0]).value;
+                UpdateIgnition2State();
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestIgn2Starter)
+            {
+                _ign2Starter = ((LightBoolStruct)data.dwData[0]).value;
+                UpdateIgnition2State();
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestFuelPump1)
+            {
+                _readFuelpump1 = ((LightBoolStruct)data.dwData[0]).value;
+                UpdateFuelPumpState();
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestFuelPump2)
+            {
+                _readFuelpump2 = ((LightBoolStruct)data.dwData[0]).value;
+                UpdateFuelPumpState();
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestFuelPump1_2024)
+            {
+                _readFuelpump1_2024 = ((LightBoolStruct)data.dwData[0]).value;
+                UpdateFuelPumpState();
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestFuelPump2_2024)
+            {
+                _readFuelpump2_2024 = ((LightBoolStruct)data.dwData[0]).value;
+                UpdateFuelPumpState();
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestFuelPumpIdx3_2024)
+            {
+                _readFuelpumpIdx3_2024 = ((LightBoolStruct)data.dwData[0]).value;
+                UpdateFuelPumpState();
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestCom1)
+            {
+                bool newCom1Active = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (newCom1Active != com1Active || newCom1Active != com1Tx)
+                {
+                    com1Active = newCom1Active;
+                    com1Tx = newCom1Active;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestCom2)
+            {
+                bool newCom2Active = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (newCom2Active != com2Active || newCom2Active != com2Tx)
+                {
+                    com2Active = newCom2Active;
+                    com2Tx = newCom2Active;
+                    pbMain.Invalidate();
+                }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestComReceiveAll)
+            {
+                bool newComReceiveAll = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (newComReceiveAll != comReceiveAll) { comReceiveAll = newComReceiveAll; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestDmeSound)
+            {
+                bool newDmeActive = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (newDmeActive != dmeActive) { dmeActive = newDmeActive; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestSpkrSound)
+            {
+                bool newSpkrActive = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (newSpkrActive != spkrActive) { spkrActive = newSpkrActive; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestMkrMute)
+            {
+                bool newMkrMute = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (newMkrMute != mkrMute) { mkrMute = newMkrMute; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestNav1Sound)
+            {
+                bool newNav1Active = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (newNav1Active != nav1Active) { nav1Active = newNav1Active; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestAdfSound)
+            {
+                bool newAdfActive = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (newAdfActive != adfMute) { adfMute = newAdfActive; pbMain.Invalidate(); }
+                return;
+            }
+            if (data.dwRequestID == (uint)REQUESTS.RequestNav2Sound)
+            {
+                bool newNav2Active = ((LightBoolStruct)data.dwData[0]).value != 0;
+                if (newNav2Active != nav2Active) { nav2Active = newNav2Active; pbMain.Invalidate(); }
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestParkingBrake)
@@ -7918,62 +9033,15 @@ namespace SimConnect3
             {
                 Struct1 s1 = (Struct1)data.dwData[0];
                 bool needsRepaint = false;
-                bool newCom1Active = (s1.com_transmit_1 & 1) != 0;
-                bool newCom2Active = (s1.com_transmit_2 & 1) != 0;
-                bool newComReceiveAll = (s1.com_receive_all & 1) != 0;
-                bool newDmeActive = (s1.dme_sound & 1) != 0;
-                bool newNav1Active = (s1.nav1_sound & 1) != 0;
-                bool newSpkrActive = (s1.spkr_sound & 1) != 0;
-                bool newMkrMute = (s1.mkr_mute & 1) != 0;
-                bool newAdfActive = (s1.adf_sound & 1) != 0;
-                bool newNav2Active = (s1.nav2_sound & 1) != 0;
-                bool newBeacon = (s1.read_beacon & 1) != 0;
-                bool newLand = (s1.read_land & 1) != 0;
-                bool newTaxi = (s1.read_taxi & 1) != 0;
-                bool newNav = (s1.read_nav & 1) != 0;
-                bool newStrobe = (s1.read_strobe & 1) != 0;
-                bool newRecogn = (s1.read_recogn & 1) != 0;
-                // Baron G58 (2020, confirmat 2026-08-26): LIGHT PANEL llegeix invertida respecte al
-                // switch real del VC — mateix patró d'asimetria vist en altres avions (Bonanza/Cirrus fuel
-                // selector). El COMANDAMENT (SWITCH_PANELLIGHT, un toggle pla) no cal tocar-lo, només com
-                // interpretem la lectura.
-                // C172 (2020, confirmat 2026-08-27): exclosa d'aquesta lectura genèrica — el llum de
-                // panell real ve del potenciòmetre A:LIGHT POTENTIOMETER:3, no del booleà "LIGHT PANEL"
-                // (RequestC172PanelLightPot més amunt).
-                bool newPanelLight = (IsC172() && !_isMsfs2024)
-                    ? panelLightActive
-                    : (IsBaronG58() && !_isMsfs2024)
-                        ? (s1.read_panellight & 1) == 0
-                        : (s1.read_panellight & 1) != 0;
+                // COM1/COM2/COM RECEIVE ALL/DME/NAV1/SPKR/MKR/ADF/NAV2 ja no es llegeixen aquí — cada
+                // una té la seva pròpia definició (veure handlers de RequestCom1/Com2/ComReceiveAll/
+                // DmeSound/SpkrSound/MkrMute/Nav1Sound/AdfSound/Nav2Sound).
+                // Les 7 llums (BEACON/LANDING/TAXI/NAV/STROBE/RECOGNITION/PANEL) ja no es llegeixen
+                // aquí — cada una té la seva pròpia definició (veure handlers de RequestLightXxx).
                 bool newPitotheat = (s1.read_pitotheat & 1) != 0;
-                bool newFuelpump1;
-                bool newFuelpump2;
-                if (UsesPump1_3StateUi())
-                {
-                    // Estat gestionat localment pels clics (StepFuelPumpBaron), no per lectura del simulador.
-                    newFuelpump1 = _fuelPump1State3 != 2; // != OFF
-                    newFuelpump2 = _fuelPump2State3 != 2;
-                }
-                else if (_isMsfs2024)
-                {
-                    newFuelpump1 = IsDA40() ? (s1.read_fuelpump_idx3_2024 & 1) != 0 : (s1.read_fuelpump1_2024 & 1) != 0;
-                    newFuelpump2 = (s1.read_fuelpump2_2024 & 1) != 0;
-                }
-                else
-                {
-                    newFuelpump1 = (s1.read_fuelpump1 & 1) != 0;
-                    newFuelpump2 = (s1.read_fuelpump2 & 1) != 0;
-                }
-                if (IsC408())
-                {
-                    int newIdx3 = (s1.read_fuelpump_idx3_2024 & 1) != 0 ? 1 : 0;
-                    if (newIdx3 != _c408Idx3)
-                    {
-                        Debug.WriteLine($"[C408 FUELSYSTEM PUMP SWITCH:3] {_c408Idx3} -> {newIdx3}");
-                        _c408Idx3 = newIdx3;
-                        UpdateC408SeSelectorFromPumpSwitches();
-                    }
-                }
+                // fuelpump1Active/2Active (GENERAL ENG FUEL PUMP SWITCH:1/2, FUELSYSTEM PUMP SWITCH:1/2/3)
+                // i el hook del selector C408 ja no es decideixen aquí — lectura pròpia independent,
+                // veure UpdateFuelPumpState() i els handlers de RequestFuelPump1/2/1_2024/2_2024/Idx3_2024.
                 gearNosePercent = (int)s1.gear_center;
                 gearLeftPercent = (int)s1.gear_left;
                 gearRightPercent = (int)s1.gear_right;
@@ -7993,105 +9061,12 @@ namespace SimConnect3
                 //System.Diagnostics.Debug.WriteLine($"DME SOUND raw={s1.dme_read}");
                 //System.Diagnostics.Debug.WriteLine(">>> OnRecvSimobjectData CALLED");
                 //bool newDmeActive = s1.dme_read == 1;
-                // flapsNumPositions/flapsPoscPalanca (RequestFlapsPos) i elevatorTrim/rudderTrim
-                // (RequestElevatorTrimPos/RequestRudderTrimPos) ja no es llegeixen aquí — tenen
+                // flapsNumPositions/flapsPoscPalanca (RequestFlapsNumPos/RequestFlapsHandleIndex) i
+                // elevatorTrim/rudderTrim (RequestElevatorTrimPos/RequestRudderTrimPos) ja no es llegeixen aquí — tenen
                 // lectura pròpia independent (sync + activa només quan cal, veure els seus handlers
                 // respectius).
 
-                if (newCom1Active != com1Active)
-                {
-                    com1Active = newCom1Active;
-
-                    needsRepaint = true;
-                }
-                if (newCom2Active != com2Active)
-                {
-                    com2Active = newCom2Active;
-
-                    needsRepaint = true;
-                }
-                if (newComReceiveAll != comReceiveAll)
-                {
-                    comReceiveAll = newComReceiveAll;
-
-                    needsRepaint = true;
-                }
-                if (newDmeActive != dmeActive)
-                {
-                    dmeActive = newDmeActive;
-
-                    needsRepaint = true;
-                }
-                if (newNav1Active != nav1Active)
-                {
-                    nav1Active = newNav1Active;
-
-                    needsRepaint = true;
-                }
-                if (newSpkrActive != spkrActive)
-                {
-                    spkrActive = newSpkrActive;
-
-                    needsRepaint = true;
-                }
-                if (newMkrMute != mkrMute)
-                {
-                    mkrMute = newMkrMute;
-
-                    needsRepaint = true;
-                }
-                if (newAdfActive != adfMute)
-                {
-                    adfMute = newAdfActive;
-
-                    needsRepaint = true;
-                }
-                if (newNav2Active != nav2Active)
-                {
-                    nav2Active = newNav2Active;
-
-                    needsRepaint = true;
-                }
-                if (newBeacon != beaconActive )
-                {
-                    beaconActive = newBeacon;
-
-                    needsRepaint = true;
-                }
-                if (newLand != landActive)
-                {
-                    landActive = newLand;
-
-                    needsRepaint = true;
-                }
-                if (newTaxi != taxiActive)
-                {
-                    taxiActive = newTaxi;
-
-                    needsRepaint = true;
-                }
-                if (newNav != navActive)
-                {
-                    navActive = newNav;
-
-                    needsRepaint = true;
-                }
-                if (newStrobe != strobeActive)
-                {
-                    strobeActive = newStrobe;
-
-                    needsRepaint = true;
-                }
-                if (newRecogn != recognActive)
-                {
-                    recognActive = newRecogn;
-                    needsRepaint = true;
-                }
-                if (newPanelLight != panelLightActive)
-                {
-                    panelLightActive = newPanelLight;
-                    needsRepaint = true;
-                }
+                // BEACON/LAND/TAXI/NAV/STROBE/RECOGNITION/PANEL ja no s'apliquen aquí — lectura pròpia.
                 // Caravan: exclosa del tot, independent del sim — 2024 fa servir L:XMLVAR_DEICE_MASTER,
                 // 2020 fa servir L:DEICE_Airframe_1 (RequestCaravanDeice, més precisa que aquest booleà
                 // genèric perquè distingeix HIGH/NORM, no només ON/OFF). Igual que amb els fuel selectors,
@@ -8168,286 +9143,19 @@ namespace SimConnect3
 
                     needsRepaint = true;
                 }
-                if (newFuelpump1 != fuelpump1Active)
-                {
-                    fuelpump1Active = newFuelpump1;
-
-                    needsRepaint = true;
-                }
-                if (newFuelpump2 != fuelpump2Active)
-                {
-                    fuelpump2Active = newFuelpump2;
-
-                    needsRepaint = true;
-                }
-                bool newMasterBatteryOff = s1.elec_master_battery == 0;
-                if (newMasterBatteryOff != masterBatteryOff)
-                {
-                    masterBatteryOff = newMasterBatteryOff;
-                    needsRepaint = true;
-                }
-                // DA-62/C172/Caravan (MSFS2024): exclosos — "AVIONICS MASTER SWITCH:1/2" no reflecteix el
-                // seu sistema elèctric modular (LINE CONNECTION); cadascun té la seva pròpia lectura
-                // dedicada de dalt (mateix bug recurrent que ja ha passat amb els selectors de combustible
-                // — veure memòria). La Caravan, la C172 i la DA-62 a MSFS2020 no tenen aquesta lectura
-                // dedicada (és un mecanisme 2024 que no existia abans), així que aquí sí que s'ha de fer servir.
-                if (!(IsDA62() && _isMsfs2024) && !(IsC172() && _isMsfs2024) && !(IsCaravan() && _isMsfs2024))
-                {
-                    bool newAvionics1Off = s1.avionics_master_1 == 0;
-                    if (newAvionics1Off != avionics1Off)
-                    {
-                        avionics1Off = newAvionics1Off;
-                        needsRepaint = true;
-                    }
-                }
-                // Cirrus SR22 / DA-40 (2020): l'avió només té UN interruptor d'avionics físic, però MSFS
-                // reflecteix el mateix estat a AVIONICS MASTER SWITCH:1 i :2 — exclosa la lectura del 2
-                // perquè no mogui l'interruptor dret, que aquí no existeix (a la DA-40 també queda
-                // inactiu del tot al clic, veure OnClickEnabled a AVIONICS2-TOGGLE).
-                if (!(IsC172() && _isMsfs2024) && !(IsCaravan() && _isMsfs2024) && !(IsCirrusSR22() && !_isMsfs2024) && !(IsDA40() && !_isMsfs2024))
-                {
-                    bool newAvionics2Off = s1.avionics_master_2 == 0;
-                    if (newAvionics2Off != avionics2Off)
-                    {
-                        avionics2Off = newAvionics2Off;
-                        needsRepaint = true;
-                    }
-                }
-                bool newAltGen1Off = s1.gen_master_alt_1 == 0;
-                bool newAltGen2Off = s1.gen_master_alt_2 == 0;
-                if (newAltGen1Off != altGen1Off)
-                {
-                    Debug.WriteLine($"[ALTGEN1 GENERAL ENG MASTER ALTERNATOR:1] altGen1Off {altGen1Off} -> {newAltGen1Off}");
-                    altGen1Off = newAltGen1Off;
-                    needsRepaint = true;
-                }
-                if (!(IsCaravan() && _isMsfs2024) && !IsDA40() && newAltGen2Off != altGen2Off)
-                {
-                    altGen2Off = newAltGen2Off;
-                    needsRepaint = true;
-                }
-                bool newStarter1 = s1.ign1_starter != 0;
-                starter1Active = newStarter1;
-                needsRepaint = true;
-                bool newStarter2 = s1.ign2_starter != 0;
-                starter2Active = newStarter2;
-                int newIgn1Pos;
-                if      (s1.ign1_left == 0 && s1.ign1_right == 0 && s1.ign1_starter == 0) newIgn1Pos = 0; // OFF
-                else if (s1.ign1_left == 0 && s1.ign1_right == 1 && s1.ign1_starter == 0) newIgn1Pos = 1; // RIGHT
-                else if (s1.ign1_left == 1 && s1.ign1_right == 0 && s1.ign1_starter == 0) newIgn1Pos = 2; // LEFT
-                else if (s1.ign1_left == 1 && s1.ign1_right == 1 && s1.ign1_starter == 0) newIgn1Pos = 3; // BOTH
-                else if (s1.ign1_left == 1 && s1.ign1_right == 1 && s1.ign1_starter == 1) newIgn1Pos = 4; // START
-                else newIgn1Pos = ign1Pos; // mantenim l'últim valor conegut
-                if (newIgn1Pos != ign1Pos) { ign1Pos = newIgn1Pos; needsRepaint = true; }
-                int newIgn2Pos;
-                if      (s1.ign2_left == 0 && s1.ign2_right == 0 && s1.ign2_starter == 0) newIgn2Pos = 0;
-                else if (s1.ign2_left == 0 && s1.ign2_right == 1 && s1.ign2_starter == 0) newIgn2Pos = 1;
-                else if (s1.ign2_left == 1 && s1.ign2_right == 0 && s1.ign2_starter == 0) newIgn2Pos = 2;
-                else if (s1.ign2_left == 1 && s1.ign2_right == 1 && s1.ign2_starter == 0) newIgn2Pos = 3;
-                else if (s1.ign2_left == 1 && s1.ign2_right == 1 && s1.ign2_starter == 1) newIgn2Pos = 4;
-                else newIgn2Pos = ign2Pos;
-                if (newIgn2Pos != ign2Pos) { ign2Pos = newIgn2Pos; needsRepaint = true; }
+                // fuelpump1Active/2Active, masterBatteryOff, avionics1Off/2Off, altGen1Off/2Off,
+                // starter1Active/2Active i ign1Pos/ign2Pos ja no es decideixen aquí — lectura pròpia
+                // independent per a cada camp (veure UpdateFuelPumpState/UpdateIgnition1State/
+                // UpdateIgnition2State i els handlers RequestMasterBattery/Avionics1/Avionics2/AltGen1/
+                // AltGen2/Ign1Left/Ign1Right/Ign1Starter/Ign2Left/Ign2Right/Ign2Starter).
                 numEngines = s1.num_engines;
 
-                int newFuel1Pos, newFuel2Pos;
-
-                if (IsBonanzaG36())
-                {
-                    // Selector únic (SW_SE_SELECTOR), no els 2 ganivets fuel1Pos/fuel2Pos. Reutilitza la
-                    // mateixa lectura "FUEL TANK SELECTOR:1" ja present a Struct1 (s1.fuel_selector_1).
-                    // ASIMETRIA confirmada: escriure (K:FUEL_SELECTOR_SET) i llegir (FUEL TANK SELECTOR:1)
-                    // fan servir codis DIFERENTS per Right — escriure 1 mou a Right, però llegit torna 3
-                    // (verificat movent el selector a mà al VC): lectura real 0=Off, 2=Left, 3=Right.
-                    if (s1.fuel_selector_1 != _bonanzaFuelSelectorRawLast)
-                    {
-                        Debug.WriteLine($"[BONANZA FUEL TANK SELECTOR:1] {_bonanzaFuelSelectorRawLast} -> {s1.fuel_selector_1}");
-                        _bonanzaFuelSelectorRawLast = s1.fuel_selector_1;
-                    }
-                    int newPosFromRead = s1.fuel_selector_1 switch { 0 => 0, 2 => 1, 3 => 2, _ => seSelectorPos };
-                    if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
-                    {
-                        seSelectorPos = newPosFromRead;
-                        needsRepaint = true;
-                    }
-                    newFuel1Pos = fuel1Pos;
-                    newFuel2Pos = fuel2Pos;
-                }
-                else if (IsCirrusSR22())
-                {
-                    // Selector únic, mateixa lectura reutilitzada que Bonanza/C400. ASIMETRIA confirmada
-                    // per Pere movent el selector a mà al VC i mirant el Debug Output (igual que la
-                    // Bonanza: escriptura i lectura NO fan servir el mateix codi): raw 0=OFF, raw 2=LEFT,
-                    // raw 3=RIGHT (valors reals confirmats, no coincideixen amb els d'escriptura 0/1/2).
-                    if (s1.fuel_selector_1 != _cirrusFuelSelectorRawLast)
-                    {
-                        Debug.WriteLine($"[CIRRUS FUEL TANK SELECTOR:1] {_cirrusFuelSelectorRawLast} -> {s1.fuel_selector_1}");
-                        _cirrusFuelSelectorRawLast = s1.fuel_selector_1;
-                    }
-                    int newPosFromRead = s1.fuel_selector_1 switch { 0 => 0, 2 => 1, 3 => 2, _ => seSelectorPos };
-                    if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
-                    {
-                        seSelectorPos = newPosFromRead;
-                        needsRepaint = true;
-                    }
-                    newFuel1Pos = fuel1Pos;
-                    newFuel2Pos = fuel2Pos;
-                }
-                else if (IsDA40() && !_isMsfs2024)
-                {
-                    // DA-40 (2020 NOMÉS) — mateix patró que Bonanza/Cirrus: selector únic (SW_SE_SELECTOR),
-                    // reutilitza "FUEL TANK SELECTOR:1" ja present a Struct1. A diferència de la Bonanza,
-                    // aquí escriptura (K:FUEL_SELECTOR_SET) i lectura fan servir la MATEIXA codificació
-                    // (0=OFF, 2=LEFT, 3=RIGHT), confirmada via revòlver SEND (2026-08-28).
-                    if (s1.fuel_selector_1 != _da40FuelSelectorRawLast)
-                    {
-                        Debug.WriteLine($"[DA40 FUEL TANK SELECTOR:1] {_da40FuelSelectorRawLast} -> {s1.fuel_selector_1}");
-                        _da40FuelSelectorRawLast = s1.fuel_selector_1;
-                    }
-                    int newPosFromRead = s1.fuel_selector_1 switch { 0 => 0, 2 => 1, 3 => 2, _ => seSelectorPos };
-                    if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
-                    {
-                        seSelectorPos = newPosFromRead;
-                        needsRepaint = true;
-                    }
-                    newFuel1Pos = fuel1Pos;
-                    newFuel2Pos = fuel2Pos;
-                }
-                else if (IsC172() && !_isMsfs2024)
-                {
-                    // C172 Skyhawk (2020 NOMÉS, 2026-09-01) — mateix patró que Bonanza/Cirrus/DA40-2020:
-                    // selector únic, reutilitza "FUEL TANK SELECTOR:1" ja present a Struct1. Enum clàssic
-                    // (0=Off, 1=All, 2=Left, 3=Right) — el Skyhawk no té Off, per això qualsevol valor que
-                    // no sigui 2(Left)/3(Right) es tracta com a BOTH.
-                    if (s1.fuel_selector_1 != _c172FuelSelectorRawLast)
-                    {
-                        Debug.WriteLine($"[C172 SKYHAWK 2020 FUEL TANK SELECTOR:1] {_c172FuelSelectorRawLast} -> {s1.fuel_selector_1}");
-                        _c172FuelSelectorRawLast = s1.fuel_selector_1;
-                    }
-                    int newPosFromRead = s1.fuel_selector_1 switch { 2 => 0, 3 => 2, _ => 1 };
-                    if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
-                    {
-                        seSelectorPos = newPosFromRead;
-                        needsRepaint = true;
-                    }
-                    newFuel1Pos = fuel1Pos;
-                    newFuel2Pos = fuel2Pos;
-                }
-                else if (IsDA40() && _isMsfs2024)
-                {
-                    // DA-40 (2024 NOMÉS, 2026-08-30) — feedback real: FUELSYSTEM VALVE SWITCH:1 (=1 quan
-                    // NORMAL/Left actiu) i SWITCH:2 (=1 quan EMERGENCY/Right actiu), ja llegits per
-                    // RequestDA40FuelTankSelector/2 (registrats a Simconnect_OnRecvOpen). Ambdós a 0 = OFF.
-                    int newPosFromRead = _daFuelTankSelector2 >= 0.5 ? 2 : (_daFuelTankSelector >= 0.5 ? 1 : 0);
-                    if (newPosFromRead != seSelectorPos && DateTime.UtcNow >= _seSelectorIgnoreFollowUntil)
-                    {
-                        seSelectorPos = newPosFromRead;
-                        needsRepaint = true;
-                    }
-                    newFuel1Pos = fuel1Pos;
-                    newFuel2Pos = fuel2Pos;
-                }
-                else if (IsCaravan() && _isMsfs2024)
-                {
-                    // Caravan (MSFS2024 NOMÉS): monomotor (numEngines==1), per això cauria al bloc "SINGLE
-                    // ENGINE" de sota, que sobreescriu fuel1Pos/fuel2Pos cada frame amb la SimVar legacy
-                    // "FUEL TANK SELECTOR:1" — irrellevant per aquest avió A 2024 (fa servir FUELSYSTEM
-                    // VALVE SWITCH:1/4, vegeu RequestDA40FuelTankSelector/4 més amunt) i causava els
-                    // "rebots" que anul·laven el feedback real. Exclòs: fuel1Pos/fuel2Pos ja els actualitzen
-                    // aquells handlers dedicats.
-                    // MSFS2020 (confirmat 2026-08-26): la Caravan NO té lectura dedicada — cau al bloc
-                    // "SINGLE ENGINE" de sota, que SÍ és la lectura real correcta (A:FUEL TANK SELECTOR:1,
-                    // el mateix mecanisme confirmat amb candidates de K:FUEL_SELECTOR_SET, 0=OFF/1=BOTH/
-                    // 2=LEFT/3=RIGHT). Aquesta branca abans excloïa la Caravan SEMPRE (sense `_isMsfs2024`),
-                    // deixant fuel1Pos/fuel2Pos sense sincronitzar mai a 2020 — arrel del moviment
-                    // descontrolat que reportava Pere.
-                    newFuel1Pos = fuel1Pos;
-                    newFuel2Pos = fuel2Pos;
-                }
-                else if (IsDA62() && !_isMsfs2024)
-                {
-                    // DA-62 (2020, 2026-08-28) — preset MobiFlight/HubHop real (Imadunatic) confirma que
-                    // l'enum de A:FUEL TANK SELECTOR:1/2 per aquestes palanques NO és el 0/2/3 genèric
-                    // d'altres bimotors. Esquerra (selector:1): 0=OFF, 19=ON(Left Main), 20=CROSSFEED
-                    // (Right Main). Dreta (selector:2): 20=ON(Right Main, confirmat), 0=OFF i 19=CROSSFEED
-                    // (Left Main) inferits per simetria — pendent de confirmar del tot.
-                    if (s1.fuel_selector_1 == 0)       newFuel1Pos = 0; // OFF
-                    else if (s1.fuel_selector_1 == 19) newFuel1Pos = 1; // ON (Left Main)
-                    else if (s1.fuel_selector_1 == 20) newFuel1Pos = 2; // CROSSFEED (Right Main)
-                    else                                newFuel1Pos = fuel1Pos;
-                    if (s1.fuel_selector_2 == 19)       newFuel2Pos = 0; // CROSSFEED (Left Main)
-                    else if (s1.fuel_selector_2 == 20)  newFuel2Pos = 1; // ON (Right Main)
-                    else if (s1.fuel_selector_2 == 0)   newFuel2Pos = 2; // OFF
-                    else                                 newFuel2Pos = fuel2Pos;
-                }
-                else if (_isMsfs2024 && numEngines >= 2)
-                {
-                    // Bimotors MSFS2024: estat actualitzat pels handlers dedicats RequestFuelSelLeft/Right
-                    // (L:FUEL_Switch_Cutoff_Crossfeed_1/_2) — la SimVar "FUEL TANK SELECTOR" no reflecteix
-                    // el sistema de junctions (FUELSYSTEM_JUNCTION_SET). Confirmat al Baron G58; si un altre
-                    // bimotor 2024 no es sincronitza bé, probablement necessita el seu propi nom de L:Var
-                    // i/o número de junction — no assumir que són els mateixos sense verificar-ho.
-                    newFuel1Pos = fuel1Pos;
-                    newFuel2Pos = fuel2Pos;
-                }
-                else if (numEngines >= 2)
-                {
-                    // TWIN ENGINE — selectors independents
-                    if (IsBaronG58() && !_isMsfs2024 && DateTime.UtcNow < _fuelSel1IgnoreFollowUntil)
-                    {
-                        // Baron G58 (2020, confirmat 2026-08-26): mateix rebot transitori just després
-                        // del clic que ja vam veure a la Caravan — ignorem la lectura una finestra curta.
-                        newFuel1Pos = fuel1Pos;
-                    }
-                    else if (s1.fuel_selector_1 == 0 || s1.fuel_selector_1 == 20) newFuel1Pos = 0; // OFF
-                    else if (s1.fuel_selector_1 == 2)                              newFuel1Pos = 1; // ON
-                    else if (s1.fuel_selector_1 == 3)                              newFuel1Pos = 2; // CF
-                    else                                                           newFuel1Pos = fuel1Pos;
-
-                    if (IsBaronG58() && !_isMsfs2024 && DateTime.UtcNow < _fuelSel2IgnoreFollowUntil)
-                    {
-                        newFuel2Pos = fuel2Pos;
-                    }
-                    else if (s1.fuel_selector_2 == 2)                              newFuel2Pos = 0; // CF
-                    else if (s1.fuel_selector_2 == 3)                              newFuel2Pos = 1; // ON
-                    else if (s1.fuel_selector_2 == 0 || s1.fuel_selector_2 == 20) newFuel2Pos = 2; // OFF
-                    else                                                           newFuel2Pos = fuel2Pos;
-                }
-                else if (IsCaravan() && DateTime.UtcNow < _fuelSel1IgnoreFollowUntil)
-                {
-                    // Caravan (2020, confirmat 2026-08-26): just després d'un clic, la lectura real
-                    // "rebota" per un instant abans d'assentar-se (mateix patró que STARTER/IGNITION) —
-                    // ignorem la lectura durant una finestra curta, mantenint l'estat local del clic.
-                    newFuel1Pos = fuel1Pos;
-                    newFuel2Pos = fuel2Pos;
-                }
-                else
-                {
-                    // SINGLE ENGINE — 1 selector, 2 knobs sincronitzats
-                    // MSFS: 0=OFF, 1=ALL/BOTH, 2=LEFT, 3=RIGHT, 16=BOTH
-                    switch (s1.fuel_selector_1)
-                    {
-                        case 0: case 20:                    // OFF → ambdós OFF
-                            newFuel1Pos = 0; newFuel2Pos = 2; break;
-                        case 2:                             // LEFT → esquerre ON, dret OFF
-                            newFuel1Pos = 1; newFuel2Pos = 2; break;
-                        case 3:                             // RIGHT → esquerre OFF, dret ON
-                            newFuel1Pos = 0; newFuel2Pos = 1; break;
-                        case 1: case 16:                    // BOTH → ambdós ON
-                            newFuel1Pos = 1; newFuel2Pos = 1; break;
-                        default:
-                            newFuel1Pos = fuel1Pos; newFuel2Pos = fuel2Pos; break;
-                    }
-                }
-
-                if (newFuel1Pos != fuel1Pos) { fuel1Pos = newFuel1Pos; needsRepaint = true; }
-                if (newFuel2Pos != fuel2Pos) { fuel2Pos = newFuel2Pos; needsRepaint = true; }
+                // fuel1Pos/fuel2Pos (FUEL TANK SELECTOR:1/2) ja no es decideixen aquí — tenen lectura
+                // pròpia independent, veure UpdateFuelSelectorState() i els handlers de
+                // RequestFuelTankSelector1/2.
                 //dmeActive = s1.dme_read == 1; // o la variable que ja estàs llegint
 
-                //com1Tx = s1.com_transmit_1 == 1;
-                //com2Tx = s1.com_transmit_2 == 1;
-                com1Tx = (s1.com_transmit_1 & 1) != 0;
-                com2Tx = (s1.com_transmit_2 & 1) != 0;
-                //Debug.WriteLine($"COM TX raw: c1={s1.com_transmit_1} c2={s1.com_transmit_2} -> b1={com1Tx} b2={com2Tx}");
+                // com1Tx/com2Tx ja no es decideixen aquí — veure RequestCom1/RequestCom2.
 
                 displayBackupActive_bool = s1.displayBackupActive > 0.5;
                 // TBM930 (2024): igual que el crashbar, _elecSourceSwitch el porta SetElecSourceSwitch()
@@ -8492,87 +9200,19 @@ namespace SimConnect3
                 _masterCautionActive = s1.masterCautionActive;
                 _masterWarningActive = s1.masterWarningActive;
                 _aileronTrimFrac = s1.aileronTrimFrac;
-                // G3K fuel selector animation
-                {
-                    float fselTarget = s1.fuel_selector_1 == 2 ? 245f : (s1.fuel_selector_1 == 3 ? 113f : 0f);
-                    if (_g3kFuelSelAngle < 0f)
-                    {
-                        _g3kFuelSelAngle = fselTarget;
-                        _g3kFuelSelTargetAngle = fselTarget;
-                    }
-                    else if (fselTarget != _g3kFuelSelTargetAngle)
-                    {
-                        _g3kFuelSelTargetAngle = fselTarget;
-                        _g3kFuelSelLastPaint = DateTime.MinValue;
-                        needsRepaint = true;
-                    }
-                }
+                // L'animació del rotatiu de combustible (G3K_FSEL_SW) ja no es decideix aquí — veure
+                // UpdateFuelSelectorState().
                 _rudderTrimDisabled = s1.rudderTrimDisabled;
                 _aileronTrimDisabled = s1.aileronTrimDisabled;
-                if (_lightingLogo1 != s1.lightingLogo1) { _lightingLogo1 = s1.lightingLogo1; needsRepaint = true; }
-                _lightingWing1 = s1.lightingWing1;
-                _lightLogo = s1.lightLogo;
+                // LIGHT LOGO / L:LIGHTING_LOGO_1 / L:LIGHTING_WING_1 ja no es llegeixen aquí — lectura pròpia.
                 _circuitConn17 = s1.circuitConn17;
-                if (_g3000Active && pbMain.IsHandleCreated)
-                {
-                    pbMain.BeginInvoke(new Action(() =>
-                    {
-                        if (!_thrHandleLeftRail && _thrQuadrantVisible && !_thrHandleDragging && DateTime.UtcNow > _thrIgnoreFollowUntil)
-                        {
-                            if (!double.IsNaN(_lastThrLeverPos) && Math.Abs(s1.thrLeverPos - _lastThrLeverPos) > 200)
-                            {
-                                var taxiA5 = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_TAXI");
-                                var thrH5 = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
-                                if (taxiA5 != null && thrH5 != null)
-                                    _thrHandleLeftRailCenterY = taxiA5.BasePos.Y + taxiA5.Bounds.Height / 2 - thrH5.Bounds.Height / 2;
-                                _thrHandleLeftRail = true;
-                                _taxiPropActive = true;
-                            }
-                            _lastThrLeverPos = s1.thrLeverPos;
-                        }
-                        if (_thrQuadrantVisible && !_thrHandleDragging && DateTime.UtcNow > _thrIgnoreFollowUntil && _thrHandleLeftRail)
-                        {
-                            var thrH4 = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
-                            if (thrH4 != null)
-                            {
-                                int read = (int)s1.thrLeverPos;
-                                int centerY = _thrHandleLeftRailCenterY;
-                                int handleY;
-                                if (read >= 0)
-                                    handleY = centerY - (int)((long)read * 375 / 16383);
-                                else
-                                    handleY = centerY - (int)((long)read * 250 / 2048);
-                                handleY = Math.Max(centerY - 375, Math.Min(centerY + 250, handleY));
-                                thrH4.BasePos = new Point(3694, handleY);
-                                pbMain.BeginInvoke(new Action(() => pbMain.Invalidate()));
-                            }
-                        }
-                        // Seguiment carril dret des de MSFS (fuel valve / prop+thr)
-                        if (_thrQuadrantVisible && !_thrHandleDragging && DateTime.UtcNow > _thrIgnoreRightRailUntil) // anti-rebot
-                        {
-                            if (s1.fuelValve == 0)
-                            {
-                                if (_thrHandleLeftRail) { _thrHandleLeftRail = false; _lastThrLeverPos = double.NaN; }
-                                MoveThrHandle(_thrHandleDefaultY + 150);
-                            }
-                            else if ((int)s1.propLeverPos == -4096 && (int)s1.thrLeverPos == 4915)
-                            {
-                                if (_thrHandleLeftRail) { _thrHandleLeftRail = false; _lastThrLeverPos = double.NaN; }
-                                MoveThrHandle(_thrHandleDefaultY - 170);
-                            }
-                            else if ((int)s1.propLeverPos == -4096 && (int)s1.thrLeverPos == 0)
-                            {
-                                if (_thrHandleLeftRail) { _thrHandleLeftRail = false; _lastThrLeverPos = double.NaN; }
-                                var liArea2 = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_LOWIDLE");
-                                var thrHli2 = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_HANDLE");
-                                if (liArea2 != null && thrHli2 != null)
-                                    MoveThrHandle(liArea2.BasePos.Y + liArea2.Bounds.Height / 2 - thrHli2.Bounds.Height / 2);
-                                else
-                                    MoveThrHandle(_thrHandleDefaultY);
-                            }
-                        }
-                    }));
-                }
+                // GENERAL ENG THROTTLE LEVER POSITION:1 ja no es llegeix aquí — té lectura pròpia
+                // independent (veure UpdateThrHandleFromLeverPos). propLeverPos/fuelValve es queden
+                // dins Struct1 (canvien poc) i es guarden en una còpia perquè aquell mètode hi pugui
+                // accedir sense dependre de Struct1.
+                _propLeverPosCached = s1.propLeverPos;
+                _fuelValveCached = s1.fuelValve;
+                UpdateThrHandleFromLeverPos(includeRightRailCheck: true);
                 // _fuelSelectionSet es gestiona localment, no es llegeix de MSFS
                 if (_elecCrashbar < 0.5 && (_elecSourceSwitch > 0.5 || _elecGeneratorSwitch > 0.5))
                 {
@@ -8797,6 +9437,9 @@ namespace SimConnect3
                     var sw = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_FSEL_SW");
                     if (sw?.Img != null && _g3kFuelSelAngle >= 0f)
                     {
+                        // El repintat mentre dura la rotació el porta _g3kFuelSelAnimTimer (timer
+                        // dedicat, veure comentari del camp i la seva inicialització) — aquí només
+                        // calculem el pas de l'angle cap a l'objectiu.
                         var nowAnim = DateTime.UtcNow;
                         if (_g3kFuelSelAngle != _g3kFuelSelTargetAngle)
                         {
@@ -8807,8 +9450,6 @@ namespace SimConnect3
                                 _g3kFuelSelAngle = Math.Min(_g3kFuelSelAngle + step, _g3kFuelSelTargetAngle);
                             else
                                 _g3kFuelSelAngle = Math.Max(_g3kFuelSelAngle - step, _g3kFuelSelTargetAngle);
-                            if (_g3kFuelSelAngle != _g3kFuelSelTargetAngle)
-                                this.BeginInvoke(new Action(() => pbMain.Invalidate()));
                         }
                         _g3kFuelSelLastPaint = nowAnim;
 
@@ -10712,7 +11353,19 @@ namespace SimConnect3
                             simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         }
                     }
-                    pbMain.Invalidate();
+                    // Retallat al recorregut del handle i limitat a com a màxim cada 50ms — mateix
+                    // motiu que la roda FLC/VS, veure comentari allà.
+                    if ((DateTime.UtcNow - _lastThrHandleDragInvalidate).TotalMilliseconds >= 50)
+                    {
+                        _lastThrHandleDragInvalidate = DateTime.UtcNow;
+                        const int margin = 30;
+                        var thrDragRect = new Rectangle(
+                            thrHandle.BasePos.X - margin,
+                            minY - margin,
+                            thrHandle.Bounds.Width + margin * 2,
+                            (maxY - minY) + thrHandle.Bounds.Height + margin * 2);
+                        pbMain.Invalidate(ToRealInvalidateRect(thrDragRect));
+                    }
                 }
                 return;
             }
@@ -10873,7 +11526,16 @@ namespace SimConnect3
                 trimFramePos += deltaY / TRIM_PIXELS_PER_FRAME;
                 trimFramePos = ((trimFramePos % RUDDER_TRIM_FRAME_COUNT)
                                + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
-                pbMain.Invalidate(ToRealInvalidateRect(Rectangle.Inflate(trimZone, 80, 80)));
+                // La posició es desa a cada MouseMove (gratis, és matemàtica local), però el
+                // repintat es limita — MouseMove pot disparar-se molt més sovint que qualsevol
+                // timer (al ritme natiu del ratolí/tàctil), i aquest Invalidate() no tenia CAP
+                // límit — era el cost real "ocult" que quedava fora de tots els arreglaments
+                // d'avui (confirmat per Pere, 2026-10-03: la roda seguia anant a tota màquina).
+                if ((DateTime.UtcNow - _lastElevatorTrimInvalidate).TotalMilliseconds >= 50)
+                {
+                    _lastElevatorTrimInvalidate = DateTime.UtcNow;
+                    pbMain.Invalidate(ToRealInvalidateRect(Rectangle.Inflate(trimZone, 80, 80)));
+                }
             }
             if (_g3kTrimDragging)
             {
@@ -10886,7 +11548,12 @@ namespace SimConnect3
                 while (_g3kTrimAccumulatedDelta <= -TRIM_TICK_PIXELS) { SendTrimTick(-1); _g3kTrimAccumulatedDelta += TRIM_TICK_PIXELS; }
                 trimFramePos += deltaY / TRIM_PIXELS_PER_FRAME;
                 trimFramePos = ((trimFramePos % TRIM_FRAME_COUNT) + TRIM_FRAME_COUNT) % TRIM_FRAME_COUNT;
-                pbMain.Invalidate(ToRealInvalidateRect(Rectangle.Inflate(_g3kTrimZone, 80, 80)));
+                // Mateix motiu que el bloc G1000 d'amunt.
+                if ((DateTime.UtcNow - _lastElevatorTrimInvalidate).TotalMilliseconds >= 50)
+                {
+                    _lastElevatorTrimInvalidate = DateTime.UtcNow;
+                    pbMain.Invalidate(ToRealInvalidateRect(Rectangle.Inflate(_g3kTrimZone, 80, 80)));
+                }
             }
             if (_g3kRudderTrimDragging)
             {
@@ -10899,7 +11566,12 @@ namespace SimConnect3
                 while (_g3kRudderTrimAccumulatedDelta <= -RUDDER_TRIM_TICK_PIXELS) { SendRudderTrimTick(-1); _g3kRudderTrimAccumulatedDelta += RUDDER_TRIM_TICK_PIXELS; }
                 rudderTrimFramePos -= deltaX / RUDDER_TRIM_PIXELS_PER_FRAME;
                 rudderTrimFramePos = ((rudderTrimFramePos % RUDDER_TRIM_FRAME_COUNT) + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
-                pbMain.Invalidate(ToRealInvalidateRect(Rectangle.Inflate(_g3kRudderTrimZone, 80, 80)));
+                // Mateix motiu que l'elevator, veure comentari allà.
+                if ((DateTime.UtcNow - _lastRudderTrimInvalidate).TotalMilliseconds >= 50)
+                {
+                    _lastRudderTrimInvalidate = DateTime.UtcNow;
+                    pbMain.Invalidate(ToRealInvalidateRect(Rectangle.Inflate(_g3kRudderTrimZone, 80, 80)));
+                }
             }
             if (g3kApSliderDragging)
             {
@@ -10909,7 +11581,14 @@ namespace SimConnect3
                 g3kApSliderAccumDelta += deltaY;
                 while (g3kApSliderAccumDelta >= G3K_AP_SLIDER_TICK_PIXELS)  { SendG3kApSliderTick(+1); g3kApSliderAccumDelta -= G3K_AP_SLIDER_TICK_PIXELS; }
                 while (g3kApSliderAccumDelta <= -G3K_AP_SLIDER_TICK_PIXELS) { SendG3kApSliderTick(-1); g3kApSliderAccumDelta += G3K_AP_SLIDER_TICK_PIXELS; }
-                pbMain.Invalidate();
+                // Retallat a la zona de la roda i limitat a com a màxim cada 50ms — mateixa tècnica
+                // d'avui (2026-10-03, Pere), MouseMove pot disparar-se molt més sovint que qualsevol
+                // timer i aquest Invalidate() no tenia cap límit.
+                if ((DateTime.UtcNow - _lastG3kApSliderInvalidate).TotalMilliseconds >= 50)
+                {
+                    _lastG3kApSliderInvalidate = DateTime.UtcNow;
+                    pbMain.Invalidate(ToRealInvalidateRect(Rectangle.Inflate(g3kApSliderZone, 20, 20)));
+                }
             }
             if (rudderTrimDragging)
             {
@@ -10924,7 +11603,12 @@ namespace SimConnect3
                 rudderTrimFramePos -= deltaX / RUDDER_TRIM_PIXELS_PER_FRAME;
                 rudderTrimFramePos = ((rudderTrimFramePos % RUDDER_TRIM_FRAME_COUNT)
                                      + RUDDER_TRIM_FRAME_COUNT) % RUDDER_TRIM_FRAME_COUNT;
-                pbMain.Invalidate(ToRealInvalidateRect(Rectangle.Inflate(rudderTrimZone, 80, 80)));
+                // Mateix motiu que l'elevator, veure comentari al bloc G1000 d'amunt.
+                if ((DateTime.UtcNow - _lastRudderTrimInvalidate).TotalMilliseconds >= 50)
+                {
+                    _lastRudderTrimInvalidate = DateTime.UtcNow;
+                    pbMain.Invalidate(ToRealInvalidateRect(Rectangle.Inflate(rudderTrimZone, 80, 80)));
+                }
             }
         }
 
@@ -10940,10 +11624,16 @@ namespace SimConnect3
             {
                 simconnect.TransmitClientEvent(0,SIMCONNECT_EVENTS.TRIM_UP,0,SIMCONNECT_GROUPS.GROUP0,SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             }
-            // Confirmació immediata (no esperar el pròxim tick del timer actiu, 33ms) — el primer
-            // "tick" real de trim és el que marca que de veritat comença a canviar (confirmat per
-            // Pere, 2026-10-02: el retard es notava just a l'inici del gest, no durant).
-            SyncElevatorTrimOnce();
+            // Confirmació immediata NOMÉS al primer tic de l'arrossegament (evita el retard
+            // d'arrencada) — els següents tics NO disparen lectura pròpia, els porta el timer actiu
+            // al seu ritme. Fer-ho a cada tic (com abans) ignorava per complet l'interval del timer
+            // perquè un sol MouseMove ràpid pot cridar SendTrimTick moltes vegades (confirmat per
+            // Pere, 2026-10-03: canviar l'interval de 33 a 100ms no canviava res, aquest era el motiu).
+            if (_elevatorTrimAwaitingFirstTick)
+            {
+                _elevatorTrimAwaitingFirstTick = false;
+                SyncElevatorTrimOnce();
+            }
         }
 
         private void SendRudderTrimTick(int dir)
@@ -10953,7 +11643,12 @@ namespace SimConnect3
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.RUDDER_TRIM_RIGHT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             else
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.RUDDER_TRIM_LEFT,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-            SyncRudderTrimOnce();
+            // Mateix motiu que SendTrimTick: només el primer tic fa lectura immediata.
+            if (_rudderTrimAwaitingFirstTick)
+            {
+                _rudderTrimAwaitingFirstTick = false;
+                SyncRudderTrimOnce();
+            }
         }
 
         private void SendAileronTrimSet(int axisVal)
