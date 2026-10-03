@@ -58,15 +58,12 @@ namespace SimConnect3
         private System.Windows.Forms.Timer? _dataPollTimer;
 
 
-        // Flaps — lectura independent de tota la resta, i FLAPS NUM HANDLE POSITIONS / FLAPS HANDLE
-        // INDEX separades l'una de l'altra (2026-10-03, Pere: no té sentit ajuntar-les; la primera és
-        // pràcticament constant per avió, la segona és la posició real). Totes dues es llegeixen 1
-        // cop en sincronitzar (connexió o canvi d'avió, veure SyncFlapsNumPosOnce/SyncFlapsHandleIndexOnce);
-        // fora d'això, NOMÉS el handle index es torna a llegir, i només quan nosaltres enviem una
-        // comanda de flaps amunt/avall (StartFlapsActiveRead) — llavors activament cada 100ms,
-        // allargant 2s la finestra cada cop que el valor canvia de veritat (debounce), i es para sola
-        // quan passen 2s sense cap canvi (idea de Pere: evita que es quedi llegint per sempre si els
-        // flaps ja són al límit i no hi pot haver canvi).
+        // Flaps — FLAPS NUM HANDLE POSITIONS / FLAPS HANDLE INDEX separades l'una de l'altra
+        // (2026-10-03, Pere: no té sentit ajuntar-les; la primera és pràcticament constant per avió,
+        // la segona és la posició real). NUM POSITIONS es llegeix 1 cop en sincronitzar i prou. HANDLE
+        // INDEX (pas 3 de la unificació) té floor al grup dels 124 (200ms, per tothom) i puja a 50ms
+        // durant 2s quan el propi handler detecta un canvi real — igual que throttle i selector TBM,
+        // tant si l'hem clicat nosaltres com si ha canviat des de fora.
         private System.Windows.Forms.Timer? _flapsActiveReadTimer;
         private DateTime _flapsActiveReadUntilUtc = DateTime.MinValue;
 
@@ -344,16 +341,12 @@ namespace SimConnect3
         private int _fuelTankSelector1 = 0;
         private int _fuelTankSelector2 = 0;
 
-        // Excepció pel TBM930 (2026-10-03, Pere): la TBM té un sistema automàtic que gira el selector
-        // de combustible sol (L a R i viceversa cada x segons) — igual que l'AP mou el trim vertical
-        // sol. Per això, mentre la TBM és l'avió actiu, aquest timer és qui llegeix FUEL TANK
-        // SELECTOR:1/2 en lloc del ritme fix de 200ms (veure PollLowFrequencySimData): normalment a
-        // 1000ms (prou per detectar el canvi automàtic), però a 100ms durant 2s just després que
-        // NOSALTRES cliquem L/R/OFF (StartTbmFuelSelectorActiveRead) — sense això, un clic trigava
-        // fins a 1s a veure's (confirmat per Pere, 2026-10-03: regressió greu, "ja funcionava bé").
-        // S'engega/para del tot quan es detecta entrar/sortir de la TBM.
-        private System.Windows.Forms.Timer? _tbmFuelSelectorPollTimer;
-        private DateTime _tbmFuelSelectorFastUntilUtc = DateTime.MinValue;
+        // FUEL TANK SELECTOR:1/2 (2026-10-03, Pere, pas 2 de la unificació): floor unificat al grup
+        // dels 124 (200ms, per tothom incloent la TBM, que el gira sola automàticament); si qualsevol
+        // dels 2 handlers detecta un canvi real, aquest timer puja a 50ms durant 2s — mateix patró que
+        // el throttle (pas 1). Res de "només si cliquem" ni "només si és la TBM".
+        private System.Windows.Forms.Timer? _fuelTankSelectorActiveReadTimer;
+        private DateTime _fuelTankSelectorActiveReadUntilUtc = DateTime.MinValue;
 
         int _bonanzaFuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de _fuelTankSelector1 vist per la Bonanza (veure Output/Debug de VS)
         int _cirrusFuelSelectorRawLast = int.MinValue; // diagnòstic: valor cru de _fuelTankSelector1 vist per la Cirrus SR22T (veure Output/Debug de VS)
@@ -943,10 +936,10 @@ namespace SimConnect3
             public string title;
         }
 
-        // Flaps, lectura independent de Struct1 i separades l'una de l'altra (2026-10-03, Pere: no té
-        // sentit ajuntar-les): FLAPS NUM HANDLE POSITIONS és pràcticament constant per avió, es
-        // llegeix només en sincronitzar; FLAPS HANDLE INDEX és la posició real, es llegeix també
-        // activament mentre el selector es mou — veure StartFlapsActiveRead() i _flapsActiveReadTimer.
+        // Flaps, separades l'una de l'altra (2026-10-03, Pere: no té sentit ajuntar-les): FLAPS NUM
+        // HANDLE POSITIONS és pràcticament constant per avió, es llegeix només en sincronitzar; FLAPS
+        // HANDLE INDEX és la posició real, amb floor al grup dels 124 i burst a _flapsActiveReadTimer
+        // quan el seu handler detecta un canvi.
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct FlapsNumPosStruct { public int value; }
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -1579,6 +1572,9 @@ namespace SimConnect3
             public Func<Rectangle, bool>? IsHiddenByCover;
             public Func<Point, Point>? TransformMouse;
             public bool ShowAllAreas = false;
+            // PROVA PROVISIONAL (2026-10-03, Pere): avisa frmMain que s'ha enviat una comanda, pel
+            // rectangle negre/verd de l'AUX.
+            public Action? OnAnyClick;
 
             public UiSurface(PictureBox pb)
             {
@@ -1607,6 +1603,7 @@ namespace SimConnect3
                     {
                         b.PressedUntilUtc = DateTime.UtcNow.AddMilliseconds(b.PressVisualMs);
                         b.OnClick?.Invoke();
+                        OnAnyClick?.Invoke();
                         Pb.Invalidate();
                         Pb.Update();
                         break;
@@ -1815,6 +1812,24 @@ namespace SimConnect3
         private bool _elevatorTrimAwaitingFirstTick = false;
         private bool _rudderTrimAwaitingFirstTick = false;
 
+        // PROVA PROVISIONAL (2026-10-03, Pere): marca el moment de l'última comanda enviada a MSFS,
+        // per al rectangle negre/verd de l'AUX i per pujar el floor dels 124 de 1000ms a 200ms a
+        // l'instant (en lloc d'esperar fins a 1000ms que el propi timer se n'adoni sol). Veure
+        // comentari on es crea el rectangle per l'abast exacte (no cobreix tots els punts d'enviament
+        // del codi, només els principals). Torna a 1000ms sol als 2s sense cap comanda nova — veure
+        // PollLowFrequencySimData.
+        private DateTime _lastCommandSentUtc = DateTime.MinValue;
+        private void MarkCommandSent()
+        {
+            _lastCommandSentUtc = DateTime.UtcNow;
+            if (_dataPollTimer != null && _dataPollTimer.Interval != 200)
+            {
+                _dataPollTimer.Interval = 200;
+                _dataPollTimer.Stop();
+                _dataPollTimer.Start();
+            }
+        }
+
         private Form? _popoutReminderForm;
         private Label? _popoutReminderMsgLbl;
         private Form? _noAircraftMessageForm;
@@ -1869,7 +1884,6 @@ namespace SimConnect3
         private DateTime _lastSeSelectorInvalidate = DateTime.MinValue;
         private double _propLeverPosCached = 0;   // mirall de s1.propLeverPos, només per aquest ús
         private int _fuelValveCached = 0;          // mirall de s1.fuelValve, només per aquest ús
-        private System.Windows.Forms.Timer? _thrLeverIdlePollTimer;
         private System.Windows.Forms.Timer? _thrLeverActiveReadTimer;
         private DateTime _thrLeverActiveReadUntilUtc = DateTime.MinValue;
         private bool _thrHandleLeftRail = false;
@@ -1989,6 +2003,7 @@ namespace SimConnect3
             pbMain.MouseUp += (s, e) => PbMain_MouseUp(s, TranslateMouseEventArgs(e));
 
             mainSurface = new UiSurface(pbMain);
+            mainSurface.OnAnyClick = MarkCommandSent; // PROVA PROVISIONAL (2026-10-03, Pere): rectangle CMD
             mainSurface.TransformMouse = ToVirtualCoords;
             mainSurface.HideAreasWhenActive = () => _g3000Active;
             mainSurface.IsHiddenByCover = IsHiddenByActiveCover;
@@ -2112,7 +2127,7 @@ namespace SimConnect3
 
             _configBtn = new System.Windows.Forms.Button
             {
-                Text = "⚙  CONFIGURATION",
+                Text = "⚙  SETUP WIZARD",
                 Location = new Point(900, 180),
                 Size = new Size(363, 63),
                 BackColor = Color.FromArgb(40, 40, 40),
@@ -2719,8 +2734,8 @@ namespace SimConnect3
             mfdRight.Buttons.Add(new UiButton { Name = "MFD_ent",       BasePos = new Point(3775, 922), OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.MFD_ENT,    0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) });
 
             var cockpitRight = mainSurface;
-            cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-UP",   BasePos = new Point(3450, 1646), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir = -1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); StartFlapsActiveRead(); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
-            cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-DN",   BasePos = new Point(3450, 1776), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir =  1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_DN,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); StartFlapsActiveRead(); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
+            cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-UP",   BasePos = new Point(3450, 1646), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir = -1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
+            cockpitRight.Buttons.Add(new UiButton { Name = "FLAPS-DN",   BasePos = new Point(3450, 1776), W = 110, H = 115, Resizable = true, NoShadow = true, OnClick = () => { flapsAnimDir =  1; pbMain.Invalidate(); simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_DN,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); Task.Delay(150).ContinueWith(_ => this.Invoke(() => { flapsAnimDir = 0; pbMain.Invalidate(); })); } });
             // DA-40, Cirrus SR22, C408, C400, C172 i Caravan (2026-09-05, confirmat per Pere): exclosos
             // del ressaltat. Nota: el criteri general de "gear només per avions retràctils" queda pendent
             // de repassar per a la resta d'avions (veure conversa sobre l gear).
@@ -4301,18 +4316,16 @@ namespace SimConnect3
             new() { Name="G3K_FLAPS_UP",  TypeKey="G3K Flaps UP",  BasePos=new Point(400, 370), ZoomWidth=217, ZoomHeight=60, PressVisualMs=0,
                     OnClick = () => { _g3kFlapsAnimDir = -1; pbMain.Invalidate();
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_UP, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        StartFlapsActiveRead();
                         Task.Delay(150).ContinueWith(_ => this.BeginInvoke(() => { _g3kFlapsAnimDir = 0; pbMain.Invalidate(); })); } },
             new() { Name="G3K_FLAPS_DN",  TypeKey="G3K Flaps DN",  BasePos=new Point(400, 450), ZoomWidth=217, ZoomHeight=60, PressVisualMs=0,
                     OnClick = () => { _g3kFlapsAnimDir =  1; pbMain.Invalidate();
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FLAPS_SWITCH_DN, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
-                        StartFlapsActiveRead();
                         Task.Delay(150).ContinueWith(_ => this.BeginInvoke(() => { _g3kFlapsAnimDir = 0; pbMain.Invalidate(); })); } },
             new() { Name="G3K_CAUT_LIGHT", TypeKey="G3K Caut Light", BasePos=new Point(900, 200), ZoomWidth=108, ZoomHeight=105, NoResize=true, Img=LoadOverlayImage("MASTER CAUTION LIGHT.png"), ShowWhen=() => _masterCautionActive != 0 },
             new() { Name="G3K_WARN_LIGHT", TypeKey="G3K Warn Light", BasePos=new Point(1020, 200), ZoomWidth=111, ZoomHeight=107, NoResize=true, Img=LoadOverlayImage("MASTER WARNING LIGHT.png"), ShowWhen=() => _masterWarningActive != 0 },
-            new() { Name="G3K_FSEL_L", TypeKey="G3K Fuel Sel L", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 2, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); StartTbmFuelSelectorActiveRead(); } },
-            new() { Name="G3K_FSEL_R", TypeKey="G3K Fuel Sel R", BasePos=new Point(300, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 3, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); StartTbmFuelSelectorActiveRead(); } },
-            new() { Name="G3K_FSEL_OFF", TypeKey="G3K Fuel Sel Off", BasePos=new Point(400, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => { simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY); StartTbmFuelSelectorActiveRead(); } },
+            new() { Name="G3K_FSEL_L", TypeKey="G3K Fuel Sel L", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 2, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_FSEL_R", TypeKey="G3K Fuel Sel R", BasePos=new Point(300, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 3, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
+            new() { Name="G3K_FSEL_OFF", TypeKey="G3K Fuel Sel Off", BasePos=new Point(400, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.FUEL_SELECTOR_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY) },
             new() { Name="G3K_FSEL_SW", TypeKey="G3K Fuel Sel SW", BasePos=new Point(500, 100), ZoomWidth=244, ZoomHeight=244, Img=LoadOverlayImage("FUEL SEL SW.png") },
             new() { Name="G3K_AP_NOSE_UP", TypeKey="G3K AP NOSE UP", BasePos=new Point(200, 10), ZoomWidth=93, ZoomHeight=63, OnClick = () => {
                 if (_kap140State != 0 && _apVsHold == 1)
@@ -4481,7 +4494,8 @@ namespace SimConnect3
                 MessageBox.Show(this,
                     "You're running panelAIR1000 in DEMO mode (no panelAIR hardware detected).\n\n" +
                     "You have 10 minutes to explore the app. Resize this window or move it to any monitor you like.\n\n" +
-                    "Connect a real panelAIR panel at any time to unlock full operation.",
+                    "Connect a real panelAIR panel at any time to unlock full operation.\n\n" +
+                    "IMPORTANT: Before testing this demo, please download our SFS Link add-on from our website and install it in your MSFS Community folder. You can find it in the panelAIR Downloads tab.",
                     "panelAIR1000 — Demo", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                 _demoStartTime = DateTime.Now;
@@ -4617,11 +4631,13 @@ namespace SimConnect3
             };
 
             _dataPollTimer = new System.Windows.Forms.Timer();
-            _dataPollTimer.Interval = 200; // 5/s, fix — veure comentari del camp
+            // Floor a 1000ms en repòs (sense cost, confirmat), puja a 200ms quan s'envia una comanda
+            // (veure MarkCommandSent) i hi torna als 2s sense cap comanda nova (2026-10-03, Pere).
+            _dataPollTimer.Interval = 1000;
             _dataPollTimer.Tick += (s3, ev3) => PollLowFrequencySimData();
 
             _flapsActiveReadTimer = new System.Windows.Forms.Timer();
-            _flapsActiveReadTimer.Interval = 100; // veure comentari del camp
+            _flapsActiveReadTimer.Interval = 50; // veure comentari del camp
             _flapsActiveReadTimer.Tick += (s3c, ev3c) =>
             {
                 if (DateTime.UtcNow >= _flapsActiveReadUntilUtc)
@@ -4703,18 +4719,17 @@ namespace SimConnect3
                 pbMain.Invalidate(ToRealInvalidateRect(swRect));
             };
 
-            _tbmFuelSelectorPollTimer = new System.Windows.Forms.Timer();
-            _tbmFuelSelectorPollTimer.Interval = 1000; // veure comentari del camp
-            _tbmFuelSelectorPollTimer.Tick += (s11, ev11) =>
+            _fuelTankSelectorActiveReadTimer = new System.Windows.Forms.Timer();
+            _fuelTankSelectorActiveReadTimer.Interval = 50; // veure comentari del camp
+            _fuelTankSelectorActiveReadTimer.Tick += (s11, ev11) =>
             {
+                if (DateTime.UtcNow >= _fuelTankSelectorActiveReadUntilUtc)
+                {
+                    _fuelTankSelectorActiveReadTimer!.Stop();
+                    return;
+                }
                 PollFuelTankSelectors();
-                if (_tbmFuelSelectorPollTimer!.Interval != 1000 && DateTime.UtcNow >= _tbmFuelSelectorFastUntilUtc)
-                    _tbmFuelSelectorPollTimer.Interval = 1000; // torna al ritme lent (ja no cal seguir el clic)
             };
-
-            _thrLeverIdlePollTimer = new System.Windows.Forms.Timer();
-            _thrLeverIdlePollTimer.Interval = 1000; // sempre actiu, veure comentari del camp
-            _thrLeverIdlePollTimer.Tick += (s12, ev12) => SyncThrLeverPosOnce();
 
             _thrLeverActiveReadTimer = new System.Windows.Forms.Timer();
             _thrLeverActiveReadTimer.Interval = 50; // veure comentari del camp
@@ -7314,11 +7329,30 @@ namespace SimConnect3
             (REQUESTS.RequestAileronTrimFrac, DEFINITIONS.AileronTrimFracRead),
             (REQUESTS.RequestIsDeiceAirframe, DEFINITIONS.IsDeiceAirframeRead),
             (REQUESTS.RequestIsDeiceAirframe2, DEFINITIONS.IsDeiceAirframe2Read),
+            // Throttle lever (2026-10-03, Pere): floor unificat amb la resta — abans tenia el seu
+            // propi timer de 1Hz (_thrLeverIdlePollTimer, ja eliminat); ara el detecta aquest mateix
+            // grup de 200ms, igual que totes les altres. El handler de RequestThrottleLeverPos ja
+            // feia "si canvia, 2s actius a 50ms" pel seu compte — no ha calgut tocar-hi res més.
+            (REQUESTS.RequestThrottleLeverPos, DEFINITIONS.ThrottleLeverPosRead),
+            // FUEL TANK SELECTOR:1/2 (2026-10-03, Pere, pas 2 de la unificació): el floor torna al
+            // mateix ritme de 200ms per tothom, incloent la TBM — abans la TBM tenia un timer propi
+            // de 1Hz perquè el seu sistema automàtic gira el selector sol; ara el detecta aquest
+            // mateix grup, igual que el throttle. Els handlers de RequestFuelTankSelector1/2 porten
+            // la regla "si canvia, 2s actius a 50ms" pel seu compte (_fuelTankSelectorActiveReadTimer).
+            (REQUESTS.RequestFuelTankSelector1, DEFINITIONS.FuelTankSelector1Read),
+            (REQUESTS.RequestFuelTankSelector2, DEFINITIONS.FuelTankSelector2Read),
+            // FLAPS HANDLE INDEX (2026-10-03, Pere, pas 3): floor unificat — abans només es llegia
+            // activament quan NOSALTRES clicàvem amunt/avall (StartFlapsActiveRead, ja eliminat).
+            (REQUESTS.RequestFlapsHandleIndex, DEFINITIONS.FlapsHandleIndexRead),
         };
 
         private void PollLowFrequencySimData()
         {
             if (simconnect == null) return;
+            // PROVA PROVISIONAL (2026-10-03, Pere): si fa 2s que no s'envia cap comanda (veure
+            // MarkCommandSent), tornem al floor lent de 1000ms.
+            if (_dataPollTimer != null && _dataPollTimer.Interval != 1000 && (DateTime.UtcNow - _lastCommandSentUtc).TotalSeconds >= 2.0)
+                _dataPollTimer.Interval = 1000;
             foreach (var (req, def) in _lowFreqPolls)
             {
                 try
@@ -7327,13 +7361,6 @@ namespace SimConnect3
                 }
                 catch { }
             }
-            // FUEL TANK SELECTOR:1/2 ja no van al ritme fix de 200ms per tothom (2026-10-03, Pere):
-            // la TBM té un sistema automàtic que gira aquest selector sol, de L a R i viceversa, cada
-            // x segons, igual que l'AP mou el trim vertical sol — per això, quan la TBM és l'avió
-            // actiu, es llegeix cada 1000ms via _tbmFuelSelectorPollTimer (veure comentari del camp),
-            // no aquí. Per a la resta d'avions (que només canvien aquest selector si nosaltres hi
-            // clicem), es queda al ritme fix de 200ms, igual que abans.
-            if (!IsTBM930()) PollFuelTankSelectors();
         }
 
         private void PollFuelTankSelectors()
@@ -7347,19 +7374,8 @@ namespace SimConnect3
             catch { }
         }
 
-        // Crida's en clicar L/R/OFF del selector de combustible de la TBM. Lectura immediata (no
-        // esperar el timer) + puja el ritme a 100ms durant 2s perquè es vegi començar a l'instant —
-        // mateix motiu que StartElevatorTrimActiveRead.
-        private void StartTbmFuelSelectorActiveRead()
-        {
-            _tbmFuelSelectorFastUntilUtc = DateTime.UtcNow.AddSeconds(2);
-            if (_tbmFuelSelectorPollTimer != null) _tbmFuelSelectorPollTimer.Interval = 100;
-            PollFuelTankSelectors();
-        }
-
-        // Sync puntual del throttle lever: en obrir connexió, canvi d'avió, i a cada tick dels
-        // timers (_thrLeverIdlePollTimer 1Hz sempre actiu, _thrLeverActiveReadTimer 50ms mentre hi
-        // ha moviment en curs — veure comentari del camp).
+        // Sync puntual del throttle lever: en obrir connexió, canvi d'avió, pel floor de 200ms
+        // (_lowFreqPolls) i a cada tick de _thrLeverActiveReadTimer (50ms) mentre hi ha moviment.
         private void SyncThrLeverPosOnce()
         {
             if (simconnect == null) return;
@@ -7514,8 +7530,8 @@ namespace SimConnect3
             catch { }
         }
 
-        // Sync de FLAPS HANDLE INDEX (la posició real): en obrir connexió, en canvi d'avió, i
-        // activament mentre el selector es mou (StartFlapsActiveRead).
+        // Sync de FLAPS HANDLE INDEX (la posició real): en obrir connexió, en canvi d'avió, pel floor
+        // de 200ms (_lowFreqPolls) i a cada tick de _flapsActiveReadTimer (50ms) mentre hi ha moviment.
         private void SyncFlapsHandleIndexOnce()
         {
             if (simconnect == null) return;
@@ -7524,16 +7540,6 @@ namespace SimConnect3
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestFlapsHandleIndex, DEFINITIONS.FlapsHandleIndexRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.ONCE, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
             }
             catch { }
-        }
-
-        // Crida's en enviar una comanda de flaps amunt/avall (selector). Engega (o allarga, si ja
-        // estava en marxa) una finestra de lectura activa de només aquest offset, cada 100ms, que es
-        // para sola als 2s sense cap canvi real (el handler de RequestFlapsHandleIndex allarga la
-        // finestra quan detecta un canvi — veure comentari allà).
-        private void StartFlapsActiveRead()
-        {
-            _flapsActiveReadUntilUtc = DateTime.UtcNow.AddSeconds(2);
-            _flapsActiveReadTimer?.Start();
         }
 
         // Sync puntual de trim: es criden en obrir connexió, en detectar canvi d'avió, i a cada tick
@@ -7557,7 +7563,7 @@ namespace SimConnect3
             catch { }
         }
 
-        // Ritme de lectura activa de l'elevator trim: ràpid (33ms) mentre el dit arrossega la roda
+        // Ritme de lectura activa de l'elevator trim: ràpid (50ms) mentre el dit arrossega la roda
         // (cal màxima resposta, és un gest curt), molt més lent (150ms) quan només l'AP la mou sol
         // (no hi ha dit a seguir, i en turbulència l'AP pot corregir contínuament durant minuts — a
         // 33ms costava fins a 10 FPS volant de veritat, confirmat per Pere, 2026-10-02).
@@ -7954,10 +7960,9 @@ namespace SimConnect3
             SyncElevatorTrimOnce();
             SyncRudderTrimOnce();
 
-            // Throttle lever: sync puntual + engega el timer de fons de 1Hz (sempre actiu, veure
-            // comentari del camp — cal per detectar moviments d'un joystick extern).
+            // Throttle lever: sync puntual — el floor continu ara el porta el grup dels 124
+            // (RequestThrottleLeverPos dins _lowFreqPolls), igual que la resta.
             SyncThrLeverPosOnce();
-            _thrLeverIdlePollTimer?.Start();
 
             // Llums: sync puntual de les 10.
             SyncAllLightsOnce();
@@ -7987,8 +7992,7 @@ namespace SimConnect3
             _flapsActiveReadTimer?.Stop();
             _elevatorTrimActiveReadTimer?.Stop();
             _rudderTrimActiveReadTimer?.Stop();
-            _tbmFuelSelectorPollTimer?.Stop();
-            _thrLeverIdlePollTimer?.Stop();
+            _fuelTankSelectorActiveReadTimer?.Stop();
             _thrLeverActiveReadTimer?.Stop();
 
             simReconnectPending = true;
@@ -8040,17 +8044,10 @@ namespace SimConnect3
                 bool isTBM930Now = IsTBM930();
                 if (isTBM930Now != wasTBM930 && _g3000Active != isTBM930Now && !calibrationMode)
                     SetG3000Active(isTBM930Now);
-                if (isTBM930Now != wasTBM930)
-                {
-                    // FUEL TANK SELECTOR:1/2 passa del ritme fix de 200ms (resta d'avions) al timer
-                    // dedicat de 1000ms (veure comentari del camp) en entrar/sortir de la TBM.
-                    if (isTBM930Now) { _tbmFuelSelectorPollTimer?.Start(); PollFuelTankSelectors(); }
-                    else _tbmFuelSelectorPollTimer?.Stop();
-                }
                 RefreshNoCompatibleAircraftMessage();
                 // Canvi d'avió real (no només una altra lectura del mateix títol cada segon): re-sync
                 // puntual de flaps (veure comentari a SyncFlapsNumPosOnce/SyncFlapsHandleIndexOnce).
-                if (aircraftChanged) { SyncFlapsNumPosOnce(); SyncFlapsHandleIndexOnce(); SyncElevatorTrimOnce(); SyncRudderTrimOnce(); SyncThrLeverPosOnce(); SyncAllLightsOnce(); }
+                if (aircraftChanged) { SyncFlapsNumPosOnce(); SyncFlapsHandleIndexOnce(); SyncElevatorTrimOnce(); SyncRudderTrimOnce(); SyncThrLeverPosOnce(); SyncAllLightsOnce(); PollFuelTankSelectors(); }
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestFlapsNumPos)
@@ -8070,8 +8067,9 @@ namespace SimConnect3
                 {
                     flapsPoscPalanca = fhi.value;
                     // Hi ha hagut un canvi real: allarguem la finestra de lectura activa 2s més
-                    // (debounce — veure StartFlapsActiveRead).
+                    // (debounce — mateixa regla que el throttle i el selector TBM).
                     _flapsActiveReadUntilUtc = DateTime.UtcNow.AddSeconds(2);
+                    _flapsActiveReadTimer?.Start();
                     pbMain.Invalidate();
                 }
                 return;
@@ -8139,6 +8137,11 @@ namespace SimConnect3
                 {
                     _fuelTankSelector1 = fts1.value;
                     UpdateFuelSelectorState();
+                    // Hi ha hagut un canvi real: allarguem la finestra de lectura activa 2s més
+                    // (debounce — mateixa regla que el throttle), tant si l'hem clicat nosaltres com
+                    // si l'ha girat sol el sistema automàtic de la TBM.
+                    _fuelTankSelectorActiveReadUntilUtc = DateTime.UtcNow.AddSeconds(2);
+                    _fuelTankSelectorActiveReadTimer?.Start();
                 }
                 return;
             }
@@ -8149,6 +8152,8 @@ namespace SimConnect3
                 {
                     _fuelTankSelector2 = fts2.value;
                     UpdateFuelSelectorState();
+                    _fuelTankSelectorActiveReadUntilUtc = DateTime.UtcNow.AddSeconds(2);
+                    _fuelTankSelectorActiveReadTimer?.Start();
                 }
                 return;
             }
@@ -11106,6 +11111,7 @@ namespace SimConnect3
                     if (isThrZone && !_thrQuadrantVisible) continue;
                     ov.PressedUntilUtc = DateTime.UtcNow.AddMilliseconds(ov.PressVisualMs);
                     ov.OnClick.Invoke();
+                    MarkCommandSent();
                     pbMain.Invalidate();
                     return;
                 }
@@ -11394,11 +11400,11 @@ namespace SimConnect3
             if (_g3000Active)
                 foreach (var ov in g3000OverlayImages.Where(o => o.IsRound))
                     if (ov.OnClick != null && ov.Bounds.Contains(e.Location))
-                    { ov.PressedUntilUtc = DateTime.UtcNow.AddMilliseconds(ov.PressVisualMs); ov.OnClick.Invoke(); pbMain.Invalidate(); return; }
+                    { ov.PressedUntilUtc = DateTime.UtcNow.AddMilliseconds(ov.PressVisualMs); ov.OnClick.Invoke(); MarkCommandSent(); pbMain.Invalidate(); return; }
 
             foreach (var ov in overlayImages)
                 if (ov.OnClick != null && (ov.OnClickEnabled?.Invoke() ?? true) && ov.Bounds.Contains(e.Location))
-                { ov.OnClick.Invoke(); return; }
+                { ov.OnClick.Invoke(); MarkCommandSent(); return; }
 
             if (trimZone.Contains(e.Location))
             {
@@ -11459,6 +11465,7 @@ namespace SimConnect3
                         thrVal = Math.Max(-21350, Math.Min(16383, thrVal));
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)thrVal), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 8250, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        MarkCommandSent();
                     }
                     int topLimit = minY;
                     int botLimit = maxY;
@@ -11467,12 +11474,14 @@ namespace SimConnect3
                         _taxiPropActive = false; _thrSliderFollow = false;
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-11000)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        MarkCommandSent();
                     }
                     if (!_thrHandleLeftRail && newY >= botLimit - 10)
                     {
                         _taxiPropActive = false; _thrSliderFollow = false;
                         simconnect?.SetDataOnSimObject(DEFINITIONS.CondLeverCutoffWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, new CondLeverCutoffStruct { value = 0 });
                         simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                        MarkCommandSent();
                     }
                     var lowIdleArea = g3000OverlayImages.FirstOrDefault(o => o.Name == "G3K_THR_LOWIDLE");
                     if (!_thrHandleLeftRail && lowIdleArea != null)
@@ -11486,6 +11495,7 @@ namespace SimConnect3
                             simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.SET_FUEL_VALVE_ENG1, 1, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                             simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.AXIS_THROTTLE_SET, unchecked((uint)(-16383)), SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                             simconnect?.TransmitClientEvent(0, SIMCONNECT_EVENTS.PROP_PITCH_SET, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                            MarkCommandSent();
                         }
                     }
                     // Retallat al recorregut del handle i limitat a com a màxim cada 50ms — mateix
@@ -11759,6 +11769,7 @@ namespace SimConnect3
             {
                 simconnect.TransmitClientEvent(0,SIMCONNECT_EVENTS.TRIM_UP,0,SIMCONNECT_GROUPS.GROUP0,SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             }
+            MarkCommandSent();
             // Confirmació immediata NOMÉS al primer tic de l'arrossegament (evita el retard
             // d'arrencada) — els següents tics NO disparen lectura pròpia, els porta el timer actiu
             // al seu ritme. Fer-ho a cada tic (com abans) ignorava per complet l'interval del timer
@@ -11778,6 +11789,7 @@ namespace SimConnect3
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.RUDDER_TRIM_RIGHT, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
             else
                 simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.RUDDER_TRIM_LEFT,  0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            MarkCommandSent();
             // Mateix motiu que SendTrimTick: només el primer tic fa lectura immediata.
             if (_rudderTrimAwaitingFirstTick)
             {
@@ -11790,6 +11802,7 @@ namespace SimConnect3
         {
             if (simconnect == null) return;
             simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.AILERON_TRIM_SET_EX1, (uint)axisVal, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+            MarkCommandSent();
         }
 
         private void SendG3kApSliderTick(int dir)
@@ -11817,6 +11830,7 @@ namespace SimConnect3
                     simconnect.TransmitClientEvent(0, SIMCONNECT_EVENTS.G3K_AP_SPD_INC,    0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
                 }
             }
+            MarkCommandSent();
         }
 
 

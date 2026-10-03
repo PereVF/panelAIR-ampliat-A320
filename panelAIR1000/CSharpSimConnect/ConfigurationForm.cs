@@ -98,7 +98,7 @@ namespace SimConnect3
         public ConfigurationForm()
         {
             AutoScaleMode = AutoScaleMode.None;
-            Text = "panelAIR Configuration";
+            Text = "panelAIR Setup Wizard";
             Size = new Size(3840, 1375);
             StartPosition = FormStartPosition.CenterScreen;
             FormBorderStyle = FormBorderStyle.Sizable;
@@ -108,7 +108,7 @@ namespace SimConnect3
 
             var header = new Label
             {
-                Text = "Configuration",
+                Text = "Setup Wizard",
                 Font = new Font("Segoe UI", 40f, FontStyle.Bold),
                 ForeColor = Color.FromArgb(22, 32, 42),
                 AutoSize = true,
