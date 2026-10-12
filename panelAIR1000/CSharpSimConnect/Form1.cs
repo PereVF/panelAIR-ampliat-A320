@@ -2099,11 +2099,11 @@ namespace SimConnect3
 
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
             {
-                try { System.IO.File.WriteAllText("panelAIR1000_crash.txt", e.ExceptionObject.ToString()); } catch { }
+                try { System.IO.File.WriteAllText("panelAIR_App_crash.txt", e.ExceptionObject.ToString()); } catch { }
             };
             Application.ThreadException += (s, e) =>
             {
-                try { System.IO.File.AppendAllText("panelAIR1000_crash.txt", "\r\n[UI] " + e.Exception.ToString()); } catch { }
+                try { System.IO.File.AppendAllText("panelAIR_App_crash.txt", "\r\n[UI] " + e.Exception.ToString()); } catch { }
             };
 
             this.Icon = Resources.logo;
@@ -5742,7 +5742,7 @@ namespace SimConnect3
                 simconnect.OnRecvSimobjectData += new SimConnect.RecvSimobjectDataEventHandler(Simconnect_OnRecvSimobjectData);
                 simconnect.OnRecvException += (s, d) =>
                 {
-                    try { System.IO.File.AppendAllText("panelAIR1000_crash.txt", $"\r\n[SIMCONNECT EXCEPTION] {d.dwException}  (SendID={d.dwSendID} Index={d.dwIndex})"); } catch { }
+                    try { System.IO.File.AppendAllText("panelAIR_App_crash.txt", $"\r\n[SIMCONNECT EXCEPTION] {d.dwException}  (SendID={d.dwSendID} Index={d.dwIndex})"); } catch { }
                 };
 
                 //rotAIR exclisive mode GC*****************************************************************************************************************
@@ -7113,7 +7113,7 @@ namespace SimConnect3
 
                     try
                     {
-                        System.IO.File.AppendAllText("panelAIR1000_crash.txt",
+                        System.IO.File.AppendAllText("panelAIR_App_crash.txt",
                             "\r\n[SimConnect] Reconnected OK.");
                     }
                     catch { }
@@ -7153,7 +7153,7 @@ namespace SimConnect3
                         // Ignorem els Key '27' repetits per evitar logs massius
                         if (!ex.Message.Contains("'27'"))
                         {
-                            try { System.IO.File.AppendAllText("panelAIR1000_crash.txt", "\r\n[SIMCONNECT KeyNotFound] " + ex.Message); } catch { }
+                            try { System.IO.File.AppendAllText("panelAIR_App_crash.txt", "\r\n[SIMCONNECT KeyNotFound] " + ex.Message); } catch { }
                         }
                     }
                     catch (System.Runtime.InteropServices.COMException ex)
@@ -7161,7 +7161,7 @@ namespace SimConnect3
                         // Desconnexió brusc (0xC000014B): no tanquem; marquem "disconnected" i reintentem
                         try
                         {
-                            System.IO.File.AppendAllText("panelAIR1000_crash.txt",
+                            System.IO.File.AppendAllText("panelAIR_App_crash.txt",
                             "\r\n[SIMCONNECT Dispatch] " + ex.ToString());
                         }
                         catch { }
@@ -7177,7 +7177,7 @@ namespace SimConnect3
                     catch (System.Exception ex)
                     {
                         // Altres errors del dispatcher SimConnect
-                        try { System.IO.File.AppendAllText("panelAIR1000_crash.txt", "\r\n[SIMCONNECT Dispatch] " + ex.ToString()); } catch { }
+                        try { System.IO.File.AppendAllText("panelAIR_App_crash.txt", "\r\n[SIMCONNECT Dispatch] " + ex.ToString()); } catch { }
                     }
                 }
             }
@@ -8000,7 +8000,7 @@ namespace SimConnect3
 
             try
             {
-                System.IO.File.AppendAllText("panelAIR1000_crash.txt",
+                System.IO.File.AppendAllText("panelAIR_App_crash.txt",
                 "\r\n[SimConnect] Quit received -> will try reconnect...");
             }
             catch { }
