@@ -17,24 +17,22 @@ namespace SimConnect3
 
             bool has4K = Screen.AllScreens.Any(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
 
-            bool hasPanel = false;
-            using (var searcher = new System.Management.ManagementObjectSearcher(
-                @"SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%VID_0457%PID_0819%' AND ConfigManagerErrorCode = 0 AND Present = TRUE"))
-            {
-                hasPanel = searcher.Get().Count > 0;
-            }
             bool hasMonitor = false;
+            // Només la pantalla Xiaomi (XMI3446): és l'única que s'ha venut mai amb panelAIR.
+            // El model antic (RTK1B1A) ja no compta com a vàlid.
             using (var searcher = new System.Management.ManagementObjectSearcher(
-                @"SELECT * FROM Win32_PnPEntity WHERE (DeviceID LIKE '%RTK1B1A%' OR DeviceID LIKE '%XMI3446%') AND ConfigManagerErrorCode = 0"))
+                @"SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%XMI3446%' AND ConfigManagerErrorCode = 0"))
             {
                 hasMonitor = searcher.Get().Count > 0;
             }
 
-            // Si no té ni el nostre monitor ni el tàctil, sabem del cert que no té panelAIR —
-            // mode demo directe (finestra a escala), sense preguntar res més. També mode demo si,
-            // per qualsevol motiu, no hi ha cap pantalla 4K real (evita petar el codi que dona per
-            // fet que n'hi ha una).
-            frmMain.IsDemoMode = (!hasPanel && !hasMonitor) || !has4K;
+            // Si la pantalla 4K connectada no és la nostra (Xiaomi), ja sabem del cert que no té
+            // panelAIR — mode demo directe (finestra a escala), encara que per casualitat es detecti
+            // un xip tàctil (VID_0457/PID_0819, no exclusiu nostre). També mode demo si, per qualsevol
+            // motiu, no hi ha cap pantalla 4K real (evita petar el codi que dona per fet que n'hi ha una).
+            // El cas "monitor sí, tàctil o RotAIR no" (propietari real amb un cable despenjat) NO és
+            // demo — es gestiona al Nivell 2 dins frmMain_Load (missatge "verification failed").
+            frmMain.IsDemoMode = !hasMonitor || !has4K;
 
             if (!AppSettings.Instance.WelcomeCompleted)
             {

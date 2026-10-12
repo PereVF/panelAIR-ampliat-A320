@@ -1846,6 +1846,12 @@ namespace SimConnect3
         private Action? _mainOverlayOnPrimaryClick;
         private Form? _overlayPanel;
         private Panel? _fsConnPanel;
+        private Panel? _appVersionPanel;
+        private bool _appVersionDragging = false;
+        private Point _appVersionDragOffset;
+
+        // Versió de panelAIR App mostrada a l'overlay. Bump manual a cada compilació de distribuïble.
+        private const string AppVersion = "00.00";
         private bool _taxiPropActive = false;
         private bool _thrSliderFollow = false;
         private bool _thrQuadrantVisible = false;
@@ -2217,6 +2223,56 @@ namespace SimConnect3
             };
             _fsConnTitle.MouseUp += (s, e) => { _tb21Dragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             _overlayPanel.Controls.Add(_fsConnPanel);
+
+            _appVersionPanel = new Panel { BackColor = Color.Transparent };
+            var appVerFont = new Font("Segoe UI Emoji", 26f, FontStyle.Bold, GraphicsUnit.Pixel);
+            var _appVersionPrefixLbl = new Label
+            {
+                Text = "panelAIR App version: v",
+                AutoSize = true,
+                Location = new Point(0, 0),
+                Font = appVerFont,
+                ForeColor = Color.White,
+                BackColor = Color.Transparent
+            };
+            _appVersionPanel.Controls.Add(_appVersionPrefixLbl);
+            var _appVersionNumberLbl = new Label
+            {
+                Text = AppVersion,
+                AutoSize = true,
+                Location = new Point(_appVersionPrefixLbl.Right, 0),
+                Font = appVerFont,
+                ForeColor = Color.DodgerBlue,
+                BackColor = Color.Transparent
+            };
+            _appVersionPanel.Controls.Add(_appVersionNumberLbl);
+            _appVersionPanel.Size = new Size(_appVersionNumberLbl.Right, _appVersionPrefixLbl.Height);
+            _appVersionPanel.Location = new Point(
+                _fsConnPanel.Location.X + (_fsConnPanel.Width - _appVersionPanel.Width) / 2,
+                _fsConnPanel.Location.Y + _fsConnPanel.Height + 6);
+
+            void AppVersionDragStart(object? s, MouseEventArgs e)
+            {
+                if (!calibrationMode) return;
+                _appVersionDragging = true;
+                _appVersionDragOffset = e.Location;
+            }
+            void AppVersionDragMove(object? s, MouseEventArgs e)
+            {
+                if (!_appVersionDragging) return;
+                var screenPt = ((Control)s!).PointToScreen(e.Location);
+                var formPt = _overlayPanel!.PointToClient(screenPt);
+                _appVersionPanel.Location = new Point(formPt.X - _appVersionDragOffset.X, formPt.Y - _appVersionDragOffset.Y);
+            }
+            void AppVersionDragEnd(object? s, MouseEventArgs e) { _appVersionDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } }
+
+            foreach (Control c in new Control[] { _appVersionPanel, _appVersionPrefixLbl, _appVersionNumberLbl })
+            {
+                c.MouseDown += AppVersionDragStart;
+                c.MouseMove += AppVersionDragMove;
+                c.MouseUp += AppVersionDragEnd;
+            }
+            _overlayPanel.Controls.Add(_appVersionPanel);
 
             _g3000Btn = MakeGroupBtn("TBM 930 Cockpit", 363, 63);
             _g3000Btn.Location = new Point(3100, 100);
@@ -4536,10 +4592,10 @@ namespace SimConnect3
                     hasPanel = searcher.Get().Count > 0;
                 }
                 bool hasMonitor = false;
-                // Model original (RTK1B1A) + nou model exclusiu Xiaomi (XMI3446, 2026-08-31) — tots dos
-                // vàlids, cap client amb el monitor antic queda desconnectat.
+                // Només la pantalla Xiaomi (XMI3446): és l'única que s'ha venut mai amb panelAIR.
+                // El model antic (RTK1B1A) ja no compta com a vàlid.
                 using (var searcher = new System.Management.ManagementObjectSearcher(
-                    @"SELECT * FROM Win32_PnPEntity WHERE (DeviceID LIKE '%RTK1B1A%' OR DeviceID LIKE '%XMI3446%') AND ConfigManagerErrorCode = 0"))
+                    @"SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%XMI3446%' AND ConfigManagerErrorCode = 0"))
                 {
                     hasMonitor = searcher.Get().Count > 0;
                 }
@@ -4560,11 +4616,67 @@ namespace SimConnect3
                 {
                     var screen4K = Screen.AllScreens.FirstOrDefault(s => !s.Primary && s.Bounds.Width == 3840 && s.Bounds.Height == 2160)
                         ?? Screen.AllScreens.First(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
-                    using (var msgHelper = new Form { StartPosition = FormStartPosition.Manual, TopMost = true, Size = new Size(1, 1), ShowInTaskbar = false })
+                    using (var verifyFailedForm = new Form
                     {
-                        msgHelper.Location = new Point(screen4K.Bounds.X + screen4K.Bounds.Width / 2, screen4K.Bounds.Y + screen4K.Bounds.Height / 2);
-                        msgHelper.Show();
-                        MessageBox.Show(msgHelper, "panelAIR verification failed.\n\nThis application requires an SFS panelAIR device to operate.\n\nIf you own a panelAIR device, please ensure that:\n\n  • The panelAIR display is connected to the computer and powered on.\n  • The panelAIR USB touch cable is connected to the computer.\n  • The RotAIR module is connected to a USB port.\n\nThen restart the application.\n\n(If you do not own a panelAIR device, the application will remain functional for 10 minutes only.)", "panelAIR1000", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                        AutoScaleMode = AutoScaleMode.None,
+                        FormBorderStyle = FormBorderStyle.FixedDialog,
+                        MaximizeBox = false,
+                        MinimizeBox = false,
+                        ControlBox = false,
+                        Text = "panelAIR1000",
+                        Size = new Size(900, 560),
+                        BackColor = Color.White,
+                        StartPosition = FormStartPosition.Manual
+                    })
+                    {
+                        verifyFailedForm.Location = new Point(
+                            screen4K.Bounds.X + (screen4K.Bounds.Width - verifyFailedForm.Width) / 2,
+                            screen4K.Bounds.Y + (screen4K.Bounds.Height - verifyFailedForm.Height) / 2);
+
+                        var titleLbl = new Label
+                        {
+                            Text = "panelAIR App - verification failed",
+                            Font = new Font("Segoe UI", 24f, FontStyle.Bold),
+                            ForeColor = Color.FromArgb(22, 32, 42),
+                            TextAlign = ContentAlignment.MiddleCenter,
+                            Location = new Point(30, 30),
+                            Size = new Size(verifyFailedForm.ClientSize.Width - 60, 50)
+                        };
+                        verifyFailedForm.Controls.Add(titleLbl);
+
+                        var bodyLbl = new Label
+                        {
+                            Text = "This application requires an SFS panelAIR device to operate.\n\n" +
+                                   "If you own a panelAIR device, please ensure that:\n\n" +
+                                   "  •  The panelAIR screen is connected to the computer and powered on.\n" +
+                                   "  •  The panelAIR USB \"touch\" cable is connected to the computer.\n" +
+                                   "  •  The RotAIR module is connected to a computer USB port.\n\n" +
+                                   "Then restart the application.\n\n" +
+                                   "(If you do not own a panelAIR device, the application will remain functional for 10 minutes only.)",
+                            Font = new Font("Segoe UI", 14f),
+                            ForeColor = Color.FromArgb(60, 60, 60),
+                            TextAlign = ContentAlignment.TopLeft,
+                            Location = new Point(30, 90),
+                            Size = new Size(verifyFailedForm.ClientSize.Width - 60, 380)
+                        };
+                        verifyFailedForm.Controls.Add(bodyLbl);
+
+                        var okButton = new Button
+                        {
+                            Text = "OK",
+                            Size = new Size(160, 48),
+                            Location = new Point((verifyFailedForm.ClientSize.Width - 160) / 2, 480),
+                            FlatStyle = FlatStyle.Flat,
+                            BackColor = Color.FromArgb(235, 91, 37),
+                            ForeColor = Color.White,
+                            Font = new Font("Segoe UI", 14f, FontStyle.Bold),
+                            DialogResult = DialogResult.OK
+                        };
+                        okButton.FlatAppearance.BorderSize = 0;
+                        verifyFailedForm.Controls.Add(okButton);
+                        verifyFailedForm.AcceptButton = okButton;
+
+                        verifyFailedForm.ShowDialog();
                     }
                     var countdownForm = new Form
                     {
@@ -12095,6 +12207,7 @@ namespace SimConnect3
             sb.AppendLine($"G1000BTN:g1000:{_g1000Btn.Location.X}:{_g1000Btn.Location.Y}");
             sb.AppendLine($"THRQBTN:tq:{_thrQuadrantBtn.Location.X}:{_thrQuadrantBtn.Location.Y}:0:0");
             if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
+            if (_appVersionPanel != null) sb.AppendLine($"APPVER:apv:{_appVersionPanel.Location.X}:{_appVersionPanel.Location.Y}");
             string path = GetCalibrationFilePath();
             System.IO.File.WriteAllText(path, sb.ToString());
             if (!silent)
@@ -12291,6 +12404,10 @@ namespace SimConnect3
                 else if (type == "FSCONN" && _fsConnPanel != null)
                 {
                     _fsConnPanel.Location = new Point(x, y);
+                }
+                else if (type == "APPVER" && _appVersionPanel != null)
+                {
+                    _appVersionPanel.Location = new Point(x, y);
                 }
             }
         }
