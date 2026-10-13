@@ -97,6 +97,10 @@ namespace SimConnect3
 
         public ConfigurationForm()
         {
+            // None + lletres en GraphicsUnit.Pixel (veure totes les Font d'aquest fitxer): ignorem
+            // del tot el DPI de Windows, la wizard es renderitza sempre a mida fixa en píxels, com
+            // si el DPI fos sempre el 100% — decisió explícita de Pere en comptes d'intentar seguir
+            // el DPI real (que ja ha fallat dues vegades amb aquest formulari).
             AutoScaleMode = AutoScaleMode.None;
             Text = "panelAIR Setup Wizard";
             Size = new Size(3840, 1375);
@@ -109,7 +113,7 @@ namespace SimConnect3
             var header = new Label
             {
                 Text = "Setup Wizard",
-                Font = new Font("Segoe UI", 40f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 51f, FontStyle.Bold, GraphicsUnit.Pixel),
                 ForeColor = Color.FromArgb(22, 32, 42),
                 AutoSize = true,
                 Location = new Point(32, 24)
@@ -144,7 +148,7 @@ namespace SimConnect3
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(90, 90, 90),
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 16f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 20f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             resetButton.FlatAppearance.BorderSize = 0;
             resetButton.Click += (s, e) =>
@@ -193,7 +197,7 @@ namespace SimConnect3
 
             _resetOverlayMsgLbl = new Label
             {
-                Font = new Font("Segoe UI", 20f),
+                Font = new Font("Segoe UI", 25f, GraphicsUnit.Pixel),
                 ForeColor = Color.FromArgb(22, 32, 42),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Location = new Point(40, 40),
@@ -209,7 +213,7 @@ namespace SimConnect3
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(230, 230, 230),
                 ForeColor = Color.FromArgb(22, 32, 42),
-                Font = new Font("Segoe UI", 15f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 19f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             _resetOverlaySecondaryBtn.FlatAppearance.BorderSize = 2;
             _resetOverlaySecondaryBtn.FlatAppearance.BorderColor = Color.FromArgb(180, 186, 194);
@@ -224,7 +228,7 @@ namespace SimConnect3
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(235, 91, 37),
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 15f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 19f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             _resetOverlayPrimaryBtn.FlatAppearance.BorderSize = 0;
             _resetOverlayPrimaryBtn.Click += (s, e) =>
@@ -278,7 +282,7 @@ namespace SimConnect3
 
             _dialogOverlayMsgLbl = new Label
             {
-                Font = new Font("Segoe UI", 16f),
+                Font = new Font("Segoe UI", 20f, GraphicsUnit.Pixel),
                 ForeColor = Color.FromArgb(22, 32, 42),
                 TextAlign = ContentAlignment.MiddleCenter,
                 Location = new Point(40, 30),
@@ -293,7 +297,7 @@ namespace SimConnect3
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(230, 230, 230),
                 ForeColor = Color.FromArgb(22, 32, 42),
-                Font = new Font("Segoe UI", 15f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 19f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             _dialogOverlaySecondaryBtn.FlatAppearance.BorderSize = 2;
             _dialogOverlaySecondaryBtn.FlatAppearance.BorderColor = Color.FromArgb(180, 186, 194);
@@ -311,7 +315,7 @@ namespace SimConnect3
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(235, 91, 37),
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 15f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 19f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             _dialogOverlayPrimaryBtn.FlatAppearance.BorderSize = 0;
             _dialogOverlayPrimaryBtn.Click += (s, e) =>
@@ -386,7 +390,7 @@ namespace SimConnect3
                 var lbl = new Label
                 {
                     Text = text,
-                    Font = new Font("Segoe UI", 24f),
+                    Font = new Font("Segoe UI", 31f, GraphicsUnit.Pixel),
                     ForeColor = Color.FromArgb(22, 32, 42),
                     Location = new Point(32, y),
                     AutoSize = true,
@@ -403,7 +407,7 @@ namespace SimConnect3
                 var lbl = new Label
                 {
                     Text = text,
-                    Font = new Font("Segoe UI", 18f, FontStyle.Italic),
+                    Font = new Font("Segoe UI", 23f, FontStyle.Italic, GraphicsUnit.Pixel),
                     ForeColor = Color.FromArgb(102, 114, 127),
                     Location = new Point(32, y),
                     AutoSize = true,
@@ -420,7 +424,7 @@ namespace SimConnect3
                 var lbl = new Label
                 {
                     Text = text,
-                    Font = new Font("Segoe UI", 24f),
+                    Font = new Font("Segoe UI", 31f, GraphicsUnit.Pixel),
                     ForeColor = Color.FromArgb(22, 32, 42),
                     Location = new Point(32, y),
                     AutoSize = true,
@@ -450,7 +454,7 @@ namespace SimConnect3
                 var lbl = new Label
                 {
                     Text = text,
-                    Font = new Font("Segoe UI", 20f, FontStyle.Bold),
+                    Font = new Font("Segoe UI", 25f, FontStyle.Bold, GraphicsUnit.Pixel),
                     ForeColor = Color.FromArgb(153, 27, 27),
                     Location = new Point(32, y),
                     AutoSize = true,
@@ -500,7 +504,7 @@ namespace SimConnect3
             var screenshotCaptionLbl = new Label
             {
                 Text = "For reference only — use the calculators below to get the exact values for your setup.",
-                Font = new Font("Segoe UI", 16f, FontStyle.Italic),
+                Font = new Font("Segoe UI", 20f, FontStyle.Italic, GraphicsUnit.Pixel),
                 ForeColor = Color.FromArgb(102, 114, 127),
                 Location = new Point(32, screenshotBox.Bottom + 8),
                 AutoSize = true,
@@ -511,7 +515,7 @@ namespace SimConnect3
             var oneProfileNoteLbl = new Label
             {
                 Text = "You'll need one profile in POPM for every aircraft you want to fly — type the same G1000 values below into each one.",
-                Font = new Font("Segoe UI", 20f),
+                Font = new Font("Segoe UI", 25f, GraphicsUnit.Pixel),
                 ForeColor = Color.FromArgb(102, 114, 127),
                 Location = new Point(32, screenshotCaptionLbl.Bottom + 24),
                 AutoSize = true,
@@ -566,7 +570,7 @@ namespace SimConnect3
             var g1000GroupLbl = new Label
             {
                 Text = "G1000 coordinates",
-                Font = new Font("Segoe UI", 24f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 31f, FontStyle.Bold, GraphicsUnit.Pixel),
                 ForeColor = Color.FromArgb(22, 32, 42),
                 Location = new Point(32, afterOneProfileY + 32),
                 AutoSize = true
@@ -579,7 +583,7 @@ namespace SimConnect3
             var g3000GroupLbl = new Label
             {
                 Text = "G3000 coordinates (TBM 930)",
-                Font = new Font("Segoe UI", 24f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 31f, FontStyle.Bold, GraphicsUnit.Pixel),
                 ForeColor = Color.FromArgb(22, 32, 42),
                 Location = new Point(32, g1000Bottom + 40),
                 AutoSize = true
@@ -602,7 +606,7 @@ namespace SimConnect3
             var titleLbl = new Label
             {
                 Text = title,
-                Font = new Font("Segoe UI", 19f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 24f, FontStyle.Bold, GraphicsUnit.Pixel),
                 ForeColor = Color.FromArgb(102, 114, 127),
                 Location = new Point(x, y),
                 AutoSize = true
@@ -617,7 +621,7 @@ namespace SimConnect3
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(235, 91, 37),
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 14f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 18f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             calcBtn.FlatAppearance.BorderSize = 0;
             parent.Controls.Add(calcBtn);
@@ -635,7 +639,7 @@ namespace SimConnect3
                 BackgroundColor = Color.White,
                 BorderStyle = BorderStyle.FixedSingle,
                 GridColor = Color.FromArgb(217, 223, 229),
-                Font = new Font("Segoe UI", 16f),
+                Font = new Font("Segoe UI", 20f, GraphicsUnit.Pixel),
                 ColumnHeadersHeightSizeMode = DataGridViewColumnHeadersHeightSizeMode.AutoSize,
                 RowTemplate = { Height = 40 }
             };
@@ -743,7 +747,7 @@ namespace SimConnect3
             var card = new Panel
             {
                 Size = new Size(520, 960),
-                Margin = new Padding(0, 0, 24, 0),
+                Margin = new Padding(0, 0, 22, 0),
                 BackColor = Color.White,
                 Padding = new Padding(32)
             };
@@ -761,19 +765,25 @@ namespace SimConnect3
                 TextAlign = ContentAlignment.MiddleCenter,
                 BackColor = Color.FromArgb(235, 91, 37),
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 22f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 28f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             card.Controls.Add(numberBadge);
 
             var titleLbl = new Label
             {
                 Text = title,
-                Font = new Font("Segoe UI", 26f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 33f, FontStyle.Bold, GraphicsUnit.Pixel),
                 ForeColor = Color.FromArgb(22, 32, 42),
                 AutoSize = true,
                 Location = new Point(32, 112)
             };
             card.Controls.Add(titleLbl);
+            // La targeta té una mida fixa en píxels (520 d'ample): a DPI alt el títol (AutoSize)
+            // pot créixer més ràpid que la targeta que l'envolta, i una Panel retalla qualsevol
+            // fill que sobresurti. Assegurem que la targeta mai sigui més estreta del que el seu
+            // propi títol necessita, sigui quin sigui el DPI.
+            if (card.Width < titleLbl.Right + 32)
+                card.Width = titleLbl.Right + 32;
 
             // Si la descripció és buida, no es crea cap etiqueta — encara que no tingui text,
             // una etiqueta buida igualment pinta el seu propi fons i, per l'ordre de z-order de
@@ -784,7 +794,7 @@ namespace SimConnect3
                 var descLbl = new Label
                 {
                     Text = description,
-                    Font = new Font("Segoe UI", 19f),
+                    Font = new Font("Segoe UI", 24f, GraphicsUnit.Pixel),
                     ForeColor = Color.FromArgb(102, 114, 127),
                     Location = new Point(32, 165),
                     Size = new Size(456, 175)
@@ -816,7 +826,7 @@ namespace SimConnect3
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(235, 91, 37),
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 20f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 25f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             openButton.FlatAppearance.BorderSize = 0;
             content.Controls.Add(openButton);
@@ -829,7 +839,7 @@ namespace SimConnect3
             {
                 Text = "",
                 ForeColor = Color.FromArgb(21, 115, 71),
-                Font = new Font("Segoe UI", 15f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 19f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Location = new Point(0, 104),
                 AutoSize = true,
                 MaximumSize = new Size(456, 0)
@@ -840,7 +850,7 @@ namespace SimConnect3
             {
                 Text = "",
                 ForeColor = Color.FromArgb(153, 27, 27),
-                Font = new Font("Segoe UI", 14f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 18f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Location = new Point(0, 104),
                 AutoSize = true,
                 MaximumSize = new Size(456, 0)
@@ -880,7 +890,7 @@ namespace SimConnect3
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(235, 91, 37),
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 20f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 25f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             _touchButton.FlatAppearance.BorderSize = 0;
             content.Controls.Add(_touchButton);
@@ -889,7 +899,7 @@ namespace SimConnect3
             {
                 Text = "This will close panelAIR so you can configure the touch screen in Windows. Start panelAIR again afterward.",
                 ForeColor = Color.FromArgb(102, 114, 127),
-                Font = new Font("Segoe UI", 15f),
+                Font = new Font("Segoe UI", 19f, GraphicsUnit.Pixel),
                 Location = new Point(0, 104),
                 Size = new Size(456, 80)
             };
@@ -899,7 +909,7 @@ namespace SimConnect3
             {
                 Text = AppSettings.Instance.TouchScreenConfigured ? "This monitor is configured as the touch screen." : "",
                 ForeColor = Color.FromArgb(21, 115, 71),
-                Font = new Font("Segoe UI", 18f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 23f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Location = new Point(0, 196),
                 Size = new Size(456, 80)
             };
@@ -934,7 +944,7 @@ namespace SimConnect3
             var questionLbl = new Label
             {
                 Text = "Is SFSmonitor already installed on this computer?",
-                Font = new Font("Segoe UI", 19f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 24f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Location = new Point(0, 0),
                 Size = new Size(456, 90)
             };
@@ -949,7 +959,7 @@ namespace SimConnect3
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(230, 230, 230),
                 ForeColor = Color.FromArgb(22, 32, 42),
-                Font = new Font("Segoe UI", 16f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 20f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             yesBtn.FlatAppearance.BorderSize = 2;
             yesBtn.FlatAppearance.BorderColor = Color.FromArgb(180, 186, 194);
@@ -965,7 +975,7 @@ namespace SimConnect3
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(235, 91, 37),
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 16f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 20f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             _sfsInstallButton.FlatAppearance.BorderSize = 0;
             _sfsInstallButton.Click += SfsInstallButton_Click;
@@ -975,7 +985,7 @@ namespace SimConnect3
             _sfsInstallStatusLbl = new Label
             {
                 ForeColor = Color.FromArgb(102, 114, 127),
-                Font = new Font("Segoe UI", 14f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 18f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Location = new Point(0, 254),
                 Size = new Size(456, 80)
             };
@@ -987,7 +997,7 @@ namespace SimConnect3
             {
                 Text = "SFSmonitor location",
                 AutoSize = true,
-                Font = new Font("Segoe UI", 18f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 23f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Location = new Point(0, 0)
             };
             content.Controls.Add(pathLbl);
@@ -996,7 +1006,7 @@ namespace SimConnect3
             _sfsPathBox = new TextBox
             {
                 Text = AppSettings.Instance.SfsMonitorPath,
-                Font = new Font("Segoe UI", 16f),
+                Font = new Font("Segoe UI", 20f, GraphicsUnit.Pixel),
                 Location = new Point(0, 42),
                 Size = new Size(310, 40)
             };
@@ -1007,7 +1017,7 @@ namespace SimConnect3
             var browseButton = new Button
             {
                 Text = "Browse…",
-                Font = new Font("Segoe UI", 14f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 18f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Location = new Point(322, 40),
                 Size = new Size(134, 44),
                 FlatStyle = FlatStyle.Flat,
@@ -1041,7 +1051,7 @@ namespace SimConnect3
             {
                 Text = "Select the SFSmonitor.exe file.",
                 ForeColor = Color.FromArgb(102, 114, 127),
-                Font = new Font("Segoe UI", 16f),
+                Font = new Font("Segoe UI", 20f, GraphicsUnit.Pixel),
                 Location = new Point(0, 100),
                 AutoSize = true
             };
@@ -1051,7 +1061,7 @@ namespace SimConnect3
             var switchTitle = new Label
             {
                 Text = "Open SFSmonitor automatically",
-                Font = new Font("Segoe UI", 18f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 23f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Location = new Point(0, 200),
                 Size = new Size(300, 60)
             };
@@ -1062,7 +1072,7 @@ namespace SimConnect3
             {
                 Text = "Turn this on only if you want panelAIR to launch SFSmonitor.",
                 ForeColor = Color.FromArgb(102, 114, 127),
-                Font = new Font("Segoe UI", 15f),
+                Font = new Font("Segoe UI", 19f, GraphicsUnit.Pixel),
                 Location = new Point(0, 262),
                 Size = new Size(300, 90)
             };
@@ -1084,7 +1094,7 @@ namespace SimConnect3
                 Text = toggle.Checked ? "On" : "Off",
                 Location = new Point(330, 264),
                 AutoSize = true,
-                Font = new Font("Segoe UI", 18f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 23f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             var toggleStateLbl = _sfsToggleStateLbl;
             content.Controls.Add(toggleStateLbl);
@@ -1176,7 +1186,7 @@ namespace SimConnect3
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(235, 91, 37),
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 20f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 25f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             installButton.FlatAppearance.BorderSize = 0;
             content.Controls.Add(installButton);
@@ -1185,7 +1195,7 @@ namespace SimConnect3
             {
                 Text = "",
                 ForeColor = Color.FromArgb(21, 115, 71),
-                Font = new Font("Segoe UI", 18f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 23f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Location = new Point(0, 104),
                 Size = new Size(456, 80)
             };
@@ -1228,7 +1238,7 @@ namespace SimConnect3
             var itemTitle = new Label
             {
                 Text = title,
-                Font = new Font("Segoe UI", 20f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 25f, FontStyle.Bold, GraphicsUnit.Pixel),
                 AutoSize = true,
                 Location = new Point(0, y)
             };
@@ -1238,7 +1248,7 @@ namespace SimConnect3
             {
                 Text = desc,
                 ForeColor = Color.FromArgb(102, 114, 127),
-                Font = new Font("Segoe UI", 16f),
+                Font = new Font("Segoe UI", 20f, GraphicsUnit.Pixel),
                 Location = new Point(0, y + 44),
                 Size = new Size(456, 70)
             };
@@ -1248,7 +1258,7 @@ namespace SimConnect3
             {
                 Text = linkText,
                 LinkColor = Color.FromArgb(235, 91, 37),
-                Font = new Font("Segoe UI", 17f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 22f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Location = new Point(0, y + 120),
                 AutoSize = true
             };
@@ -1266,7 +1276,7 @@ namespace SimConnect3
             var switchTitle = new Label
             {
                 Text = "Disable Windows edge-swipe gesture",
-                Font = new Font("Segoe UI", 18f, FontStyle.Bold),
+                Font = new Font("Segoe UI", 23f, FontStyle.Bold, GraphicsUnit.Pixel),
                 Location = new Point(0, 0),
                 Size = new Size(456, 60)
             };
@@ -1276,7 +1286,7 @@ namespace SimConnect3
             {
                 Text = "Requires administrator confirmation the first time. Can be reverted here at any time.",
                 ForeColor = Color.FromArgb(102, 114, 127),
-                Font = new Font("Segoe UI", 15f),
+                Font = new Font("Segoe UI", 19f, GraphicsUnit.Pixel),
                 Location = new Point(0, 62),
                 Size = new Size(456, 90)
             };
@@ -1293,7 +1303,7 @@ namespace SimConnect3
             {
                 Location = new Point(0, 226),
                 Size = new Size(456, 60),
-                Font = new Font("Segoe UI", 15f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 19f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             content.Controls.Add(_edgeSwipeStatusLbl);
 
@@ -1334,7 +1344,7 @@ namespace SimConnect3
                 Text = "POPM is a free tool made by other flight simmers. It lets you pop out your screens automatically and place them exactly within panelAIR's bezels. (SFS doesn't provide support for how this software works.)\n\n" +
                        "You can already pop out screens in MSFS with \"Alt+G\", but that always leaves a title bar on top. POPM removes that bar completely, and for the G3000 it's the only way to make the TSC1 and TSC2 screens respond to touch.\n\n" +
                        "There's a separate version for MSFS 2020 and for MSFS 2024. Download the one for your simulator below, unzip it anywhere you like, run the program inside, then open our step-by-step guide.",
-                Font = new Font("Segoe UI", 19f),
+                Font = new Font("Segoe UI", 24f, GraphicsUnit.Pixel),
                 ForeColor = Color.FromArgb(102, 114, 127),
                 Location = new Point(0, 0),
                 AutoSize = true,
@@ -1352,7 +1362,7 @@ namespace SimConnect3
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(235, 91, 37),
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 17f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 22f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             download2020Btn.FlatAppearance.BorderSize = 0;
             download2020Btn.Click += (s, e) => OpenUrlOnPrimaryMonitor("https://github.com/hawkeye-stan/msfs-popout-panel-manager/releases");
@@ -1367,7 +1377,7 @@ namespace SimConnect3
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(235, 91, 37),
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 17f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 22f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             download2024Btn.FlatAppearance.BorderSize = 0;
             download2024Btn.Click += (s, e) => OpenUrlOnPrimaryMonitor("https://github.com/hawkeye-stan/msfs-2024-popout-panel-manager/releases");
@@ -1382,7 +1392,7 @@ namespace SimConnect3
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(60, 90, 130),
                 ForeColor = Color.White,
-                Font = new Font("Segoe UI", 17f, FontStyle.Bold)
+                Font = new Font("Segoe UI", 22f, FontStyle.Bold, GraphicsUnit.Pixel)
             };
             setupGuideBtn.FlatAppearance.BorderSize = 0;
             setupGuideBtn.Click += (s, e) => ShowPopoutGuide();

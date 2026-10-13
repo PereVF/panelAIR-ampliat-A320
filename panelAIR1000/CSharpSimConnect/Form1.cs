@@ -1968,6 +1968,15 @@ namespace SimConnect3
         {
             InitializeComponent();
 
+            // DoubleBuffered del formulari (Designer) només evita parpelleig del propi Form — NO
+            // es propaga a controls fills com pbMain, on es fa tot el dibuix pesat. Sense això,
+            // en mode DEMO (l'únic lloc on la finestra es redimensiona de debò) cada fotograma
+            // intermedi de l'arrossegament quedava "apilat" en comptes de substituir l'anterior.
+            // DoubleBuffered és protected a Control: cal activar-ho per reflexió des de fora.
+            typeof(Control).InvokeMember("DoubleBuffered",
+                System.Reflection.BindingFlags.SetProperty | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic,
+                null, pbMain, new object[] { true });
+
             imglightOff = panelAIR1000.Properties.Resources.light_off;
             imglightOn = panelAIR1000.Properties.Resources.light_on;
             trimWheelImg = LoadOverlayImage("trim wheel.png");
@@ -2080,7 +2089,27 @@ namespace SimConnect3
                 this.Size = new Size(targetW, targetH);
                 this.Location = new Point(wa.X + (wa.Width - targetW) / 2, wa.Y + (wa.Height - targetH) / 2);
                 pbMain.Dock = DockStyle.Fill;
-                this.Text = "panelAIR1000 — DEMO";
+                this.Text = "panelAIR — DEMO";
+                // Diagnòstic temporal: la finestra demo surt trencada en algun entorn concret
+                // (monitor únic, no 4K) — registrem els valors reals calculats per saber si el
+                // problema és una mida/posició incorrecta abans de seguir endevinant a cegues.
+                try
+                {
+                    System.IO.File.AppendAllText("panelAIR_App_crash.txt",
+                        $"\r\n[DEMO DEBUG] AllScreens={Screen.AllScreens.Length} PrimaryScreen={(Screen.PrimaryScreen == null ? "NULL" : "OK")} " +
+                        $"wa={wa} targetW={targetW} targetH={targetH} ThisSize={this.Size} ThisLocation={this.Location} " +
+                        $"ControlBox={this.ControlBox} MinimizeBox={this.MinimizeBox} MaximizeBox={this.MaximizeBox} FormBorderStyle={this.FormBorderStyle}");
+                }
+                catch { }
+                this.Shown += (s, e) =>
+                {
+                    try
+                    {
+                        System.IO.File.AppendAllText("panelAIR_App_crash.txt",
+                            $"\r\n[DEMO DEBUG Shown] ThisBounds={this.Bounds} WindowState={this.WindowState} pbMainSize={pbMain.Size}");
+                    }
+                    catch { }
+                };
                 // Els forats del PFD/MFD (i TSC en G3000) depenen de l'escala actual — recalcular-los
                 // cada vegada que la finestra es redimensiona (arrossegar-la sola no cal: la Region
                 // és relativa al propi Form, es mou sola amb la finestra).
@@ -2363,8 +2392,11 @@ namespace SimConnect3
                 closeButton.Location = new Point(formPt.X - _closeBtnDragOffset.X, formPt.Y - _closeBtnDragOffset.Y);
             };
             closeButton.MouseUp += (s, e) => { _closeBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
-            closeButton.Location = new Point(100, 100);
-            closeButton.Anchor = AnchorStyles.None;
+            // Posició per defecte: just a sota del botó "SETUP WIZARD" (900,180 + 63 d'alçada + 10),
+            // perquè sigui sempre visible i previsible encara que el calibratge guardat falli per
+            // qualsevol motiu. Pere el reposicionarà amb F12 un cop confirmat que es veu.
+            closeButton.Location = new Point(900, 253);
+            closeButton.Anchor = AnchorStyles.Top | AnchorStyles.Left;
             _overlayPanel.Controls.Add(closeButton);
 
 
@@ -4541,6 +4573,19 @@ namespace SimConnect3
                 formRegion.Exclude(ToWindow(hole));
 
             this.Region = formRegion;
+
+            // Diagnòstic temporal (veure PbMain_Paint/constructor): la finestra demo surt com una
+            // tireta mínima des del primer frame en un entorn concret (un sol monitor ultrawide).
+            // Registrem els valors reals d'aquest càlcul de "forats" per confirmar si és aquí on
+            // es trenca, sense seguir endevinant a cegues.
+            try
+            {
+                System.IO.File.AppendAllText("panelAIR_App_crash.txt",
+                    $"\r\n[REGION DEBUG] scale={scale} offX={offX} offY={offY} pbScreenOrigin={pbScreenOrigin} " +
+                    $"thisLocation={this.Location} chromeDx={chromeDx} chromeDy={chromeDy} thisSize={this.Width}x{this.Height} " +
+                    $"holes=[{string.Join(" | ", virtualHoles.Select(h => $"{h}->{ToWindow(h)}"))}]");
+            }
+            catch { }
         }
 
         private void frmMain_Load(object sender, EventArgs e)
@@ -4548,11 +4593,11 @@ namespace SimConnect3
             if (IsDemoMode)
             {
                 MessageBox.Show(this,
-                    "You're running panelAIR1000 in DEMO mode (no panelAIR hardware detected).\n\n" +
+                    "You're running panelAIR in DEMO mode (no panelAIR hardware detected).\n\n" +
                     "You have 10 minutes to explore the app. Resize this window or move it to any monitor you like.\n\n" +
                     "Connect a real panelAIR panel at any time to unlock full operation.\n\n" +
                     "IMPORTANT: Before testing this demo, please download our SFS Link add-on from our website and install it in your MSFS Community folder. You can find it in the panelAIR Downloads tab.",
-                    "panelAIR1000 — Demo", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    "panelAIR — Demo", MessageBoxButtons.OK, MessageBoxIcon.Information);
 
                 _demoStartTime = DateTime.Now;
                 int demoTotalSeconds = 600;
@@ -4570,12 +4615,12 @@ namespace SimConnect3
                             {
                                 demoExpiryHandled = true;
                                 try { Process.Start(new ProcessStartInfo { FileName = "https://simflightservices.com/shop/air-panels/", UseShellExecute = true }); } catch { }
-                                MessageBox.Show(this, "Thanks for trying panelAIR1000!\n\nWe've opened our shop page so you can get the real thing.", "panelAIR1000 — Demo ended", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                                MessageBox.Show(this, "Thanks for trying panelAIR!\n\nWe've opened our shop page so you can get the real thing.", "panelAIR — Demo ended", MessageBoxButtons.OK, MessageBoxIcon.Information);
                                 Process.GetCurrentProcess().Kill();
                             }
                             else
                             {
-                                this.Text = $"panelAIR1000 — DEMO (closing in {secondsLeft / 60}:{secondsLeft % 60:D2})";
+                                this.Text = $"panelAIR — DEMO (closing in {secondsLeft / 60}:{secondsLeft % 60:D2})";
                             }
                         }));
                     }
@@ -4618,54 +4663,77 @@ namespace SimConnect3
                         ?? Screen.AllScreens.First(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
                     using (var verifyFailedForm = new Form
                     {
-                        AutoScaleMode = AutoScaleMode.None,
-                        FormBorderStyle = FormBorderStyle.FixedDialog,
+                        AutoScaleDimensions = new SizeF(96f, 96f),
+                        AutoScaleMode = AutoScaleMode.Dpi,
+                        FormBorderStyle = FormBorderStyle.Sizable,
                         MaximizeBox = false,
                         MinimizeBox = false,
                         ControlBox = false,
-                        Text = "panelAIR1000",
-                        Size = new Size(900, 560),
+                        Text = "panelAIR",
                         BackColor = Color.White,
-                        StartPosition = FormStartPosition.Manual
+                        StartPosition = FormStartPosition.Manual,
+                        AutoSize = true,
+                        AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                        Padding = new Padding(30)
                     })
                     {
-                        verifyFailedForm.Location = new Point(
-                            screen4K.Bounds.X + (screen4K.Bounds.Width - verifyFailedForm.Width) / 2,
-                            screen4K.Bounds.Y + (screen4K.Bounds.Height - verifyFailedForm.Height) / 2);
+                        // Deixem que el propi motor de layout de WinForms (FlowLayoutPanel + AutoSize
+                        // en cascada, AutoScaleMode.Dpi) calculi mides/posicions, en comptes de
+                        // calcular-les nosaltres a mà en píxels — dos intents manuals (AutoSize+Bottom/
+                        // Right, i després GetPreferredSize() explícit) van fallar igualment en canviar
+                        // de DPI. Sizable: si tot i així queda retallat, es pot arrossegar la vora.
+                        var flow = new FlowLayoutPanel
+                        {
+                            FlowDirection = FlowDirection.TopDown,
+                            WrapContents = false,
+                            AutoSize = true,
+                            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                            Dock = DockStyle.Fill
+                        };
 
                         var titleLbl = new Label
                         {
                             Text = "panelAIR App - verification failed",
+                            AutoSize = true,
                             Font = new Font("Segoe UI", 24f, FontStyle.Bold),
                             ForeColor = Color.FromArgb(22, 32, 42),
-                            TextAlign = ContentAlignment.MiddleCenter,
-                            Location = new Point(30, 30),
-                            Size = new Size(verifyFailedForm.ClientSize.Width - 60, 50)
+                            Margin = new Padding(0, 0, 0, 20)
                         };
-                        verifyFailedForm.Controls.Add(titleLbl);
+                        flow.Controls.Add(titleLbl);
 
-                        var bodyLbl = new Label
+                        var bodyFont = new Font("Segoe UI", 14f);
+                        var bodyBoldFont = new Font("Segoe UI", 14f, FontStyle.Bold);
+                        var bodyColor = Color.FromArgb(60, 60, 60);
+
+                        FlowLayoutPanel MakeBoldLine(string before, string bold, string after, int marginBottom)
                         {
-                            Text = "This application requires an SFS panelAIR device to operate.\n\n" +
-                                   "If you own a panelAIR device, please ensure that:\n\n" +
-                                   "  •  The panelAIR screen is connected to the computer and powered on.\n" +
-                                   "  •  The panelAIR USB \"touch\" cable is connected to the computer.\n" +
-                                   "  •  The RotAIR module is connected to a computer USB port.\n\n" +
-                                   "Then restart the application.\n\n" +
-                                   "(If you do not own a panelAIR device, the application will remain functional for 10 minutes only.)",
-                            Font = new Font("Segoe UI", 14f),
-                            ForeColor = Color.FromArgb(60, 60, 60),
-                            TextAlign = ContentAlignment.TopLeft,
-                            Location = new Point(30, 90),
-                            Size = new Size(verifyFailedForm.ClientSize.Width - 60, 380)
-                        };
-                        verifyFailedForm.Controls.Add(bodyLbl);
+                            var line = new FlowLayoutPanel
+                            {
+                                FlowDirection = FlowDirection.LeftToRight,
+                                WrapContents = false,
+                                AutoSize = true,
+                                AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                                Margin = new Padding(0, 0, 0, marginBottom)
+                            };
+                            line.Controls.Add(new Label { Text = before, AutoSize = true, Font = bodyFont, ForeColor = bodyColor, Margin = Padding.Empty });
+                            line.Controls.Add(new Label { Text = bold, AutoSize = true, Font = bodyBoldFont, ForeColor = bodyColor, Margin = Padding.Empty });
+                            line.Controls.Add(new Label { Text = after, AutoSize = true, Font = bodyFont, ForeColor = bodyColor, Margin = Padding.Empty });
+                            return line;
+                        }
+                        Label MakeLine(string text, int marginTop, int marginBottom)
+                            => new Label { Text = text, AutoSize = true, Font = bodyFont, ForeColor = bodyColor, Margin = new Padding(0, marginTop, 0, marginBottom) };
+
+                        flow.Controls.Add(MakeBoldLine("If you own a ", "panelAIR", " device, please ensure that:", 14));
+                        flow.Controls.Add(MakeLine("1.  The panelAIR screen is powered ON.", 0, 2));
+                        flow.Controls.Add(MakeLine("2.  The panelAIR USB \"touch\" cable is connected to the computer.", 0, 2));
+                        flow.Controls.Add(MakeLine("3.  The RotAIR module USB cables are connected to the computer.", 0, 20));
+                        flow.Controls.Add(MakeLine("Then restart the application.", 0, 20));
+                        flow.Controls.Add(MakeLine("(Until these 3 points are resolved, the application will remain functional for 10 minutes only.)", 0, 30));
 
                         var okButton = new Button
                         {
                             Text = "OK",
                             Size = new Size(160, 48),
-                            Location = new Point((verifyFailedForm.ClientSize.Width - 160) / 2, 480),
                             FlatStyle = FlatStyle.Flat,
                             BackColor = Color.FromArgb(235, 91, 37),
                             ForeColor = Color.White,
@@ -4673,30 +4741,48 @@ namespace SimConnect3
                             DialogResult = DialogResult.OK
                         };
                         okButton.FlatAppearance.BorderSize = 0;
-                        verifyFailedForm.Controls.Add(okButton);
+                        flow.Controls.Add(okButton);
+
+                        verifyFailedForm.Controls.Add(flow);
                         verifyFailedForm.AcceptButton = okButton;
+
+                        // Centrat a la pantalla PRINCIPAL (no la panelAIR): si el client té el cable
+                        // de vídeo connectat però la pantalla panelAIR apagada, mai veuria l'avís si
+                        // sortís allà. Cal fer-ho a Shown (no abans), perquè amb AutoSize=true la mida
+                        // final de la finestra només es coneix amb certesa un cop ja s'ha fet el
+                        // primer layout complet.
+                        verifyFailedForm.Shown += (s, e) =>
+                        {
+                            var primary = Screen.PrimaryScreen!.Bounds;
+                            verifyFailedForm.Location = new Point(
+                                primary.X + (primary.Width - verifyFailedForm.Width) / 2,
+                                primary.Y + (primary.Height - verifyFailedForm.Height) / 2);
+                        };
 
                         verifyFailedForm.ShowDialog();
                     }
                     var countdownForm = new Form
                     {
-                        Text = "panelAIR1000 - Trial Mode",
-                        Size = new Size(800, 300),
+                        Text = "panelAIR - Trial Mode",
+                        Size = new Size(280, 110),
                         FormBorderStyle = FormBorderStyle.FixedDialog,
                         StartPosition = FormStartPosition.Manual,
                         TopMost = true,
                         ControlBox = false
                     };
+                    // Pantalla PRINCIPAL, no la panelAIR (mateix motiu que el diàleg "verification
+                    // failed": si la pantalla panelAIR està apagada, mai es veuria aquí).
+                    var countdownPrimary = Screen.PrimaryScreen!.Bounds;
                     countdownForm.Location = new Point(
-                        screen4K.Bounds.X + (screen4K.Bounds.Width - countdownForm.Width) / 2,
-                        screen4K.Bounds.Y + (screen4K.Bounds.Height - countdownForm.Height) / 2
+                        countdownPrimary.X + (countdownPrimary.Width - countdownForm.Width) / 2,
+                        countdownPrimary.Y + (countdownPrimary.Height - countdownForm.Height) / 2
                     );
                     var label = new Label
                     {
-                        Text = "No panelAIR1000 detected.\nClosing in 10:00...",
+                        Text = "No panelAIR detected.\nClosing in 10:00...",
                         Dock = DockStyle.Fill,
                         TextAlign = ContentAlignment.MiddleCenter,
-                        Font = new Font("Arial", 24)
+                        Font = new Font("Arial", 9f)
                     };
                     countdownForm.Controls.Add(label);
                     countdownForm.Show();   // no-modal: l'app principal continua inicialitzant-se
@@ -4720,7 +4806,7 @@ namespace SimConnect3
                                 }
                                 else
                                 {
-                                    label.Text = $"No panelAIR1000 detected.\nClosing in {secondsLeft / 60}:{secondsLeft % 60:D2}...";
+                                    label.Text = $"No panelAIR detected.\nClosing in {secondsLeft / 60}:{secondsLeft % 60:D2}...";
                                 }
                             }));
                         }
@@ -4892,7 +4978,7 @@ namespace SimConnect3
                 simReconnectTimer.Start();
             }
 
-            this.Text = "panelAIR1000";
+            this.Text = "panelAIR";
 
             if (enableHidReading)
             {
@@ -7150,7 +7236,7 @@ namespace SimConnect3
             if (_sfsMissingForm != null && !_sfsMissingForm.IsDisposed) return;
             _sfsMissingForm = new Form
             {
-                Text = "panelAIR1000 - WARNING",
+                Text = "panelAIR - WARNING",
                 FormBorderStyle = FormBorderStyle.FixedDialog,
                 MaximizeBox = false, MinimizeBox = false,
                 StartPosition = FormStartPosition.Manual,
@@ -7171,7 +7257,7 @@ namespace SimConnect3
                 TabStop = false,
                 WordWrap = false
             };
-            const string msg = "Please activate the SFSmonitor plugin to complete the functionality of this panelAIR1000 App.";
+            const string msg = "Please activate the SFSmonitor plugin to complete the functionality of this panelAIR App.";
             rtb.Text = msg;
             _sfsMissingForm.Controls.Add(rtb);
             _sfsMissingForm.Shown += (s, ev) =>
@@ -9614,6 +9700,11 @@ namespace SimConnect3
             {
             if (IsDemoMode)
             {
+                // Neteja explícita de tot el control abans de dibuixar res: en redimensionar
+                // arrossegant, cada fotograma intermedi quedava "apilat" sobre l'anterior en comptes
+                // de substituir-lo (es veien desenes de còpies en diagonal). Activar DoubleBuffered
+                // a pbMain no n'hi va haver prou; netejar-ho manualment és la solució segura.
+                e.Graphics.Clear(Color.Black);
                 var (demoScale, demoOffX, demoOffY) = GetDemoTransform();
                 e.Graphics.TranslateTransform(demoOffX, demoOffY);
                 e.Graphics.ScaleTransform(demoScale, demoScale);
