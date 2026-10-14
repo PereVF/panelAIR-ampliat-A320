@@ -1847,6 +1847,8 @@ namespace SimConnect3
         private Form? _overlayPanel;
         private Panel? _fsConnPanel;
         private Panel? _appVersionPanel;
+        private int _demoPaintDebugCount = 0;
+        private System.Windows.Forms.Timer _demoDisconnectedRefreshTimer = null!;
         private bool _appVersionDragging = false;
         private Point _appVersionDragOffset;
 
@@ -2130,7 +2132,12 @@ namespace SimConnect3
                 this.TopMost = true;
             }
 
-            ApplyPfdRegion();
+            // En mode DEMO, cridar-ho aquí (abans que la finestra tingui una posició real a la
+            // pantalla) calcula malament l'offset de pbMain (pbMain.PointToScreen torna un valor
+            // fals pre-Shown) i deixa un "forat" amb coordenades disbaratades aplicat a la Region
+            // — la finestra es veu trencada des del primer fotograma. El handler de Shown (més
+            // amunt) ja el torna a calcular bé un cop la finestra és real; no cal fer-ho aquí també.
+            if (!IsDemoMode) ApplyPfdRegion();
 
             AppDomain.CurrentDomain.UnhandledException += (s, e) =>
             {
@@ -2486,7 +2493,10 @@ namespace SimConnect3
             _gearBtn.MouseUp += (s, e) => { _gearBtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             this.Controls.Add(_gearBtn);
             _gearBtn.BringToFront();
-            if (IsDemoMode) _gearBtn.Visible = false; // demo: sense engranatge, sense accés a l'AUX
+            // 2026-10-14 (Pere): amagat de nou en mode demo (es va provar a mostrar-lo dibuixat
+            // en coordenades virtuals, com DrawShowAreasIcon, i funcionava — Pere ho ha deixat
+            // de banda per ara per tancar la primera versió de l'app sense seguir-hi dedicant temps).
+            if (IsDemoMode) _gearBtn.Visible = false;
 
             // ── Overlay genèric d'avisos (substitueix MessageBox.Show per avisos que poden sortir
             // en ple vol, com el recordatori del mod TBM930) ──
@@ -4833,6 +4843,19 @@ namespace SimConnect3
             // (veure MarkCommandSent) i hi torna als 2s sense cap comanda nova (2026-10-03, Pere).
             _dataPollTimer.Interval = 1000;
             _dataPollTimer.Tick += (s3, ev3) => PollLowFrequencySimData();
+
+            // Mode DEMO: quan MSFS SÍ està connectat, les dades que arriben contínuament ja forcen
+            // repintats freqüents que "amaguen" qualsevol problema de repintat parcial en redimensionar.
+            // Quan MSFS NO hi és, no arriba res i la finestra es queda congelada amb el que hi hagi
+            // mig dibuixat. Aquest timer substitueix aquell refresc continu només quan fa falta
+            // (2026-10-14, a petició de Pere, en comptes de seguir perseguint la causa arrel).
+            _demoDisconnectedRefreshTimer = new System.Windows.Forms.Timer();
+            _demoDisconnectedRefreshTimer.Interval = 50;
+            _demoDisconnectedRefreshTimer.Tick += (s3b, ev3b) =>
+            {
+                if (IsDemoMode && simconnect == null) pbMain.Invalidate();
+            };
+            _demoDisconnectedRefreshTimer.Start();
 
             _flapsActiveReadTimer = new System.Windows.Forms.Timer();
             _flapsActiveReadTimer.Interval = 50; // veure comentari del camp
@@ -9700,10 +9723,23 @@ namespace SimConnect3
             {
             if (IsDemoMode)
             {
-                // Neteja explícita de tot el control abans de dibuixar res: en redimensionar
-                // arrossegant, cada fotograma intermedi quedava "apilat" sobre l'anterior en comptes
-                // de substituir-lo (es veien desenes de còpies en diagonal). Activar DoubleBuffered
-                // a pbMain no n'hi va haver prou; netejar-ho manualment és la solució segura.
+                // Diagnòstic temporal: confirmar si Windows només marca per repintar una franja
+                // petita (no tot pbMain) durant el redimensionament — explicaria per què Clear()
+                // no n'hi havia prou (Clear() només neteja dins del clip actual).
+                if (_demoPaintDebugCount < 40)
+                {
+                    _demoPaintDebugCount++;
+                    try
+                    {
+                        System.IO.File.AppendAllText("panelAIR_App_crash.txt",
+                            $"\r\n[PAINT DEBUG #{_demoPaintDebugCount}] ClipRectangle={e.ClipRectangle} pbMainClientRect={pbMain.ClientRectangle}");
+                    }
+                    catch { }
+                }
+                // Força el clip a TOT el control abans de netejar/dibuixar: sense això, Clear()
+                // només netejava la franja petita que Windows marcava com a "per repintar" durant
+                // l'arrossegament, deixant la resta amb el contingut vell apilat a sota.
+                e.Graphics.Clip = new Region(pbMain.ClientRectangle);
                 e.Graphics.Clear(Color.Black);
                 var (demoScale, demoOffX, demoOffY) = GetDemoTransform();
                 e.Graphics.TranslateTransform(demoOffX, demoOffY);
