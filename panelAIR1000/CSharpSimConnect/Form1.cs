@@ -4602,12 +4602,70 @@ namespace SimConnect3
         {
             if (IsDemoMode)
             {
-                MessageBox.Show(this,
-                    "You're running panelAIR in DEMO mode (no panelAIR hardware detected).\n\n" +
-                    "You have 10 minutes to explore the app. Resize this window or move it to any monitor you like.\n\n" +
-                    "Connect a real panelAIR panel at any time to unlock full operation.\n\n" +
-                    "IMPORTANT: Before testing this demo, please download our SFS Link add-on from our website and install it in your MSFS Community folder. You can find it in the panelAIR Downloads tab.",
-                    "panelAIR — Demo", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                // MessageBox normal no permet negreta parcial — mateix patró que el diàleg
+                // "verification failed" (FlowLayoutPanel + AutoSize, robust a qualsevol DPI).
+                using (var welcomeForm = new Form
+                {
+                    AutoScaleDimensions = new SizeF(96f, 96f),
+                    AutoScaleMode = AutoScaleMode.Dpi,
+                    FormBorderStyle = FormBorderStyle.FixedDialog,
+                    MaximizeBox = false,
+                    MinimizeBox = false,
+                    Text = "panelAIR App — DEMO",
+                    BackColor = Color.White,
+                    StartPosition = FormStartPosition.CenterParent,
+                    AutoSize = true,
+                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                    Padding = new Padding(30)
+                })
+                {
+                    var welcomeFlow = new FlowLayoutPanel
+                    {
+                        FlowDirection = FlowDirection.TopDown,
+                        WrapContents = false,
+                        AutoSize = true,
+                        AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                        Dock = DockStyle.Fill
+                    };
+
+                    var welcomeFont = new Font("Segoe UI", 11f);
+                    var welcomeBoldFont = new Font("Segoe UI", 11f, FontStyle.Bold);
+                    var welcomeColor = Color.Black;
+
+                    FlowLayoutPanel WelcomeLine(int marginBottom, params (string text, bool bold)[] segments)
+                    {
+                        var line = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0, 0, 0, marginBottom) };
+                        foreach (var (text, bold) in segments)
+                            line.Controls.Add(new Label { Text = text, AutoSize = true, Font = bold ? welcomeBoldFont : welcomeFont, ForeColor = welcomeColor, Margin = Padding.Empty });
+                        return line;
+                    }
+
+                    welcomeFlow.Controls.Add(WelcomeLine(16,
+                        ("You're running ", false), ("panelAIR App", true), (" in DEMO mode (no ", false), ("panelAIR", true), (" panel detected).", false)));
+                    welcomeFlow.Controls.Add(WelcomeLine(16,
+                        ("You have 10 minutes to explore the app. Resize this window or move it to any monitor you like.", false)));
+                    welcomeFlow.Controls.Add(WelcomeLine(16,
+                        ("Connect a real ", false), ("panelAIR", true), (" panel at any time to unlock full operation.", false)));
+                    welcomeFlow.Controls.Add(WelcomeLine(24,
+                        ("IMPORTANT: Before testing this demo, please download our SFS Link add-on from our website and install it in your MSFS Community folder. You can find it in the ", false), ("panelAIR", true), (" Downloads tab.", false)));
+
+                    var welcomeOkButton = new Button
+                    {
+                        Text = "OK",
+                        Size = new Size(160, 48),
+                        FlatStyle = FlatStyle.Flat,
+                        BackColor = Color.FromArgb(235, 91, 37),
+                        ForeColor = Color.White,
+                        Font = new Font("Segoe UI", 14f, FontStyle.Bold),
+                        DialogResult = DialogResult.OK
+                    };
+                    welcomeOkButton.FlatAppearance.BorderSize = 0;
+                    welcomeFlow.Controls.Add(welcomeOkButton);
+
+                    welcomeForm.Controls.Add(welcomeFlow);
+                    welcomeForm.AcceptButton = welcomeOkButton;
+                    welcomeForm.ShowDialog(this);
+                }
 
                 _demoStartTime = DateTime.Now;
                 int demoTotalSeconds = 600;
@@ -4625,7 +4683,75 @@ namespace SimConnect3
                             {
                                 demoExpiryHandled = true;
                                 try { Process.Start(new ProcessStartInfo { FileName = "https://simflightservices.com/shop/air-panels/", UseShellExecute = true }); } catch { }
-                                MessageBox.Show(this, "Thanks for trying panelAIR!\n\nWe've opened our shop page so you can get the real thing.", "panelAIR — Demo ended", MessageBoxButtons.OK, MessageBoxIcon.Information);
+
+                                // Mateix patró que "verification failed": MessageBox normal no
+                                // permet negreta i no aguanta bé qualsevol DPI. Custom Form,
+                                // centrat a la pantalla PRINCIPAL (no toca res de screen4K).
+                                using (var endedForm = new Form
+                                {
+                                    AutoScaleDimensions = new SizeF(96f, 96f),
+                                    AutoScaleMode = AutoScaleMode.Dpi,
+                                    FormBorderStyle = FormBorderStyle.FixedDialog,
+                                    MaximizeBox = false,
+                                    MinimizeBox = false,
+                                    Text = "panelAIR — DEMO ended",
+                                    BackColor = Color.White,
+                                    StartPosition = FormStartPosition.Manual,
+                                    TopMost = true, // s'obre el navegador alhora: cal quedar per davant
+                                    AutoSize = true,
+                                    AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                                    Padding = new Padding(30)
+                                })
+                                {
+                                    var endedFlow = new FlowLayoutPanel
+                                    {
+                                        FlowDirection = FlowDirection.TopDown,
+                                        WrapContents = false,
+                                        AutoSize = true,
+                                        AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                                        Dock = DockStyle.Fill
+                                    };
+
+                                    var endedFont = new Font("Segoe UI", 11f);
+                                    var endedBoldFont = new Font("Segoe UI", 11f, FontStyle.Bold);
+                                    var endedColor = Color.Black;
+
+                                    FlowLayoutPanel EndedLine(int marginBottom, params (string text, bool bold)[] segments)
+                                    {
+                                        var line = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0, 0, 0, marginBottom) };
+                                        foreach (var (text, bold) in segments)
+                                            line.Controls.Add(new Label { Text = text, AutoSize = true, Font = bold ? endedBoldFont : endedFont, ForeColor = endedColor, Margin = Padding.Empty });
+                                        return line;
+                                    }
+
+                                    endedFlow.Controls.Add(EndedLine(16, ("Thanks for trying ", false), ("panelAIR", true), (" panel!", false)));
+                                    endedFlow.Controls.Add(EndedLine(24, ("We've opened our shop page so you can get the real thing.", false)));
+
+                                    var endedOkButton = new Button
+                                    {
+                                        Text = "OK",
+                                        Size = new Size(160, 48),
+                                        FlatStyle = FlatStyle.Flat,
+                                        BackColor = Color.FromArgb(235, 91, 37),
+                                        ForeColor = Color.White,
+                                        Font = new Font("Segoe UI", 14f, FontStyle.Bold),
+                                        DialogResult = DialogResult.OK
+                                    };
+                                    endedOkButton.FlatAppearance.BorderSize = 0;
+                                    endedFlow.Controls.Add(endedOkButton);
+
+                                    endedForm.Controls.Add(endedFlow);
+                                    endedForm.AcceptButton = endedOkButton;
+                                    endedForm.Shown += (es, ee) =>
+                                    {
+                                        var primary = Screen.PrimaryScreen!.Bounds;
+                                        endedForm.Location = new Point(
+                                            primary.X + (primary.Width - endedForm.Width) / 2,
+                                            primary.Y + (primary.Height - endedForm.Height) / 2);
+                                    };
+                                    endedForm.ShowDialog(this);
+                                }
+
                                 Process.GetCurrentProcess().Kill();
                             }
                             else
@@ -4733,7 +4859,7 @@ namespace SimConnect3
                         Label MakeLine(string text, int marginTop, int marginBottom)
                             => new Label { Text = text, AutoSize = true, Font = bodyFont, ForeColor = bodyColor, Margin = new Padding(0, marginTop, 0, marginBottom) };
 
-                        flow.Controls.Add(MakeBoldLine("If you own a ", "panelAIR", " device, please ensure that:", 14));
+                        flow.Controls.Add(MakeBoldLine("If you own a ", "panelAIR", " panel, please ensure that:", 14));
                         flow.Controls.Add(MakeLine("1.  The panelAIR screen is powered ON.", 0, 2));
                         flow.Controls.Add(MakeLine("2.  The panelAIR USB \"touch\" cable is connected to the computer.", 0, 2));
                         flow.Controls.Add(MakeLine("3.  The RotAIR module USB cables are connected to the computer.", 0, 20));
