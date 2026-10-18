@@ -4630,24 +4630,28 @@ namespace SimConnect3
 
                     var welcomeFont = new Font("Segoe UI", 11f);
                     var welcomeBoldFont = new Font("Segoe UI", 11f, FontStyle.Bold);
+                    var welcomeItalicFont = new Font("Segoe UI", 11f, FontStyle.Italic);
                     var welcomeColor = Color.Black;
 
-                    FlowLayoutPanel WelcomeLine(int marginBottom, params (string text, bool bold)[] segments)
+                    FlowLayoutPanel WelcomeLine(int marginBottom, params (string text, FontStyle style)[] segments)
                     {
                         var line = new FlowLayoutPanel { FlowDirection = FlowDirection.LeftToRight, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Margin = new Padding(0, 0, 0, marginBottom) };
-                        foreach (var (text, bold) in segments)
-                            line.Controls.Add(new Label { Text = text, AutoSize = true, Font = bold ? welcomeBoldFont : welcomeFont, ForeColor = welcomeColor, Margin = Padding.Empty });
+                        foreach (var (text, style) in segments)
+                        {
+                            var font = style == FontStyle.Bold ? welcomeBoldFont : style == FontStyle.Italic ? welcomeItalicFont : welcomeFont;
+                            line.Controls.Add(new Label { Text = text, AutoSize = true, Font = font, ForeColor = welcomeColor, Margin = Padding.Empty });
+                        }
                         return line;
                     }
 
                     welcomeFlow.Controls.Add(WelcomeLine(16,
-                        ("You're running ", false), ("panelAIR App", true), (" in DEMO mode (no ", false), ("panelAIR", true), (" panel detected).", false)));
+                        ("You're running ", FontStyle.Regular), ("panelAIR App", FontStyle.Bold), (" in DEMO mode (no ", FontStyle.Regular), ("panelAIR", FontStyle.Bold), (" panel detected).", FontStyle.Regular)));
+                    welcomeFlow.Controls.Add(WelcomeLine(4,
+                        ("You have 10 minutes to explore the app. This demo runs in a resizable window — resize it or move it to any monitor you like.", FontStyle.Regular)));
                     welcomeFlow.Controls.Add(WelcomeLine(16,
-                        ("You have 10 minutes to explore the app. Resize this window or move it to any monitor you like.", false)));
-                    welcomeFlow.Controls.Add(WelcomeLine(16,
-                        ("Connect a real ", false), ("panelAIR", true), (" panel at any time to unlock full operation.", false)));
+                        ("The full version runs full-screen, fixed to your panelAIR panel.", FontStyle.Italic)));
                     welcomeFlow.Controls.Add(WelcomeLine(24,
-                        ("IMPORTANT: Before testing this demo, please download our SFS Link add-on from our website and install it in your MSFS Community folder. You can find it in the ", false), ("panelAIR", true), (" Downloads tab.", false)));
+                        ("IMPORTANT: Before testing this demo, please download our SFS Link add-on from our website and install it in your MSFS Community folder. You can find it in the ", FontStyle.Regular), ("panelAIR", FontStyle.Bold), (" Downloads tab.", FontStyle.Regular)));
 
                     var welcomeOkButton = new Button
                     {
@@ -4671,6 +4675,12 @@ namespace SimConnect3
                 int demoTotalSeconds = 600;
                 bool demoExpiryHandled = false;   // guard contra callbacks duplicats
 
+                // Compte enrere en una finestreta a part (mateix patró que el "Trial Mode"), NO al
+                // títol de la finestra: actualitzar this.Text cada segon feia parpellejar el marc
+                // de Windows (barra de títol), que és "chrome" del sistema operatiu, no nostre.
+                Form? demoCountdownForm = null;
+                Label? demoCountdownLabel = null;
+
                 _demoTimer = new System.Threading.Timer(_ => {
                     int elapsed = (int)(DateTime.Now - _demoStartTime).TotalSeconds;
                     int secondsLeft = demoTotalSeconds - elapsed;
@@ -4682,6 +4692,7 @@ namespace SimConnect3
                             if (secondsLeft <= 0)
                             {
                                 demoExpiryHandled = true;
+                                try { demoCountdownForm?.Close(); } catch { }
                                 try { Process.Start(new ProcessStartInfo { FileName = "https://simflightservices.com/shop/air-panels/", UseShellExecute = true }); } catch { }
 
                                 // Mateix patró que "verification failed": MessageBox normal no
@@ -4756,7 +4767,33 @@ namespace SimConnect3
                             }
                             else
                             {
-                                this.Text = $"panelAIR — DEMO (closing in {secondsLeft / 60}:{secondsLeft % 60:D2})";
+                                // Mateix disseny exacte que la finestreta del Trial Mode (setup
+                                // incomplet) — no se n'inventa un de nou.
+                                if (demoCountdownForm == null || demoCountdownForm.IsDisposed)
+                                {
+                                    demoCountdownForm = new Form
+                                    {
+                                        Text = "panelAIR - DEMO",
+                                        Size = new Size(280, 110),
+                                        FormBorderStyle = FormBorderStyle.FixedDialog,
+                                        StartPosition = FormStartPosition.Manual,
+                                        TopMost = true,
+                                        ControlBox = false
+                                    };
+                                    var primary = Screen.PrimaryScreen!.Bounds;
+                                    demoCountdownForm.Location = new Point(
+                                        primary.X + (primary.Width - demoCountdownForm.Width) / 2,
+                                        primary.Y + (primary.Height - demoCountdownForm.Height) / 2);
+                                    demoCountdownLabel = new Label
+                                    {
+                                        Dock = DockStyle.Fill,
+                                        TextAlign = ContentAlignment.MiddleCenter,
+                                        Font = new Font("Arial", 9f)
+                                    };
+                                    demoCountdownForm.Controls.Add(demoCountdownLabel);
+                                    demoCountdownForm.Show();
+                                }
+                                demoCountdownLabel!.Text = $"panelAIR DEMO\nClosing in {secondsLeft / 60}:{secondsLeft % 60:D2}...";
                             }
                         }));
                     }
