@@ -18,10 +18,11 @@ namespace SimConnect3
             bool has4K = Screen.AllScreens.Any(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
 
             bool hasMonitor = false;
-            // Només la pantalla Xiaomi (XMI3446): és l'única que s'ha venut mai amb panelAIR.
-            // El model antic (RTK1B1A) ja no compta com a vàlid.
+            // La pantalla panelAIR real reporta com a RTK2775 (confirmat 2026-10-18 amb WMI al
+            // mateix hardware físic en 3 PC's diferents). XMI3446 ("Mi Monitor") NO és el panell
+            // panelAIR — és un monitor normal que Pere té al seu escriptori, no relacionat.
             using (var searcher = new System.Management.ManagementObjectSearcher(
-                @"SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%XMI3446%' AND ConfigManagerErrorCode = 0"))
+                @"SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%RTK2775%' AND ConfigManagerErrorCode = 0"))
             {
                 hasMonitor = searcher.Get().Count > 0;
             }
@@ -34,7 +35,10 @@ namespace SimConnect3
             // demo — es gestiona al Nivell 2 dins frmMain_Load (missatge "verification failed").
             frmMain.IsDemoMode = !hasMonitor || !has4K;
 
-            if (!AppSettings.Instance.WelcomeCompleted)
+            // En mode DEMO no hem detectat cap panell real: no té sentit donar la benvinguda com si
+            // n'hi hagués un. No marquem WelcomeCompleted tampoc, perquè el dia que hi hagi panell
+            // real detectat en aquest mateix PC, la benvinguda de debò encara s'ha de poder mostrar.
+            if (!frmMain.IsDemoMode && !AppSettings.Instance.WelcomeCompleted)
             {
                 using var welcome = new WelcomeForm();
                 if (welcome.ShowDialog() != DialogResult.OK)

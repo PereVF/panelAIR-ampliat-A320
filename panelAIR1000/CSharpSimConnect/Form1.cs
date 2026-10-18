@@ -2733,6 +2733,10 @@ namespace SimConnect3
             this.Load += frmMain_Load;
             this.Shown += (s, e) =>
             {
+                // En mode DEMO no hem detectat panell real: no té sentit obrir el Setup Wizard
+                // (configura hardware que no hi és). No marquem FirstConfigShown tampoc, perquè
+                // s'obri de debò el dia que hi hagi panell real detectat en aquest mateix PC.
+                if (IsDemoMode) return;
                 if (AppSettings.Instance.FirstConfigShown) return;
                 AppSettings.Instance.FirstConfigShown = true;
                 AppSettings.Instance.Save();
@@ -4810,10 +4814,11 @@ namespace SimConnect3
                     hasPanel = searcher.Get().Count > 0;
                 }
                 bool hasMonitor = false;
-                // Només la pantalla Xiaomi (XMI3446): és l'única que s'ha venut mai amb panelAIR.
-                // El model antic (RTK1B1A) ja no compta com a vàlid.
+                // La pantalla panelAIR real reporta com a RTK2775 (confirmat 2026-10-18 amb WMI al
+                // mateix hardware físic en 3 PC's diferents). XMI3446 ("Mi Monitor") NO és el panell
+                // panelAIR — és un monitor normal que Pere té al seu escriptori, no relacionat.
                 using (var searcher = new System.Management.ManagementObjectSearcher(
-                    @"SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%XMI3446%' AND ConfigManagerErrorCode = 0"))
+                    @"SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%RTK2775%' AND ConfigManagerErrorCode = 0"))
                 {
                     hasMonitor = searcher.Get().Count > 0;
                 }

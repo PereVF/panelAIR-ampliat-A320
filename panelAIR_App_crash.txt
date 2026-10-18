@@ -1,0 +1,5 @@
+
+[DEMO DEBUG] AllScreens=1 PrimaryScreen=OK wa={X=0,Y=0,Width=3440,Height=1392} targetW=1978 targetH=1113 ThisSize={Width=1978, Height=1113} ThisLocation={X=731,Y=139} ControlBox=True MinimizeBox=True MaximizeBox=True FormBorderStyle=Sizable
+[DEMO DEBUG] AllScreens=1 PrimaryScreen=OK wa={X=0,Y=0,Width=3440,Height=1392} targetW=1978 targetH=1113 ThisSize={Width=1978, Height=1113} ThisLocation={X=731,Y=139} ControlBox=True MinimizeBox=True MaximizeBox=True FormBorderStyle=Sizable
+[DEMO DEBUG] AllScreens=1 PrimaryScreen=OK wa={X=0,Y=0,Width=3440,Height=1392} targetW=1978 targetH=1113 ThisSize={Width=1978, Height=1113} ThisLocation={X=731,Y=139} ControlBox=True MinimizeBox=True MaximizeBox=True FormBorderStyle=Sizable
+[DEMO DEBUG] AllScreens=1 PrimaryScreen=OK wa={X=0,Y=0,Width=3440,Height=1392} targetW=1978 targetH=1113 ThisSize={Width=1978, Height=1113} ThisLocation={X=731,Y=139} ControlBox=True MinimizeBox=True MaximizeBox=True FormBorderStyle=Sizable

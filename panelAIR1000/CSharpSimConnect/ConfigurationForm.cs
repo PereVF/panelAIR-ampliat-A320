@@ -1174,15 +1174,30 @@ namespace SimConnect3
 
         private Panel BuildSfsLinkCard()
         {
-            var card = MakeCardShell(4, "SFS Link",
-                "panelAIR will install the latest version of SFS Link into your Microsoft Flight Simulator Community folders. You will be asked to confirm before each folder is modified.",
-                out var content);
+            // Descripció buida a propòsit (igual que la targeta Pop-Out): el text s'ha allargat per
+            // avisar del cas "ja tinc un SFS Link instal·lat pel meu compte" i ja no cap a la caixa
+            // fixa de MakeCardShell — tot viu en un sol bloc AutoSize dins "content".
+            var card = MakeCardShell(4, "SFS Link", "", out var content);
+            content.Location = new Point(content.Location.X, 175);
+
+            var introLbl = new Label
+            {
+                Text = "panelAIR will install the latest version of SFS Link into your Microsoft Flight Simulator Community folders. You will be asked to confirm before each folder is modified. If you already have SFS Link installed on your own and want to run this installation, please remove it manually first.",
+                Font = new Font("Segoe UI", 24f, GraphicsUnit.Pixel),
+                ForeColor = Color.FromArgb(102, 114, 127),
+                Location = new Point(0, 0),
+                AutoSize = true,
+                MaximumSize = new Size(456, 0)
+            };
+            content.Controls.Add(introLbl);
+
+            int btnY = introLbl.Bottom + 24;
 
             var installButton = new Button
             {
                 Text = "Install SFS Link",
                 Size = new Size(456, 90),
-                Location = new Point(0, 0),
+                Location = new Point(0, btnY),
                 FlatStyle = FlatStyle.Flat,
                 BackColor = Color.FromArgb(235, 91, 37),
                 ForeColor = Color.White,
@@ -1196,7 +1211,7 @@ namespace SimConnect3
                 Text = "",
                 ForeColor = Color.FromArgb(21, 115, 71),
                 Font = new Font("Segoe UI", 23f, FontStyle.Bold, GraphicsUnit.Pixel),
-                Location = new Point(0, 104),
+                Location = new Point(0, btnY + 104),
                 Size = new Size(456, 80)
             };
             content.Controls.Add(statusLbl);
