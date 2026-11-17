@@ -1784,6 +1784,13 @@ namespace SimConnect3
         private System.Windows.Forms.Button _g1000Btn = null!;
         private bool  _g1000BtnDragging;
         private Point _g1000BtnDragOffset;
+        // Mode A320: overhead dibuixat 100% vectorial (A320Overhead.cs), sense PNG. Es crea la
+        // primera vegada que s'activa; en sortir s'amaga i allibera el seu bitmap.
+        private System.Windows.Forms.Button _a320Btn = null!;
+        private bool  _a320BtnDragging;
+        private Point _a320BtnDragOffset;
+        private bool  _a320Active = false;
+        private panelAIR1000.A320OverheadControl? _a320Overhead;
 
         private bool  _tb21Dragging;
         private Point _tb21DragOffset;
@@ -2115,11 +2122,11 @@ namespace SimConnect3
                 // Els forats del PFD/MFD (i TSC en G3000) depenen de l'escala actual — recalcular-los
                 // cada vegada que la finestra es redimensiona (arrossegar-la sola no cal: la Region
                 // és relativa al propi Form, es mou sola amb la finestra).
-                pbMain.SizeChanged += (s, e) => { if (_g3000Active) ApplyG3000Region(); else ApplyPfdRegion(); };
+                pbMain.SizeChanged += (s, e) => ApplyCurrentRegion();
                 // El primer càlcul (fet just aquí, dins el constructor) pot agafar encara la mida
                 // "de fàbrica" de pbMain (3840x2160) abans que el Dock=Fill s'apliqui de veritat.
                 // Es recalcula un cop més quan la finestra ja s'ha mostrat, amb la mida definitiva.
-                this.Shown += (s, e) => { if (_g3000Active) ApplyG3000Region(); else ApplyPfdRegion(); };
+                this.Shown += (s, e) => ApplyCurrentRegion();
             }
             else
             {
@@ -2312,7 +2319,7 @@ namespace SimConnect3
 
             _g3000Btn = MakeGroupBtn("TBM 930 Cockpit", 363, 63);
             _g3000Btn.Location = new Point(3100, 100);
-            _g3000Btn.Click += (s, e) => SetG3000Active(true);
+            _g3000Btn.Click += (s, e) => { SetA320Active(false); SetG3000Active(true); };
             _g3000Btn.MouseDown += (s, e) =>
             {
                 if (!calibrationMode) return;
@@ -2331,7 +2338,7 @@ namespace SimConnect3
 
             _g1000Btn = MakeGroupBtn("G1000 Cockpit", 363, 63);
             _g1000Btn.Location = new Point(_g3000Btn.Location.X, _g3000Btn.Location.Y + _g3000Btn.Height + 10);
-            _g1000Btn.Click += (s, e) => SetG3000Active(false);
+            _g1000Btn.Click += (s, e) => { SetA320Active(false); SetG3000Active(false); };
             _g1000Btn.MouseDown += (s, e) =>
             {
                 if (!calibrationMode) return;
@@ -2347,6 +2354,25 @@ namespace SimConnect3
             };
             _g1000Btn.MouseUp += (s, e) => { _g1000BtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
             _overlayPanel.Controls.Add(_g1000Btn);
+
+            _a320Btn = MakeGroupBtn("A320", 363, 63);
+            _a320Btn.Location = new Point(_g1000Btn.Location.X, _g1000Btn.Location.Y + _g1000Btn.Height + 10);
+            _a320Btn.Click += (s, e) => SetA320Active(true);
+            _a320Btn.MouseDown += (s, e) =>
+            {
+                if (!calibrationMode) return;
+                _a320BtnDragging = true;
+                _a320BtnDragOffset = e.Location;
+            };
+            _a320Btn.MouseMove += (s, e) =>
+            {
+                if (!_a320BtnDragging) return;
+                var screenPt = _a320Btn.PointToScreen(e.Location);
+                var formPt = _overlayPanel!.PointToClient(screenPt);
+                _a320Btn.Location = new Point(formPt.X - _a320BtnDragOffset.X, formPt.Y - _a320BtnDragOffset.Y);
+            };
+            _a320Btn.MouseUp += (s, e) => { _a320BtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            _overlayPanel.Controls.Add(_a320Btn);
             UpdateCockpitModeButtons();
 
             _thrQuadrantBtn = new System.Windows.Forms.Button
@@ -5761,10 +5787,60 @@ namespace SimConnect3
             // d'accent de l'app) i l'inactiu es queda amb una vora blanca fina, sense tocar el color de
             // fons del botó (mateix criteri d'abans: mai un farciment de color).
             var accent = Color.FromArgb(235, 91, 37);
-            _g3000Btn.FlatAppearance.BorderSize = _g3000Active ? 7 : 1;
-            _g3000Btn.FlatAppearance.BorderColor = _g3000Active ? accent : Color.White;
-            _g1000Btn.FlatAppearance.BorderSize = _g3000Active ? 1 : 7;
-            _g1000Btn.FlatAppearance.BorderColor = _g3000Active ? Color.White : accent;
+            bool tbmOn = _g3000Active && !_a320Active;
+            bool g1000On = !_g3000Active && !_a320Active;
+            _g3000Btn.FlatAppearance.BorderSize = tbmOn ? 7 : 1;
+            _g3000Btn.FlatAppearance.BorderColor = tbmOn ? accent : Color.White;
+            _g1000Btn.FlatAppearance.BorderSize = g1000On ? 7 : 1;
+            _g1000Btn.FlatAppearance.BorderColor = g1000On ? accent : Color.White;
+            if (_a320Btn != null)
+            {
+                _a320Btn.FlatAppearance.BorderSize = _a320Active ? 7 : 1;
+                _a320Btn.FlatAppearance.BorderColor = _a320Active ? accent : Color.White;
+            }
+        }
+
+        /// <summary>Forats de la Region segons el mode actual (A320 no en té: l'overhead ocupa tota la pantalla).</summary>
+        private void ApplyCurrentRegion()
+        {
+            if (_a320Active) { this.Region = null; return; }
+            if (_g3000Active) ApplyG3000Region(); else ApplyPfdRegion();
+        }
+
+        /// <summary>
+        /// Entra/surt del mode A320. L'overhead és un control propi que se situa just a sobre de pbMain
+        /// (la resta de botons del Form, com ⚙, queden per sobre). pbMain s'amaga mentre dura el mode
+        /// perquè no consumeixi CPU repintant-se per sota.
+        /// </summary>
+        private void SetA320Active(bool active)
+        {
+            if (calibrationMode) return;
+            if (_a320Active == active) { UpdateCockpitModeButtons(); return; }
+            _a320Active = active;
+            if (active)
+            {
+                if (_a320Overhead == null)
+                {
+                    _a320Overhead = new panelAIR1000.A320OverheadControl { Visible = false };
+                    this.Controls.Add(_a320Overhead);
+                }
+                _a320Overhead.Dock = pbMain.Dock;
+                if (pbMain.Dock == DockStyle.None) _a320Overhead.Bounds = pbMain.Bounds;
+                this.Controls.SetChildIndex(_a320Overhead, this.Controls.GetChildIndex(pbMain));
+                _a320Overhead.Visible = true;
+                pbMain.Visible = false;
+                _thrQuadrantBtn.Visible = false;
+                if (_popoutReminderForm != null && !_popoutReminderForm.IsDisposed) _popoutReminderForm.Close();
+            }
+            else
+            {
+                if (_a320Overhead != null) _a320Overhead.Visible = false; // allibera el bitmap (OnVisibleChanged)
+                pbMain.Visible = true;
+                _thrQuadrantBtn.Visible = _g3000Active;
+                pbMain.Invalidate();
+            }
+            ApplyCurrentRegion();
+            UpdateCockpitModeButtons();
         }
 
         private void SetG3000Active(bool active)
@@ -8431,7 +8507,7 @@ namespace SimConnect3
                 // PerformClick — el botó viu a la pantalla AUX, sempre amagada, i CanSelect hi pot ser
                 // false, fent que PerformClick no faci res).
                 bool isTBM930Now = IsTBM930();
-                if (isTBM930Now != wasTBM930 && _g3000Active != isTBM930Now && !calibrationMode)
+                if (isTBM930Now != wasTBM930 && _g3000Active != isTBM930Now && !calibrationMode && !_a320Active)
                     SetG3000Active(isTBM930Now);
                 RefreshNoCompatibleAircraftMessage();
                 // Canvi d'avió real (no només una altra lectura del mateix títol cada segon): re-sync
@@ -12500,6 +12576,7 @@ namespace SimConnect3
             sb.AppendLine($"FOCUSBTN:focus:{_focusBtn.Location.X}:{_focusBtn.Location.Y}");
             sb.AppendLine($"G3KBTN:g3k:{_g3000Btn.Location.X}:{_g3000Btn.Location.Y}");
             sb.AppendLine($"G1000BTN:g1000:{_g1000Btn.Location.X}:{_g1000Btn.Location.Y}");
+            sb.AppendLine($"A320BTN:a320:{_a320Btn.Location.X}:{_a320Btn.Location.Y}");
             sb.AppendLine($"THRQBTN:tq:{_thrQuadrantBtn.Location.X}:{_thrQuadrantBtn.Location.Y}:0:0");
             if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
             if (_appVersionPanel != null) sb.AppendLine($"APPVER:apv:{_appVersionPanel.Location.X}:{_appVersionPanel.Location.Y}");
@@ -12691,6 +12768,10 @@ namespace SimConnect3
                 else if (type == "G1000BTN")
                 {
                     _g1000Btn.Location = new Point(x, y);
+                }
+                else if (type == "A320BTN")
+                {
+                    _a320Btn.Location = new Point(x, y);
                 }
                 else if (type == "THRQBTN")
                 {
