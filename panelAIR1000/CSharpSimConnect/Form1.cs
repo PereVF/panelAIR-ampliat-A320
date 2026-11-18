@@ -1791,6 +1791,8 @@ namespace SimConnect3
         private Point _a320BtnDragOffset;
         private bool  _a320Active = false;
         private panelAIR1000.A320OverheadControl? _a320Overhead;
+        // Posició (calibració F12) dels botons de zoom + / − de l'overhead; null = per defecte a baix a la dreta.
+        private Point? _a320ZoomPlusPos, _a320ZoomMinusPos;
 
         private bool  _tb21Dragging;
         private Point _tb21DragOffset;
@@ -2035,7 +2037,7 @@ namespace SimConnect3
             mainSurface.SuppressInput = () => calibrationMode || _g3000Active;
 
             this.KeyPreview = true;
-            Action<KeyEventArgs> handleF12 = (e) => { if (e.KeyCode == Keys.F12) { calibrationMode = !calibrationMode; calibSelectedBtn = null; calibSelectedTri = null; calibSelectedOverlay = null; calibZoomBox.Visible = false; pbMain.Invalidate(); } };
+            Action<KeyEventArgs> handleF12 = (e) => { if (e.KeyCode == Keys.F12) { calibrationMode = !calibrationMode; calibSelectedBtn = null; calibSelectedTri = null; calibSelectedOverlay = null; calibZoomBox.Visible = false; pbMain.Invalidate(); if (_a320Overhead != null) { _a320Overhead.CalibrationMode = calibrationMode; _a320Overhead.Invalidate(); } } };
             this.KeyDown += (s, e) => handleF12(e);
             this.KeyDown += frmMain_KeyDown;
 
@@ -5821,9 +5823,22 @@ namespace SimConnect3
             {
                 if (_a320Overhead == null)
                 {
-                    _a320Overhead = new panelAIR1000.A320OverheadControl { Visible = false };
+                    _a320Overhead = new panelAIR1000.A320OverheadControl
+                    {
+                        Visible = false,
+                        PlusLocation = _a320ZoomPlusPos,
+                        MinusLocation = _a320ZoomMinusPos
+                    };
+                    _a320Overhead.ZoomButtonsMoved += () =>
+                    {
+                        _a320ZoomPlusPos = _a320Overhead.PlusLocation;
+                        _a320ZoomMinusPos = _a320Overhead.MinusLocation;
+                        try { ExportCalibrationPositions(silent: true); } catch { }
+                    };
                     this.Controls.Add(_a320Overhead);
                 }
+                _a320Overhead.CalibrationMode = calibrationMode;
+                _a320Overhead.OpenAtBottom(); // la vora de baix de l'overhead coincideix amb la de la pantalla
                 _a320Overhead.Dock = pbMain.Dock;
                 if (pbMain.Dock == DockStyle.None) _a320Overhead.Bounds = pbMain.Bounds;
                 this.Controls.SetChildIndex(_a320Overhead, this.Controls.GetChildIndex(pbMain));
@@ -12577,6 +12592,8 @@ namespace SimConnect3
             sb.AppendLine($"G3KBTN:g3k:{_g3000Btn.Location.X}:{_g3000Btn.Location.Y}");
             sb.AppendLine($"G1000BTN:g1000:{_g1000Btn.Location.X}:{_g1000Btn.Location.Y}");
             sb.AppendLine($"A320BTN:a320:{_a320Btn.Location.X}:{_a320Btn.Location.Y}");
+            if (_a320ZoomPlusPos is Point zp) sb.AppendLine($"A320ZOOMPLUS:a320zoom:{zp.X}:{zp.Y}");
+            if (_a320ZoomMinusPos is Point zm) sb.AppendLine($"A320ZOOMMINUS:a320zoom:{zm.X}:{zm.Y}");
             sb.AppendLine($"THRQBTN:tq:{_thrQuadrantBtn.Location.X}:{_thrQuadrantBtn.Location.Y}:0:0");
             if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
             if (_appVersionPanel != null) sb.AppendLine($"APPVER:apv:{_appVersionPanel.Location.X}:{_appVersionPanel.Location.Y}");
@@ -12772,6 +12789,16 @@ namespace SimConnect3
                 else if (type == "A320BTN")
                 {
                     _a320Btn.Location = new Point(x, y);
+                }
+                else if (type == "A320ZOOMPLUS")
+                {
+                    _a320ZoomPlusPos = new Point(x, y);
+                    if (_a320Overhead != null) _a320Overhead.PlusLocation = _a320ZoomPlusPos;
+                }
+                else if (type == "A320ZOOMMINUS")
+                {
+                    _a320ZoomMinusPos = new Point(x, y);
+                    if (_a320Overhead != null) _a320Overhead.MinusLocation = _a320ZoomMinusPos;
                 }
                 else if (type == "THRQBTN")
                 {

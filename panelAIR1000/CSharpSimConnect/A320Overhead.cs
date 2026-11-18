@@ -1174,6 +1174,11 @@ namespace panelAIR1000
         DateTime _barHideAt = DateTime.MinValue;
         bool _hasPendingScroll;
         int _pendingScroll;
+        int _zoom = 100;            // % de l'amplada original (sempre sobre l'original)
+        int _offX, _offY;           // origen del panell dins el control (centrat en X, enganxat a baix si hi cap)
+        bool _openAtBottom;
+        int _btnDrag, _btnPressed;  // 1 = +, 2 = −
+        Point _btnDragOff;
 
         // ─── Win32 ───
         [StructLayout(LayoutKind.Sequential)]
@@ -1278,20 +1283,26 @@ namespace panelAIR1000
         {
             if (_bmp != null) return true;
             if (Width <= 0 || Height <= 0) return false;
-            _s = Width / LW;
+            // L'amplada sempre es calcula sobre l'original (amplada de pantalla) i el panell es torna a
+            // dibuixar en vectorial a aquesta mida exacta: mai s'escala la imatge anterior.
+            int cw = Math.Max(1, (int)Math.Round(Width * _zoom / 100.0));
+            _s = cw / LW;
             _contentH = (int)Math.Ceiling(LH * _s);
+            _offX = (Width - cw) / 2;
+            _offY = Math.Max(0, Height - _contentH); // si hi cap sencer, queda enganxat a baix
             var bmi = new BITMAPINFOHEADER
             {
                 biSize = (uint)Marshal.SizeOf<BITMAPINFOHEADER>(),
-                biWidth = Width, biHeight = -_contentH, // negatiu = files de dalt a baix
+                biWidth = cw, biHeight = -_contentH, // negatiu = files de dalt a baix
                 biPlanes = 1, biBitCount = 32
             };
             _hDib = CreateDIBSection(IntPtr.Zero, ref bmi, 0, out IntPtr bits, IntPtr.Zero, 0);
             if (_hDib == IntPtr.Zero || bits == IntPtr.Zero) { _hDib = IntPtr.Zero; return false; }
-            _bmp = new Bitmap(Width, _contentH, Width * 4, PixelFormat.Format32bppPArgb, bits);
+            _bmp = new Bitmap(cw, _contentH, cw * 4, PixelFormat.Format32bppPArgb, bits);
             _memDC = CreateCompatibleDC(IntPtr.Zero);
             _oldObj = SelectObject(_memDC, _hDib);
             ClampScroll();
+            if (_openAtBottom) { _scrollY = MaxScroll; _openAtBottom = false; }
             Redraw(new RectangleF(0, 0, LW, LH), invalidate: false);
             return true;
         }
@@ -1340,7 +1351,7 @@ namespace panelAIR1000
                 foreach (var e in _els) if (e.DirtyBounds.IntersectsWith(lr)) e.Draw(g);
                 DrawLighting(g);
             }
-            if (invalidate) Invalidate(new Rectangle(px.X, px.Y - _scrollY, px.Width, px.Height));
+            if (invalidate) Invalidate(new Rectangle(px.X + _offX, px.Y + _offY - _scrollY, px.Width, px.Height));
         }
 
         static readonly PointF[] FramePoly =
@@ -1381,16 +1392,20 @@ namespace panelAIR1000
             var g = e.Graphics;
             if (!EnsureBitmap()) { g.Clear(Color.Black); return; }
             var clip = e.ClipRectangle;
-            int contentBottom = _contentH - _scrollY;
-            int bh = Math.Min(clip.Bottom, contentBottom) - clip.Y;
-            if (bh > 0 && clip.Width > 0)
+            var content = new Rectangle(_offX, _offY - _scrollY, _bmp!.Width, _contentH);
+            var vis = Rectangle.Intersect(clip, content);
+            if (vis.Width > 0 && vis.Height > 0)
             {
                 IntPtr hdc = g.GetHdc();
-                try { BitBlt(hdc, clip.X, clip.Y, clip.Width, bh, _memDC, clip.X, clip.Y + _scrollY, SRCCOPY); }
+                try { BitBlt(hdc, vis.X, vis.Y, vis.Width, vis.Height, _memDC, vis.X - _offX, vis.Y - _offY + _scrollY, SRCCOPY); }
                 finally { g.ReleaseHdc(hdc); }
             }
-            if (clip.Bottom > contentBottom)
-                g.FillRectangle(Brushes.Black, clip.X, Math.Max(clip.Y, contentBottom), clip.Width, clip.Bottom - Math.Max(clip.Y, contentBottom));
+            // franges negres fora del panell (laterals en reduir el zoom, i a dalt si hi cap sencer)
+            using (var outside = new Region(clip))
+            {
+                outside.Exclude(content);
+                g.FillRegion(Brushes.Black, outside);
+            }
 
             if (DateTime.UtcNow < _barHideAt && _contentH > Height)
             {
@@ -1398,7 +1413,73 @@ namespace panelAIR1000
                 using var bb = new SolidBrush(Color.FromArgb(150, 255, 255, 255));
                 g.FillRectangle(bb, bar);
             }
+            DrawZoomButtons(g, clip);
         }
+
+        // ─────────────────────────── Zoom i botons + / − ───────────────────────────
+
+        int MaxScroll => Math.Max(0, _contentH - Height);
+        int ZoomBtnSize => Math.Max(48, Width / 34);
+        Point DefaultMinusPos => new(Width - ZoomBtnSize - 40, Height - ZoomBtnSize - 40);
+        Point DefaultPlusPos => new(Width - ZoomBtnSize - 40, Height - ZoomBtnSize * 2 - 56);
+        Rectangle PlusRect => new(PlusLocation ?? DefaultPlusPos, new Size(ZoomBtnSize, ZoomBtnSize));
+        Rectangle MinusRect => new(MinusLocation ?? DefaultMinusPos, new Size(ZoomBtnSize, ZoomBtnSize));
+
+        /// <summary>Posició dels botons de zoom (null = posició per defecte a baix a la dreta).</summary>
+        public Point? PlusLocation { get; set; }
+        public Point? MinusLocation { get; set; }
+        /// <summary>Mode calibració (F12): els botons + / − es poden arrossegar.</summary>
+        public bool CalibrationMode { get; set; }
+        /// <summary>Es dispara en deixar anar un botó de zoom arrossegat en calibració (per desar-ne la posició).</summary>
+        public event Action? ZoomButtonsMoved;
+
+        public int ZoomPercent => _zoom;
+
+        public const int MinZoom = 50, MaxZoom = 100;
+
+        /// <summary>Mida del panell en % de l'original (50..100, passos de 10). Es redibuixa des de zero.</summary>
+        public void SetZoom(int percent)
+        {
+            percent = Math.Clamp(percent, MinZoom, MaxZoom);
+            if (percent == _zoom) return;
+            float frac = MaxScroll > 0 ? (float)_scrollY / MaxScroll : 1f; // es manté el punt relatiu
+            _zoom = percent;
+            ReleaseCache();
+            if (EnsureBitmap()) _scrollY = (int)Math.Round(frac * MaxScroll);
+            Invalidate();
+        }
+
+        /// <summary>La propera vegada que es mostri, el panell apareix amb la vora de baix a baix de la pantalla.</summary>
+        public void OpenAtBottom()
+        {
+            _openAtBottom = true;
+            if (_bmp != null) { _scrollY = MaxScroll; _openAtBottom = false; Invalidate(); }
+        }
+
+        void DrawZoomButtons(Graphics g, Rectangle clip)
+        {
+            var oldMode = g.SmoothingMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            foreach (var (r, plus) in new[] { (PlusRect, true), (MinusRect, false) })
+            {
+                if (!r.IntersectsWith(clip)) continue;
+                bool pressed = _btnPressed == (plus ? 1 : 2);
+                bool enabled = plus ? _zoom < MaxZoom : _zoom > MinZoom;
+                using (var path = Oh.RoundRect(r, r.Width * 0.18f))
+                {
+                    using (var b = new SolidBrush(Color.FromArgb(pressed ? 170 : 110, 0, 0, 0))) g.FillPath(b, path);
+                    using var p = new Pen(CalibrationMode ? Color.FromArgb(220, 255, 140, 0) : Color.FromArgb(150, 255, 255, 255), Math.Max(2f, r.Width / 30f));
+                    g.DrawPath(p, path);
+                }
+                float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, arm = r.Width * 0.26f;
+                using var sp = new Pen(Color.FromArgb(enabled ? 230 : 80, 255, 255, 255), Math.Max(3f, r.Width / 11f)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                g.DrawLine(sp, cx - arm, cy, cx + arm, cy);
+                if (plus) g.DrawLine(sp, cx, cy - arm, cx, cy + arm);
+            }
+            g.SmoothingMode = oldMode;
+        }
+
+        int ZoomButtonAt(Point p) => PlusRect.Contains(p) ? 1 : MinusRect.Contains(p) ? 2 : 0;
 
         Rectangle ScrollBarRect()
         {
@@ -1466,7 +1547,7 @@ namespace panelAIR1000
                 _anim.Stop();
         }
 
-        void ClampScroll() => _scrollY = Math.Clamp(_scrollY, 0, Math.Max(0, _contentH - Height));
+        void ClampScroll() => _scrollY = Math.Clamp(_scrollY, 0, MaxScroll);
 
         void ScrollTo(int y)
         {
@@ -1485,6 +1566,13 @@ namespace panelAIR1000
                 ScrollWindowEx(Handle, 0, d, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, SW_INVALIDATE);
                 int bw = Math.Max(6, Width / 320) + 6;
                 Invalidate(new Rectangle(Width - bw, 0, bw, Height)); // la barreta de posició es redibuixa sencera
+                // Els botons no es desplacen amb el panell: es repinten al seu lloc i també on Windows n'ha
+                // deixat la còpia desplaçada (si no, queden rastres repetits en arrossegar).
+                foreach (var zr in new[] { PlusRect, MinusRect })
+                {
+                    var moved = zr; moved.Offset(0, d);
+                    Invalidate(Rectangle.Union(zr, moved));
+                }
             }
             else Invalidate();
             Update();
@@ -1510,6 +1598,18 @@ namespace panelAIR1000
         {
             base.OnMouseDown(e);
             if (e.Button != MouseButtons.Left) return;
+            int zb = ZoomButtonAt(e.Location);
+            if (zb != 0)
+            {
+                if (CalibrationMode)
+                {
+                    _btnDrag = zb;
+                    var r = zb == 1 ? PlusRect : MinusRect;
+                    _btnDragOff = new Point(e.X - r.X, e.Y - r.Y);
+                }
+                else { _btnPressed = zb; Invalidate(zb == 1 ? PlusRect : MinusRect); }
+                return;
+            }
             _down = true; _dragging = false; _flingV = 0; _velY = 0;
             _downPt = e.Location; _downScroll = _scrollY;
             _lastMoveY = e.Y; _lastMoveT = _clock.Elapsed.TotalSeconds;
@@ -1518,6 +1618,14 @@ namespace panelAIR1000
         protected override void OnMouseMove(MouseEventArgs e)
         {
             base.OnMouseMove(e);
+            if (_btnDrag != 0)
+            {
+                var old = _btnDrag == 1 ? PlusRect : MinusRect;
+                var np = new Point(Math.Clamp(e.X - _btnDragOff.X, 0, Width - old.Width), Math.Clamp(e.Y - _btnDragOff.Y, 0, Height - old.Height));
+                if (_btnDrag == 1) PlusLocation = np; else MinusLocation = np;
+                Invalidate(old); Invalidate(_btnDrag == 1 ? PlusRect : MinusRect);
+                return;
+            }
             if (!_down) return;
             int dy = e.Y - _downPt.Y;
             if (!_dragging && Math.Abs(dy) > Math.Max(10, Width / 200)) _dragging = true;
@@ -1538,6 +1646,15 @@ namespace panelAIR1000
         protected override void OnMouseUp(MouseEventArgs e)
         {
             base.OnMouseUp(e);
+            if (_btnDrag != 0) { _btnDrag = 0; ZoomButtonsMoved?.Invoke(); return; }
+            if (_btnPressed != 0)
+            {
+                int b = _btnPressed;
+                _btnPressed = 0;
+                Invalidate(PlusRect); Invalidate(MinusRect);
+                if (ZoomButtonAt(e.Location) == b) SetZoom(_zoom + (b == 1 ? 10 : -10));
+                return;
+            }
             if (!_down) return;
             _down = false;
             if (_dragging)
@@ -1558,7 +1675,7 @@ namespace panelAIR1000
         void TapAt(Point pt)
         {
             if (!EnsureBitmap()) return;
-            var p = new PointF(pt.X / _s, (pt.Y + _scrollY) / _s);
+            var p = new PointF((pt.X - _offX) / _s, (pt.Y - _offY + _scrollY) / _s);
             for (int i = _els.Count - 1; i >= 0; i--)
                 if (_els[i].HitTest(p)) { _els[i].Tap(p); return; }
         }
@@ -1566,7 +1683,8 @@ namespace panelAIR1000
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
-            if (_bmp != null && _bmp.Width != Width) ReleaseCache();
+            if (_bmp != null && _bmp.Width != Math.Max(1, (int)Math.Round(Width * _zoom / 100.0))) ReleaseCache();
+            _offY = Math.Max(0, Height - _contentH);
             ClampScroll();
             Invalidate();
         }
