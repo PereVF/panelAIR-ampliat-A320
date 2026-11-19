@@ -319,6 +319,14 @@ namespace SimConnect3
             _currentAircraftTitle.IndexOf("TBM930", StringComparison.OrdinalIgnoreCase) >= 0 ||
             _currentAircraftTitle.IndexOf("TBM 930", StringComparison.OrdinalIgnoreCase) >= 0;
 
+        // A320neo de FlyByWire (A32NX). Segons la versió/simulador el títol és p.ex. "Airbus A320 Neo FlyByWire"
+        // o conté "A32NX"; es demana "A320" + "FlyByWire"/"FBW" per no confondre'l amb altres A320.
+        bool IsA320FBW() =>
+            _currentAircraftTitle.IndexOf("A32NX", StringComparison.OrdinalIgnoreCase) >= 0 ||
+            (_currentAircraftTitle.IndexOf("A320", StringComparison.OrdinalIgnoreCase) >= 0 &&
+             (_currentAircraftTitle.IndexOf("FlyByWire", StringComparison.OrdinalIgnoreCase) >= 0 ||
+              _currentAircraftTitle.IndexOf("FBW", StringComparison.OrdinalIgnoreCase) >= 0));
+
         // Estat de 3 posicions (0=HIGH, 1=LOW, 2=OFF) per bombes que ho necessiten (Baron G58)
         int _fuelPump1State3 = 0;
         int _fuelPump2State3 = 0;
@@ -1792,7 +1800,7 @@ namespace SimConnect3
         private bool  _a320Active = false;
         private panelAIR1000.A320OverheadControl? _a320Overhead;
         // Posició (calibració F12) dels botons de zoom + / − de l'overhead; null = per defecte a baix a la dreta.
-        private Point? _a320ZoomPlusPos, _a320ZoomMinusPos;
+        private Point? _a320ZoomPlusPos, _a320ZoomMinusPos, _a320PageBtnPos;
 
         private bool  _tb21Dragging;
         private Point _tb21DragOffset;
@@ -5827,12 +5835,14 @@ namespace SimConnect3
                     {
                         Visible = false,
                         PlusLocation = _a320ZoomPlusPos,
-                        MinusLocation = _a320ZoomMinusPos
+                        MinusLocation = _a320ZoomMinusPos,
+                        PageLocation = _a320PageBtnPos
                     };
                     _a320Overhead.ZoomButtonsMoved += () =>
                     {
                         _a320ZoomPlusPos = _a320Overhead.PlusLocation;
                         _a320ZoomMinusPos = _a320Overhead.MinusLocation;
+                        _a320PageBtnPos = _a320Overhead.PageLocation;
                         try { ExportCalibrationPositions(silent: true); } catch { }
                     };
                     this.Controls.Add(_a320Overhead);
@@ -5984,7 +5994,7 @@ namespace SimConnect3
             if (string.IsNullOrEmpty(_currentAircraftTitle)) return; // encara no s'ha rebut cap títol real
 
             bool compatible = IsC172() || IsDA40() || IsDA62() || IsCirrusSR22() || IsBonanzaG36()
-                || IsBaronG58() || IsCaravan() || IsC400() || IsC408() || IsTBM930();
+                || IsBaronG58() || IsCaravan() || IsC400() || IsC408() || IsTBM930() || IsA320FBW();
 
             if (compatible)
             {
@@ -6001,7 +6011,7 @@ namespace SimConnect3
         }
 
         /// <summary>Finestra normal (no modal, sense TopMost) que explica que panelAIR s'adapta automàticament
-        /// a qualsevol avió equipat amb G1000 o la TBM 930. Un únic botó "Start Flying" per tancar-la.</summary>
+        /// a qualsevol avió equipat amb G1000, la TBM 930 o l'A320neo de FlyByWire. Un únic botó "Start Flying" per tancar-la.</summary>
         private void ShowNoCompatibleAircraftMessage()
         {
             var form = new Form
@@ -6031,7 +6041,7 @@ namespace SimConnect3
 
             var msgLbl = new Label
             {
-                Text = "panelAIR automatically adapts to any aircraft equipped with G1000, or the TBM 930. Choose one of those to get started.",
+                Text = "panelAIR automatically adapts to any aircraft equipped with G1000, the TBM 930, or the FlyByWire A320neo. Choose one of those to get started.",
                 Font = new Font("Segoe UI", 16f),
                 ForeColor = Color.FromArgb(102, 114, 127),
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -8502,6 +8512,7 @@ namespace SimConnect3
                 bool wasDA62 = IsDA62();
                 bool wasC408 = IsC408();
                 bool wasTBM930 = IsTBM930();
+                bool wasA320 = IsA320FBW();
                 _currentAircraftTitle = newTitle;
                 if (_aircraftTitleLbl != null && _aircraftTitleLbl.Text != newTitle)
                     _aircraftTitleLbl.Text = newTitle;
@@ -8521,6 +8532,12 @@ namespace SimConnect3
                 // (_g3000Btn) es manté intacte, però ara truquem SetG3000Active() directament (no
                 // PerformClick — el botó viu a la pantalla AUX, sempre amagada, i CanSelect hi pot ser
                 // false, fent que PerformClick no faci res).
+                // A320 de FlyByWire: en carregar-lo s'activa sol l'overhead A320; en canviar a un altre avió
+                // es deixa (i la lògica TBM/G1000 de sota tria el cockpit que toca). Va primer perquè la
+                // condició TBM depèn de _a320Active.
+                bool isA320Now = IsA320FBW();
+                if (isA320Now != wasA320 && _a320Active != isA320Now && !calibrationMode)
+                    SetA320Active(isA320Now);
                 bool isTBM930Now = IsTBM930();
                 if (isTBM930Now != wasTBM930 && _g3000Active != isTBM930Now && !calibrationMode && !_a320Active)
                     SetG3000Active(isTBM930Now);
@@ -12594,6 +12611,7 @@ namespace SimConnect3
             sb.AppendLine($"A320BTN:a320:{_a320Btn.Location.X}:{_a320Btn.Location.Y}");
             if (_a320ZoomPlusPos is Point zp) sb.AppendLine($"A320ZOOMPLUS:a320zoom:{zp.X}:{zp.Y}");
             if (_a320ZoomMinusPos is Point zm) sb.AppendLine($"A320ZOOMMINUS:a320zoom:{zm.X}:{zm.Y}");
+            if (_a320PageBtnPos is Point pgp) sb.AppendLine($"A320PAGEBTN:a320page:{pgp.X}:{pgp.Y}");
             sb.AppendLine($"THRQBTN:tq:{_thrQuadrantBtn.Location.X}:{_thrQuadrantBtn.Location.Y}:0:0");
             if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
             if (_appVersionPanel != null) sb.AppendLine($"APPVER:apv:{_appVersionPanel.Location.X}:{_appVersionPanel.Location.Y}");
@@ -12799,6 +12817,11 @@ namespace SimConnect3
                 {
                     _a320ZoomMinusPos = new Point(x, y);
                     if (_a320Overhead != null) _a320Overhead.MinusLocation = _a320ZoomMinusPos;
+                }
+                else if (type == "A320PAGEBTN")
+                {
+                    _a320PageBtnPos = new Point(x, y);
+                    if (_a320Overhead != null) _a320Overhead.PageLocation = _a320PageBtnPos;
                 }
                 else if (type == "THRQBTN")
                 {
