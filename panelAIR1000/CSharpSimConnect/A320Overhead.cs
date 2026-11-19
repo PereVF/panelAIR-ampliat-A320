@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.Drawing.Text;
@@ -67,6 +67,9 @@ namespace panelAIR1000
 
         /// <summary>Escala lògic→píxel del dibuix actual (perquè el gra de pintura sigui d'1 píxel real).</summary>
         public static float PixelScale = 1f;
+
+        /// <summary>Mida mínima de qualsevol serigrafia (no llegendes de polsadors): 25 px a 4K al 100% (25 / 3,072).</summary>
+        public const float MinSilk = 8.15f;
         static TextureBrush? _grainFine, _grainCoarse;
 
         /// <summary>Soroll procedural (sense PNG): píxels clars/foscos aleatoris de baixa opacitat, llavor fixa.</summary>
@@ -328,7 +331,7 @@ namespace panelAIR1000
         readonly string _t; readonly float _x, _y, _size; readonly Color _c; readonly bool _bold;
         public OhLabel(string t, float x, float y, float size, Color c, bool bold)
         {
-            _t = t; _x = x; _y = y; _size = size; _c = c; _bold = bold;
+            size = Math.Max(size, Oh.MinSilk); _t = t; _x = x; _y = y; _size = size; _c = c; _bold = bold;
             float w = Oh.TextW(t, size) + 6, h = size * 1.5f;
             Bounds = new RectangleF(x - w / 2, y - h / 2, w, h);
         }
@@ -341,7 +344,7 @@ namespace panelAIR1000
         readonly string _t; readonly float _x, _y, _size;
         public OhVText(string t, float x, float y, float size)
         {
-            _t = t; _x = x; _y = y; _size = size;
+            size = Math.Max(size, Oh.MinSilk); _t = t; _x = x; _y = y; _size = size;
             float h = t.Length * size * 1.08f;
             Bounds = new RectangleF(x - size, y - h / 2 - 2, size * 2, h + 4);
         }
@@ -359,7 +362,7 @@ namespace panelAIR1000
         readonly string _t; readonly float _x, _y, _size; readonly Color _c;
         public OhBoxLabel(string t, float x, float y, float size, Color c)
         {
-            _t = t; _x = x; _y = y; _size = size; _c = c;
+            size = Math.Max(size, Oh.MinSilk); _t = t; _x = x; _y = y; _size = size; _c = c;
             float w = Oh.TextW(t, size) + 8, h = size * 1.75f;
             Bounds = new RectangleF(x - w / 2 - 2, y - h / 2 - 2, w + 4, h + 4);
         }
@@ -378,7 +381,7 @@ namespace panelAIR1000
         readonly string _t; readonly float _cx, _y, _x0, _x1, _size;
         public OhTitle(string t, float cx, float y, float x0, float x1, float size)
         {
-            _t = t; _cx = cx; _y = y; _x0 = x0; _x1 = x1; _size = size;
+            size = Math.Max(size, Oh.MinSilk); _t = t; _cx = cx; _y = y; _x0 = x0; _x1 = x1; _size = size;
             Bounds = RectangleF.FromLTRB(x0 - 2, y - size, x1 + 2, y + size);
         }
         public override void Draw(Graphics g)
@@ -441,7 +444,7 @@ namespace panelAIR1000
         readonly float _cx, _cy, _r; readonly float[] _angles; readonly string[]? _labels; readonly float _size;
         public OhDial(float cx, float cy, float r, float[] angles, string[]? labels, float size)
         {
-            _cx = cx; _cy = cy; _r = r; _angles = angles; _labels = labels; _size = size;
+            size = Math.Max(size, Oh.MinSilk); _cx = cx; _cy = cy; _r = r; _angles = angles; _labels = labels; _size = size;
             float ext = r + (labels != null ? size * 2.2f : 4f);
             Bounds = new RectangleF(cx - ext, cy - ext, ext * 2, ext * 2);
         }
@@ -735,7 +738,8 @@ namespace panelAIR1000
         public override int State => Index;
         public override bool Animating => Math.Abs(_ang - _angles[Index]) > 0.05f;
         public override void Tick(float dt) => _ang = Approach(_ang, _angles[Index], dt * 600f);
-        public override RectangleF DirtyBounds => RectangleF.Inflate(Bounds, 5, 5);
+        // la cua del rotatiu pot sobresortir de la base (fins a Outer radis): cal repintar aquesta zona en girar
+        public override RectangleF DirtyBounds => RectangleF.Inflate(Bounds, _r * (Outer - 1f) + 5, _r * (Outer - 1f) + 5);
 
         public override void Tap(PointF p)
         {
@@ -748,53 +752,188 @@ namespace panelAIR1000
             Index = ni; Changed();
         }
 
+        // ─── Rotatiu 3D calculat per píxel (sense PNG) ───
+        // Model validat a la pàgina "Rotatiu A320": base rodona plana de plàstic blanc trencat (cantell recte
+        // amb un arrodoniment mínim) + cos rectangular de cantells arrodonits que acaba en fletxa cap a la
+        // selecció. La fletxa baixa en rampa i té els flancs inclinats; la cua és un arc concèntric amb la base
+        // que en sobresurt una mica. Indicador blanc amb contorn negre pintat sobre la superfície fins a la
+        // punta. Per a cada píxel: alçada → normal → llum (difusa + especular suau), llum fixa a dalt-esquerra.
+        Bitmap? _cache;
+        float _cacheAng = float.NaN, _cacheScale;
+
+        // Paràmetres del model (els mateixos noms i valors que el requadre de la pàgina web)
+        const float KAmplada = 0.44f;     // amplada (mitja amplada del cos)
+        const float KFletxa = -0.28f;     // espatlla on comença la fletxa
+        const float KPunta = -0.87f;      // punta de la fletxa (abans d'arrodonir)
+        const float KPendent = 0.60f;     // pendent de la rampa de la fletxa
+        const float KCua = 1.10f;         // radi de l'arc de la cua
+        const float KVoraBase = 0.03f;    // arrodoniment de la vora de la base
+        const float KArrodon = 0.13f;     // arrodoniment dels cantells del cos
+        const float KBlanc = 0.35f;       // 0 = blanc trencat agrisat, 1 = blanc
+        const float KBrillantor = 1.00f;  // brillantor general del plàstic
+
+        const float Outer = 1.32f;        // zona dibuixada en radis de la base (la cua en pot sobresortir)
+        const float BaseH = 0.20f;
+        static readonly PointF[] BodyPoly =
+        {
+            new(-KAmplada, 1.4f), new(KAmplada, 1.4f), new(KAmplada, KFletxa), new(0f, KPunta), new(-KAmplada, KFletxa)
+        };
+
+        static float Smooth(float e0, float e1, float x)
+        {
+            float t = Math.Clamp((x - e0) / (e1 - e0), 0f, 1f);
+            return t * t * (3 - 2 * t);
+        }
+
+        // Distància amb signe a un polígon (negatiu a dins)
+        static float SdPoly(float px, float py, PointF[] V)
+        {
+            float d = (px - V[0].X) * (px - V[0].X) + (py - V[0].Y) * (py - V[0].Y), s = 1f;
+            for (int i = 0, j = V.Length - 1; i < V.Length; j = i, i++)
+            {
+                float ex = V[j].X - V[i].X, ey = V[j].Y - V[i].Y;
+                float wx = px - V[i].X, wy = py - V[i].Y;
+                float t = Math.Clamp((wx * ex + wy * ey) / (ex * ex + ey * ey), 0f, 1f);
+                float bx = wx - ex * t, by = wy - ey * t;
+                d = Math.Min(d, bx * bx + by * by);
+                bool c1 = py >= V[i].Y, c2 = py < V[j].Y, c3 = ex * wy > ey * wx;
+                if ((c1 && c2 && c3) || (!c1 && !c2 && !c3)) s = -s;
+            }
+            return s * MathF.Sqrt(d);
+        }
+
+        // Intersecció suau (cantells arrodonits també on els costats es troben amb l'arc de la cua)
+        static float SMax(float a, float b, float k)
+        {
+            float h = Math.Clamp(0.5f - 0.5f * (b - a) / k, 0f, 1f);
+            return a * h + b * (1 - h) + k * h * (1 - h);
+        }
+
+        static float SdBody(float u, float v) =>
+            SMax(SdPoly(u, v, BodyPoly) - KArrodon, MathF.Sqrt(u * u + v * v) - KCua, Math.Max(0.02f, KArrodon));
+
+        /// <summary>Alçada (unitats del radi) i material. mat: 0 fora, 1 base, 2 cos, 3 indicador blanc, 4 contorn negre.</summary>
+        static float KnobHeight(float u, float v, out int mat)
+        {
+            float d = MathF.Sqrt(u * u + v * v);
+            mat = 0;
+            float h = 0f;
+            if (d <= 1.0f)
+            {
+                const float be = KVoraBase;
+                if (be > 0.001f && d > 1 - be) { float x = d - (1 - be); h = BaseH - be + MathF.Sqrt(Math.Max(0f, be * be - x * x)); }
+                else h = BaseH;
+                mat = 1;
+            }
+            float sd = SdBody(u, v);
+            if (sd < 0)
+            {
+                float tipExt = KPunta - KArrodon;
+                float f = Smooth(0f, 1f, (KFletxa + 0.10f - v) / Math.Max(0.05f, KFletxa + 0.10f - tipExt));
+                float bevel = 0.16f + KPendent * 0.34f * f;
+                float t = Math.Min(1f, -sd / bevel);
+                float hb = BaseH + 0.42f * MathF.Sqrt(1f - (1f - t) * (1f - t)) * (1f - KPendent * 0.65f * f);
+                if (hb > h) { h = hb; mat = 2; }
+                if (mat == 2 && v < -0.18f)
+                {
+                    float au = Math.Abs(u);
+                    if (au < 0.026f && v < -0.21f) mat = 3;
+                    else if (au < 0.05f) mat = 4;
+                }
+            }
+            return h;
+        }
+
+        Bitmap RenderKnob(float pxScale)
+        {
+            int R = Math.Max(4, (int)MathF.Ceiling(_r * pxScale));
+            int size = (int)MathF.Ceiling(R * Outer * 2 + 2);
+            var bmp = new Bitmap(size, size, PixelFormat.Format32bppPArgb);
+            var px = new int[size * size];
+            double ar = _ang * Math.PI / 180.0;
+            float ca = (float)Math.Cos(ar), sa = (float)Math.Sin(ar);
+            float inv = 1f / R;
+            float lx = -0.48f, ly = -0.62f, lz = 0.62f;
+            float ln = MathF.Sqrt(lx * lx + ly * ly + lz * lz); lx /= ln; ly /= ln; lz /= ln;
+            float hx = lx, hy = ly, hz = lz + 1f;
+            float hn = MathF.Sqrt(hx * hx + hy * hy + hz * hz); hx /= hn; hy /= hn; hz /= hn;
+            float lu = ca * lx + sa * ly, lv = -sa * lx + ca * ly;
+
+            static float White(float c) => (c + (252f - c) * KBlanc) * KBrillantor;
+            float bR = White(206), bG = White(203), bB = White(195);     // cos
+            float sR = White(192), sG = White(190), sB = White(184);     // base
+
+            float H(float wx, float wy, out int m)
+            {
+                float u = (ca * wx + sa * wy) * inv, v = (-sa * wx + ca * wy) * inv;
+                return KnobHeight(u, v, out m);
+            }
+
+            float c0 = size / 2f;
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    float wx = x + 0.5f - c0, wy = y + 0.5f - c0;
+                    float dist = MathF.Sqrt(wx * wx + wy * wy) * inv;
+                    if (dist > Outer) continue;
+                    H(wx, wy, out int mat);
+                    if (mat == 0) continue;
+                    float gx = (H(wx + 1, wy, out _) - H(wx - 1, wy, out _)) * 0.5f * R;
+                    float gy = (H(wx, wy + 1, out _) - H(wx, wy - 1, out _)) * 0.5f * R;
+                    float nx = -gx, ny = -gy, nz = 1f;
+                    float nn = MathF.Sqrt(nx * nx + ny * ny + nz * nz); nx /= nn; ny /= nn; nz /= nn;
+                    float diff = Math.Max(0f, nx * lx + ny * ly + nz * lz);
+                    float spec = MathF.Pow(Math.Max(0f, nx * hx + ny * hy + nz * hz), 24f);
+
+                    float ar0, ag0, ab0, specK;
+                    if (mat == 3) { ar0 = 250; ag0 = 250; ab0 = 246; specK = 0.10f; }
+                    else if (mat == 4) { ar0 = 22; ag0 = 22; ab0 = 22; specK = 0.04f; }
+                    else if (mat == 2) { ar0 = bR; ag0 = bG; ab0 = bB; specK = 0.20f; }
+                    else { ar0 = sR; ag0 = sG; ab0 = sB; specK = 0.10f; }
+
+                    float u = (ca * wx + sa * wy) * inv, v = (-sa * wx + ca * wy) * inv;
+                    float sdHere = SdBody(u, v);
+                    float shade = 0.36f + 0.78f * diff;
+                    if (mat == 1)
+                    {
+                        shade *= 0.55f + 0.45f * Smooth(0f, 0.14f, sdHere);
+                        if (SdBody(u + lu * 0.16f, v + lv * 0.16f) < 0) shade *= 0.62f;
+                    }
+                    float r = ar0 * shade + 255f * specK * spec;
+                    float gg = ag0 * shade + 255f * specK * spec;
+                    float bb = ab0 * shade + 255f * specK * spec;
+                    // vora antialiasada: la de la base o la del cos (on la cua sobresurt)
+                    float alpha = Math.Max(Math.Clamp((1.0f - dist) * R + 0.5f, 0f, 1f), Math.Clamp(-sdHere * R + 0.5f, 0f, 1f));
+                    int A = (int)(alpha * 255f);
+                    int Rr = (int)(Math.Clamp(r, 0, 255) * alpha), Gg = (int)(Math.Clamp(gg, 0, 255) * alpha), Bb = (int)(Math.Clamp(bb, 0, 255) * alpha);
+                    px[y * size + x] = (A << 24) | (Rr << 16) | (Gg << 8) | Bb;
+                }
+            var data = bmp.LockBits(new Rectangle(0, 0, size, size), ImageLockMode.WriteOnly, PixelFormat.Format32bppPArgb);
+            Marshal.Copy(px, 0, data.Scan0, px.Length);
+            bmp.UnlockBits(data);
+            return bmp;
+        }
+
         public override void Draw(Graphics g)
         {
             var rect = new RectangleF(_cx - _r, _cy - _r, _r * 2, _r * 2);
-            Oh.SoftShadowEllipse(g, rect, 1.8f, 2.8f, 3.2f, 130);
+            Oh.SoftShadowEllipse(g, rect, 1.2f, 1.8f, 2.2f, 110);
             if (Style == KnobStyle.Pointer)
             {
-                // Rotatiu Airbus: faldilla rodona color crema + aleta alta que fa de punter
-                using (var path = new GraphicsPath())
+                // Rotatiu Airbus fosc, calculat en 3D (es regenera només si canvia l'angle o l'escala)
+                float ps = Oh.PixelScale;
+                if (_cache == null || _cacheAng != _ang || _cacheScale != ps)
                 {
-                    path.AddEllipse(rect);
-                    using var pg = new PathGradientBrush(path)
-                    {
-                        CenterColor = Color.FromArgb(248, 247, 242),
-                        SurroundColors = new[] { Color.FromArgb(182, 180, 172) },
-                        CenterPoint = new PointF(_cx - _r * 0.3f, _cy - _r * 0.35f)
-                    };
-                    g.FillPath(pg, path);
+                    _cache?.Dispose();
+                    _cache = RenderKnob(ps);
+                    _cacheAng = _ang; _cacheScale = ps;
                 }
-                using (var p = new Pen(Color.FromArgb(84, 82, 76), 0.8f)) g.DrawEllipse(p, rect);
-                var st = g.Save();
-                g.TranslateTransform(_cx, _cy); g.RotateTransform(_ang);
-                // l'aleta: més estreta a la punta, amb cares laterals ombrejades
-                var fin = new[]
-                {
-                    new PointF(-_r * 0.34f, _r * 0.95f), new PointF(-_r * 0.24f, -_r * 1.02f),
-                    new PointF(_r * 0.24f, -_r * 1.02f), new PointF(_r * 0.34f, _r * 0.95f)
-                };
-                using (var fp = new GraphicsPath())
-                {
-                    fp.AddPolygon(fin);
-                    // l'ombra es projecta en direcció fixa (la llum no gira amb el rotatiu)
-                    double a = -_ang * Math.PI / 180.0; // desplaçament (1.6, 2.4) del món, expressat en el marc girat
-                    Oh.SoftShadow(g, fp, (float)(1.6 * Math.Cos(a) - 2.4 * Math.Sin(a)), (float)(1.6 * Math.Sin(a) + 2.4 * Math.Cos(a)), 2.2f, 110);
-                    var fr = new RectangleF(-_r * 0.36f, -_r * 1.05f, _r * 0.72f, _r * 2.1f);
-                    using var fb = new LinearGradientBrush(fr, Color.Black, Color.Black, 0f)
-                    {
-                        InterpolationColors = new ColorBlend
-                        {
-                            Colors = new[] { Color.FromArgb(150, 148, 140), Color.FromArgb(252, 251, 246), Color.FromArgb(228, 226, 218), Color.FromArgb(132, 130, 122) },
-                            Positions = new[] { 0f, 0.38f, 0.62f, 1f }
-                        }
-                    };
-                    g.FillPath(fb, fp);
-                    using var pe = new Pen(Color.FromArgb(96, 94, 88), 0.6f); g.DrawPath(pe, fp);
-                }
-                using (var lp = new Pen(Color.FromArgb(46, 46, 46), Math.Max(0.9f, _r * 0.065f))) g.DrawLine(lp, 0, -_r * 0.15f, 0, -_r * 0.96f);
-                g.Restore(st);
+                float half = (_cache.Width / ps) / 2f;
+                var oldIm = g.InterpolationMode; var oldPo = g.PixelOffsetMode;
+                g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                g.DrawImage(_cache, new RectangleF(_cx - half, _cy - half, half * 2, half * 2));
+                g.InterpolationMode = oldIm; g.PixelOffsetMode = oldPo;
             }
             else
             {
@@ -1721,10 +1860,14 @@ namespace panelAIR1000
         }
 
         void Panel(float x, float y, float w, float h) => _silk.Add(new OhPanel(new RectangleF(x, y, w, h)));
-        void L(string t, float x, float y, float size = 6.5f, bool bold = true) => _silk.Add(new OhLabel(t, x, y, size, Oh.Silk, bold));
-        void VT(string t, float x, float y, float size = 10f) => _silk.Add(new OhVText(t, x, y, size));
-        void Box(string t, float x, float y, float size = 6.5f) => _silk.Add(new OhBoxLabel(t, x, y, size, Oh.Silk));
-        void Title(string t, float cx, float y, float x0, float x1, float size = 9.5f) => _silk.Add(new OhTitle(t, cx, y, x0, x1, size));
+        // Escala de serigrafia i interruptors. EXT LT i AIR COND ja tenen les mides finals (escala 1);
+        // la resta de l'overhead s'iguala proporcionalment amb TextScale.
+        const float TextScale = 1.22f;
+        float _ls = TextScale;
+        void L(string t, float x, float y, float size = 6.5f, bool bold = true) => _silk.Add(new OhLabel(t, x, y, size * _ls, Oh.Silk, bold));
+        void VT(string t, float x, float y, float size = 10f) => _silk.Add(new OhVText(t, x, y, size * _ls));
+        void Box(string t, float x, float y, float size = 6.5f) => _silk.Add(new OhBoxLabel(t, x, y, size * _ls, Oh.Silk));
+        void Title(string t, float cx, float y, float x0, float x1, float size = 9.5f) => _silk.Add(new OhTitle(t, cx, y, x0, x1, size * _ls));
         void Arrow(float x, float y, float dir) => _silk.Add(new OhArrow(x, y, dir, 4.2f, G));
         void Groove(float x0, float y0, float x1, float y1) => _silk.Add(new OhGroove(x0, y0, x1, y1));
         /// <summary>Etiqueta blanca dins un "⊓" verd (línia a dalt i laterals avall), com GND HP / APU BLEED.</summary>
@@ -1769,7 +1912,7 @@ namespace panelAIR1000
             return Knob(id, cx, cy, r, 4, TempAngles);
         }
         OhToggle Tog(string id, float cx, float cy, int n, int index, bool paddle = false, float size = 10f, bool spring = false) =>
-            Add(new OhToggle(id, cx, cy, n, index, paddle ? ToggleStyle.Paddle : ToggleStyle.Bat, size) { SpringToCenter = spring });
+            Add(new OhToggle(id, cx, cy, n, index, paddle ? ToggleStyle.Paddle : ToggleStyle.Bat, size * _ls) { SpringToCenter = spring });
         OhToggle TogS(string id, float cx, float cy, int n, int index, ToggleStyle style, float size) =>
             Add(new OhToggle(id, cx, cy, n, index, style, size));
         OhRoundButton Round(string id, float cx, float cy, float r) => Add(new OhRoundButton(id, cx, cy, r));
@@ -1991,7 +2134,8 @@ namespace panelAIR1000
             L("IDG 2", 876, 686);
             FrameGuard("ELEC_IDG2", 876, 695, "FAULT", "••");
 
-            // AIR COND — segons la fotografia de referència
+            // AIR COND — segons la fotografia de referència (mides ja definitives: escala 1)
+            _ls = 1f;
             Panel(314, 764, 626, 228);
             WLn(328, 800, 328, 956); VT("AIR", 340, 834, 10.5f); VT("COND", 340, 916, 10.5f);
             WLn(926, 800, 926, 956); VT("AIR", 914, 834, 10.5f); VT("COND", 914, 916, 10.5f);
@@ -2051,6 +2195,7 @@ namespace panelAIR1000
             PB("AIRCOND_ENG2_BLEED", 809, 922, "FAULT", "OFF");
 
             // Panell inferior central
+            _ls = TextScale;
             Panel(314, 998, 626, 256);
             Groove(584, 1004, 584, 1248); Groove(670, 1004, 670, 1248);
             Groove(320, 1079, 934, 1079);
@@ -2067,21 +2212,23 @@ namespace panelAIR1000
             PB("PROBE_WINDOW_HEAT", 627, 1030, "••", "ON", 42);
             VT("AUTO", 658, 1050, 5.5f);
 
-            L("CABIN PRESS", 800, 1008, 8.5f);
+            L("CABIN PRESS", 770, 1006, 8.5f);
             L("MAN V/S CTL", 700, 1021, 5.5f); L("UP", 719, 1031, 5.5f); L("DN", 719, 1068, 5.5f);
             Tog("PRESS_MAN_VS_CTL", 700, 1050, 3, 1, false, 10, spring: true);
             L("MODE SEL", 760, 1021, 5.5f);
             PB("PRESS_MODE_SEL", 760, 1030, "FAULT", "MAN", 40, 38);
             VT("AUTO", 788, 1049, 5f);
-            L("LDG ELEV", 838, 1018, 5.5f);
+            L("LDG ELEV", 838, 1013, 5.5f);
             float[] le = { -150, -110, -80, -50, -20, 10, 40, 70, 100, 130 };
-            _silk.Add(new OhDial(838, 1052, 18.5f, le, new[] { "AUTO", "-2", "0", "2", "4", "6", "8", "10", "12", "14" }, 4f));
-            Knob("PRESS_LDG_ELEV", 838, 1052, 16, 0, le);
+            // amb lletra mínima de 25 px no hi caben els 10 números: marques a totes les posicions, xifres alternes
+            _silk.Add(new OhDial(838, 1050, 16f, le, new[] { "AUTO", "", "0", "", "4", "", "8", "", "12", "" }, 4f));
+            Knob("PRESS_LDG_ELEV", 838, 1050, 14, 0, le);
             L("DITCHING", 900, 1021, 5.5f);
             GrayGuard("PRESS_DITCHING", 900, 1030, "••", "ON", 38, 40);
 
             Title("EXT LT", 455, 1086, 322, 578);
-            // EXT LT — estil fidel a la referència: sòcols foscos, pales/palanques/càpsules LAND
+            // EXT LT — estil fidel a la referència: sòcols foscos, pales/palanques/càpsules LAND (escala 1)
+            _ls = 1f;
             // EXT LT — proporcions de la referència: sòcols grans i etiquetes enganxades a l'interruptor
             const float es = 14.5f;   // mida dels interruptors
             const float fn = 8f;      // nom de l'interruptor
@@ -2099,12 +2246,13 @@ namespace panelAIR1000
             // claudàtor de LAND que agrupa L i R
             WLn(398, 1172, 398, 1164, 434, 1164); WLn(470, 1164, 506, 1164, 506, 1172);
             L("LAND", 452, 1164, fn); L("L", 420, 1173, fn); L("R", 484, 1173, fn);
-            L("ON", 452, 1185, fp); L("OFF", 452, 1197, fp); L("RETRACT", 452, 1209, 7f);
+            L("ON", 452, 1185, fp); L("OFF", 452, 1197, fp); L("RETRACT", 452, 1222, 7f);
             TogS("EXT_LT_LAND_L", 420, 1197, 3, 2, ToggleStyle.Land, es);
             TogS("EXT_LT_LAND_R", 484, 1197, 3, 2, ToggleStyle.Land, es);
             L("NOSE", 541, 1164, fn); L("T.O", 568, 1185, fp); L("TAXI", 570, 1197, fp); L("OFF", 568, 1209, fp);
             TogS("EXT_LT_NOSE", 541, 1197, 3, 2, ToggleStyle.Bat, es);
 
+            _ls = TextScale;
             Title("APU", 627, 1090, 590, 664, 8.5f);
             L("MASTER SW", 627, 1104, 6f);
             PB("APU_MASTER_SW", 627, 1112, "FAULT", "ON");
@@ -2125,12 +2273,12 @@ namespace panelAIR1000
             var ann = Tog("INT_LT_ANN_LT", 877, 1130, 3, 1, false, 9);
             ann.OnChange = t => { _annMode = ((OhToggle)t).Index; Redraw(new RectangleF(0, 0, LW, LH)); };
 
-            Title("SIGNS", 800, 1165, 676, 930, 8.5f);
-            L("SEAT BELTS", 700, 1176, 5.5f); L("ON", 700, 1186, 5f); L("OFF", 700, 1232, 5f);
-            Tog("SIGNS_SEAT_BELTS", 700, 1208, 2, 1, false, 10);
-            L("NO PORTABLE", 750, 1173, 5f); L("ELEC DEVICE", 750, 1181, 5f);
-            L("ON", 750, 1189, 4.8f); L("AUTO", 773, 1208, 4.8f); L("OFF", 750, 1232, 5f);
-            Tog("SIGNS_NO_PED", 750, 1208, 3, 1, false, 10);
+            Title("SIGNS", 840, 1165, 795, 930, 8.5f);
+            L("SEAT BELTS", 695, 1176, 5.5f); L("ON", 695, 1186, 5f); L("OFF", 695, 1232, 5f);
+            Tog("SIGNS_SEAT_BELTS", 695, 1208, 2, 1, false, 10);
+            L("NO PORTABLE", 757, 1168, 5f); L("ELEC DEVICE", 757, 1177, 5f);
+            L("ON", 757, 1186, 4.8f); L("AUTO", 782, 1208, 4.8f); L("OFF", 757, 1232, 5f);
+            Tog("SIGNS_NO_PED", 757, 1208, 3, 1, false, 10);
             L("EMER EXIT LT", 852, 1176, 5.5f);
             PB("SIGNS_EMER_EXIT_LT_PB", 812, 1190, "••", "OFF", 38, 36);
             L("ON", 893, 1194, 5f); L("ARM", 895, 1209, 5f); L("OFF", 893, 1224, 5f);
@@ -2207,8 +2355,8 @@ namespace panelAIR1000
             RKey("RMP_VHF2", 990, 240, "VHF2", "COM");
             RKey("RMP_VHF3", 1026, 240, "VHF3", "COM");
             RKey("RMP_HF1", 966, 266, "HF1", "COM");
-            Round("RMP_SEL", 1012, 274, 9);
-            L("SEL", 1012, 262, 5f);
+            Round("RMP_SEL", 1012, 278, 7);
+            L("SEL", 1012, 265.5f, 5f);
             RKey("RMP_HF2", 1030, 266, "HF2", "COM");
             RKey("RMP_AM", 1066, 266, "AM", null);
             float[] dk = new float[12];
