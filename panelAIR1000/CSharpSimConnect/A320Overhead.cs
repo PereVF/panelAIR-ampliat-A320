@@ -22,11 +22,17 @@ namespace panelAIR1000
     internal static class Oh
     {
         // To gris blavós mat (més proper a la fotografia de referència)
-        public static readonly Color Frame   = Color.FromArgb(42, 58, 74);
-        public static readonly Color PlateA  = Color.FromArgb(104, 134, 158);
-        public static readonly Color PlateB  = Color.FromArgb(86, 115, 139);
-        public static readonly Color PlateHi = Color.FromArgb(150, 176, 196);
-        public static readonly Color PlateLo = Color.FromArgb(32, 46, 60);
+        // To de la planxa: barreja entre la paleta grisa (0) i la blava (1)
+        public static float Tint = 0.30f;   // valor triat per en Pere (2026-11-20)
+        public static Color T(int r0, int g0, int b0, int r1, int g1, int b1) => Color.FromArgb(
+            Math.Clamp((int)Math.Round(r0 + (r1 - r0) * Tint), 0, 255),
+            Math.Clamp((int)Math.Round(g0 + (g1 - g0) * Tint), 0, 255),
+            Math.Clamp((int)Math.Round(b0 + (b1 - b0) * Tint), 0, 255));
+        public static Color Frame   => T(46, 55, 64, 42, 58, 74);
+        public static Color PlateA  => T(102, 115, 129, 104, 134, 158);
+        public static Color PlateB  => T(86, 99, 113, 86, 115, 139);
+        public static Color PlateHi => T(144, 156, 168, 150, 176, 196);
+        public static Color PlateLo => T(36, 44, 52, 32, 46, 60);
 
         /// <summary>
         /// Fixació Dzus (quart de volta) del perímetre de cada panell: forat enfonsat a la planxa, anell
@@ -91,12 +97,29 @@ namespace panelAIR1000
         /// <summary>Gra de pintura mat + taques suaus (desgast) dins el camí donat.</summary>
         public static void Grain(Graphics g, GraphicsPath area)
         {
-            _grainFine ??= new TextureBrush(MakeNoise(128, 7, 20), WrapMode.Tile);
-            _grainCoarse ??= new TextureBrush(MakeNoise(64, 11, 16), WrapMode.Tile);
-            _grainCoarse.ResetTransform(); _grainCoarse.ScaleTransform(7f / PixelScale, 7f / PixelScale);
-            _grainFine.ResetTransform(); _grainFine.ScaleTransform(1f / PixelScale, 1f / PixelScale);
-            g.FillPath(_grainCoarse, area);
+            if (_grainFine == null || _grainCoarse == null) RebuildGrain();
+            if (Texture < 0.98f)
+            {
+                _grainCoarse!.ResetTransform(); _grainCoarse.ScaleTransform(7f / PixelScale, 7f / PixelScale);
+                g.FillPath(_grainCoarse, area);
+            }
+            _grainFine!.ResetTransform(); _grainFine.ScaleTransform(1f / PixelScale, 1f / PixelScale);
             g.FillPath(_grainFine, area);
+        }
+
+        /// <summary>
+        /// Homogeneïtat de la textura de la planxa (provisional): 0 = granelluda (taques grosses + gra),
+        /// 1 = molt fina (sense taques i gra gairebé imperceptible).
+        /// </summary>
+        public static float Texture = 0.75f;   // valor triat per en Pere (2026-11-20)
+
+        /// <summary>Regenera els patrons de soroll segons Texture (cridar només des del fil de la UI).</summary>
+        public static void RebuildGrain()
+        {
+            _grainFine?.Dispose(); _grainCoarse?.Dispose();
+            float t = Math.Clamp(Texture, 0f, 1f);
+            _grainFine = new TextureBrush(MakeNoise(128, 7, Math.Max(1, (int)Math.Round(20 * (1 - 0.75f * t)))), WrapMode.Tile);
+            _grainCoarse = new TextureBrush(MakeNoise(64, 11, Math.Max(1, (int)Math.Round(16 * (1 - t)))), WrapMode.Tile);
         }
 
         /// <summary>Ombra difusa: el camí repetit amb traços cada cop més estrets i opacs (vora esvaïda).</summary>
@@ -1474,13 +1497,13 @@ namespace panelAIR1000
             using (var op = Oh.RoundRect(_outer, _radius))
             {
                 Oh.SoftShadow(g, op, 1.6f, 2.4f, 3f, 130);
-                using (var ob = new LinearGradientBrush(_outer, Color.FromArgb(128, 156, 178), Color.FromArgb(68, 92, 112), 60f)) g.FillPath(ob, op);
+                using (var ob = new LinearGradientBrush(_outer, Oh.T(132, 146, 160, 128, 156, 178), Oh.T(74, 86, 98, 68, 92, 112), 60f)) g.FillPath(ob, op);
                 using var pe = new Pen(Color.FromArgb(40, 48, 56), 0.8f); g.DrawPath(pe, op);
             }
             // llavi interior fosc al voltant del vidre
             var lip = RectangleF.Inflate(_glass, 2.2f, 2.2f);
             using (var lp = Oh.RoundRect(lip, 2.5f))
-            using (var lb = new LinearGradientBrush(lip, Color.FromArgb(22, 30, 38), Color.FromArgb(90, 114, 134), 90f)) g.FillPath(lb, lp);
+            using (var lb = new LinearGradientBrush(lip, Oh.T(24, 28, 32, 22, 30, 38), Oh.T(96, 108, 120, 90, 114, 134), 90f)) g.FillPath(lb, lp);
             using (var gb = new SolidBrush(Color.FromArgb(6, 7, 8))) g.FillRectangle(gb, _glass);
             // reflex molt suau del vidre
             using (var rb = new LinearGradientBrush(_glass, Color.FromArgb(22, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 35f))
@@ -1489,6 +1512,127 @@ namespace panelAIR1000
                 foreach (var p in new[] { new PointF(_outer.X + 6, _outer.Y + 6), new PointF(_outer.Right - 6, _outer.Y + 6),
                                           new PointF(_outer.X + 6, _outer.Bottom - 6), new PointF(_outer.Right - 6, _outer.Bottom - 6) })
                     Oh.Dzus(g, p.X, p.Y, 3.6f, 30f + (p.X * 3.1f + p.Y * 1.7f) % 40f);
+        }
+    }
+
+    /// <summary>
+    /// Marc de les pantalles grans (PFD, ND, ECAM), model validat a la pàgina "Marcs de pantalla": visera superior
+    /// que sobresurt i fa ombra sobre el vidre, muntants laterals amb relleu, vidre enfonsat, topalls amb cargol a
+    /// les cantonades de baix. El vidre manté exactament la mida de sempre. Mides de la maqueta en unitats de
+    /// referència (×U per passar a unitats del panell).
+    /// </summary>
+    internal sealed class OhBezel : OhSilk
+    {
+        // valors triats per en Pere (2026-11-20)
+        const float Hood = 2.00f, HoodShadow = 1.00f, Pillars = 1.35f, GlassDepth = 1.00f, Dark = 0.90f, Boss = 1.50f;
+        const float U = 0.625f;
+        readonly RectangleF _o, _g;
+
+        public OhBezel(RectangleF outer, RectangleF glass)
+        {
+            _o = outer; _g = glass;
+            float m = (2 * Hood + 8) * U;
+            Bounds = RectangleF.FromLTRB(outer.Left - m, outer.Top - m, outer.Right + m, outer.Bottom + m + 6);
+        }
+
+        static Color C(float r, float g, float b, float f, int a = 255) =>
+            Color.FromArgb(a, Math.Clamp((int)(r * f), 0, 255), Math.Clamp((int)(g * f), 0, 255), Math.Clamp((int)(b * f), 0, 255));
+
+        static void VFill(Graphics g, RectangleF r, Color c0, Color c1)
+        {
+            if (r.Height <= 0.01f || r.Width <= 0.01f) return;
+            using var b = new LinearGradientBrush(RectangleF.Inflate(r, 0, 0.5f), c0, c1, 90f);
+            g.FillRectangle(b, r);
+        }
+
+        public override void Draw(Graphics g)
+        {
+            const float fr = 92 * Dark, fg = 104 * Dark, fb = 116 * Dark;   // color del marc
+            Color F(float f, int a = 255) => C(fr, fg, fb, f, a);
+            float ox0 = _o.Left, oy0 = _o.Top, ox1 = _o.Right, oy1 = _o.Bottom;
+            float gx0 = _g.Left, gy0 = _g.Top, gx1 = _g.Right, gy1 = _g.Bottom;
+
+            // 1) cos del marc
+            using (var body = Oh.RoundRect(_o, 5 * U))
+            {
+                Oh.SoftShadow(g, body, 1.5f * U, 3f * U, 4.5f * U, 140);
+                using (var bb = new LinearGradientBrush(RectangleF.Inflate(_o, 0, 0.5f), F(1.08f), F(0.90f), 90f)) g.FillPath(bb, body);
+                Oh.Grain(g, body);
+            }
+            using (var ip = Oh.RoundRect(RectangleF.Inflate(_o, -0.6f * U, -0.6f * U), 5 * U))
+            using (var pe = new Pen(F(1.32f, 178), 0.9f * U)) g.DrawPath(pe, ip);
+
+            // 2) muntants laterals amb relleu
+            foreach (var (x0, x1) in new[] { (ox0 + 1.5f * U, gx0 - 1 * U), (gx1 + 1 * U, ox1 - 1.5f * U) })
+            {
+                var pr = RectangleF.FromLTRB(x0, gy0 - 2 * U, x1, gy1 + 2 * U);
+                if (pr.Width <= 0.1f) continue;
+                using var lb = new LinearGradientBrush(RectangleF.Inflate(pr, 0.5f, 0), Color.Black, Color.Black, 0f)
+                {
+                    InterpolationColors = new ColorBlend
+                    {
+                        Colors = new[] { F(1 + 0.30f * Pillars), F(1f), F(1 - 0.38f * Pillars) },
+                        Positions = new[] { 0f, 0.45f, 1f }
+                    }
+                };
+                g.FillRectangle(lb, pr);
+            }
+
+            // 3) vidre enfonsat
+            float st = 4 * GlassDepth * U;
+            var step = RectangleF.FromLTRB(gx0 - st, gy0 - st, gx1 + st, gy1 + st);
+            using (var sb = new SolidBrush(Color.FromArgb(13, 17, 21))) g.FillRectangle(sb, step);
+            VFill(g, step, Color.FromArgb(153, 0, 0, 0), Color.FromArgb(89, 110, 128, 146));
+            using (var gb = new SolidBrush(Color.FromArgb(5, 7, 10))) g.FillRectangle(gb, _g);
+            using (var lp = new Pen(F(1.32f, 204), 0.8f * U)) g.DrawLine(lp, gx0 - st, gy1 + st - 0.4f * U, gx1 + st, gy1 + st - 0.4f * U);
+
+            // 4) visera superior
+            float hy0 = oy0 + 1 * U, hy1 = gy0 - st + 1 * U, hx0 = ox0 - 2 * Hood * U, hx1 = ox1 + 2 * Hood * U;
+            var hood = RectangleF.FromLTRB(hx0, hy0, hx1, hy1);
+            if (hood.Height > 0.3f)
+            {
+                using (var hp = Oh.RoundRect(hood, 3 * U))
+                {
+                    Oh.SoftShadow(g, hp, 0, 2.5f * Hood * U, 3f * Hood * U, 150);
+                    using (var hb = new LinearGradientBrush(RectangleF.Inflate(hood, 0, 0.5f), F(1.35f), F(0.82f), 90f)) g.FillPath(hb, hp);
+                    Oh.Grain(g, hp);
+                }
+                using (var tl = new Pen(Color.FromArgb(166, 220, 232, 242), 0.9f * U)) g.DrawLine(tl, hx0 + 3 * U, hy0 + 0.7f * U, hx1 - 3 * U, hy0 + 0.7f * U);
+                VFill(g, RectangleF.FromLTRB(hx0 + 1 * U, hy1 - 1.6f * U, hx1 - 1 * U, hy1 + 0.6f * U), F(0.62f), Color.FromArgb(230, 0, 0, 0));
+            }
+
+            // 5) ombra de la visera sobre el vidre i reflex suau
+            float shh = (gy1 - gy0) * 0.09f * HoodShadow * Math.Max(0.4f, Hood);
+            VFill(g, RectangleF.FromLTRB(gx0, gy0, gx1, gy0 + shh), Color.FromArgb((int)(255 * Math.Min(0.85f, 0.7f * HoodShadow)), 0, 0, 0), Color.FromArgb(0, 0, 0, 0));
+            VFill(g, RectangleF.FromLTRB(gx0, gy0, gx1, gy0 + (gy1 - gy0) * 0.5f), Color.FromArgb(9, 255, 255, 255), Color.FromArgb(0, 255, 255, 255));
+
+            // 6) topalls quadrats amb cargol a les cantonades de baix
+            float bsz = 13 * Boss * U, pw = gx0 - ox0;
+            foreach (float cx in new[] { ox0 + pw / 2, ox1 - pw / 2 })
+            {
+                var br = new RectangleF(cx - bsz / 2, oy1 - bsz - 1.5f * U, bsz, bsz);
+                using (var bp = Oh.RoundRect(br, 2 * U))
+                {
+                    Oh.SoftShadow(g, bp, 0.8f * U, 1.4f * U, 1.6f * U, 150);
+                    using (var bb = new LinearGradientBrush(RectangleF.Inflate(br, 0, 0.5f), F(1.20f), F(0.78f), 90f)) g.FillPath(bb, bp);
+                }
+                using (var bp2 = Oh.RoundRect(RectangleF.Inflate(br, -0.5f * U, -0.5f * U), 2 * U))
+                using (var pe = new Pen(F(1.32f, 153), 0.6f * U)) g.DrawPath(pe, bp2);
+                float r = bsz * 0.26f, cy = br.Y + bsz / 2;
+                using (var rb = new SolidBrush(Color.FromArgb(18, 24, 30))) g.FillEllipse(rb, cx - r - 0.9f * U, cy - r - 0.9f * U, (r + 0.9f * U) * 2, (r + 0.9f * U) * 2);
+                using (var path = new GraphicsPath())
+                {
+                    path.AddEllipse(cx - r, cy - r, r * 2, r * 2);
+                    using var pgb = new PathGradientBrush(path)
+                    {
+                        CenterColor = Color.FromArgb(201, 208, 214),
+                        SurroundColors = new[] { Color.FromArgb(62, 70, 78) },
+                        CenterPoint = new PointF(cx - r * 0.35f, cy - r * 0.4f)
+                    };
+                    g.FillPath(pgb, path);
+                }
+                using (var hb = new SolidBrush(Color.FromArgb(27, 32, 38))) g.FillEllipse(hb, cx - r * 0.42f, cy - r * 0.42f, r * 0.84f, r * 0.84f);
+            }
         }
     }
 
@@ -1533,6 +1677,154 @@ namespace panelAIR1000
             var b = path.GetBounds();
             using var br = new LinearGradientBrush(RectangleF.Inflate(b, 0.5f, 0.5f), _top, _bottom, 90f);
             g.FillPath(br, path);
+        }
+    }
+
+    /// <summary>
+    /// Visera del glareshield de pell negra: segueix una línia trencada (tram inclinat + horitzontal) amb un gruix
+    /// vertical; el perfil és arrodonit (com un tub entapissat): reflex de llum a la part alta, fosca a les vores, i
+    /// textura de pell (gra irregular). Es dibuixa per franges paral·leles a la línia, perquè el degradat del perfil
+    /// segueixi també el tram inclinat.
+    /// </summary>
+    internal sealed class OhVisor : OhSilk
+    {
+        readonly PointF[] _top; readonly float _th;
+        static TextureBrush? _leather;
+
+        public OhVisor(PointF[] top, float thickness)
+        {
+            _top = top; _th = thickness;
+            Bounds = RectangleF.Inflate(RectangleF.FromLTRB(top.Min(p => p.X), top.Min(p => p.Y), top.Max(p => p.X), top.Max(p => p.Y) + thickness), 6, 8);
+        }
+
+        /// <summary>
+        /// Color del perfil per il·luminació real d'una secció arrodonida (mitja canya): t = 0 (dalt) .. 1 (baix).
+        /// Pell negra setinada: difusa baixa + especular ampla i suau (no un reflex dur de plàstic).
+        /// </summary>
+        static (float r, float g, float b) Shade(float t)
+        {
+            float a = MathF.PI * (Math.Clamp(t, 0f, 1f) - 0.5f);       // -90° (mira amunt) .. +90° (mira avall)
+            float ny = MathF.Sin(a), nz = MathF.Cos(a);                  // normal (y avall, z cap a l'observador)
+            const float lyy = -0.62f, lz = 0.78f;                         // llum de dalt i de davant
+            float diff = Math.Max(0f, ny * lyy + nz * lz);
+            float hy = lyy, hz = lz + 1f; float hn = MathF.Sqrt(hy * hy + hz * hz); hy /= hn; hz /= hn;
+            float nh = Math.Max(0f, ny * hy + nz * hz);
+            float spec = 0.55f * MathF.Pow(nh, 9f) + 0.25f * MathF.Pow(nh, 40f);   // lluentor setinada
+            float fres = MathF.Pow(1f - nz, 3f) * 0.18f;                 // vores una mica més clares (llum rasant)
+            float baseL = 0.12f + 0.55f * diff;
+            float r = 26f * baseL * 2.2f + 175f * spec + 40f * fres;
+            float gg = 26f * baseL * 2.2f + 178f * spec + 42f * fres;
+            float b = 29f * baseL * 2.2f + 186f * spec + 46f * fres;
+            return (r, gg, b);
+        }
+
+        /// <summary>Gra de pell: soroll de dues octaves (cèl·lules irregulars) convertit en relleu amb llum de dalt-esquerra.</summary>
+        static TextureBrush Leather()
+        {
+            if (_leather != null) return _leather;
+            const int n = 128;
+            var rnd = new Random(23);
+            float[] Blur(float[] src, int rad)
+            {
+                var o = new float[n * n];
+                for (int y = 0; y < n; y++)
+                    for (int x = 0; x < n; x++)
+                    {
+                        float sum = 0; int c = 0;
+                        for (int dy = -rad; dy <= rad; dy++) for (int dx = -rad; dx <= rad; dx++) { sum += src[((y + dy + n) % n) * n + (x + dx + n) % n]; c++; }
+                        o[y * n + x] = sum / c;
+                    }
+                return o;
+            }
+            var w = new float[n * n];
+            for (int i = 0; i < w.Length; i++) w[i] = (float)rnd.NextDouble();
+            var lo = Blur(w, 3); var hi = Blur(w, 1);
+            var h = new float[n * n];
+            for (int i = 0; i < h.Length; i++)
+            {
+                // "porus" de pell: valls estretes entre petits coixinets
+                float v = 0.65f * lo[i] + 0.35f * hi[i];
+                h[i] = MathF.Pow(Math.Clamp((v - 0.35f) * 3.3f, 0f, 1f), 0.7f);
+            }
+            var bmp = new Bitmap(n, n, PixelFormat.Format32bppArgb);
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                {
+                    // relleu isòtrop (sense direcció preferent): el punt respecte a la mitjana dels 4 veïns
+                    float avg = (h[((y - 1 + n) % n) * n + x] + h[((y + 1) % n) * n + x] + h[y * n + (x - 1 + n) % n] + h[y * n + (x + 1) % n]) / 4f;
+                    float d = h[y * n + x] - avg;
+                    float cav = 1f - h[y * n + x];
+                    int aLight = (int)Math.Clamp(d * 260f, 0f, 34f);
+                    int aDark = (int)Math.Clamp(-d * 300f + cav * 26f, 0f, 60f);
+                    bmp.SetPixel(x, y, aLight > aDark ? Color.FromArgb(aLight, 255, 255, 255) : Color.FromArgb(aDark, 0, 0, 0));
+                }
+            _leather = new TextureBrush(bmp, WrapMode.Tile);
+            return _leather;
+        }
+
+        static TextureBrush? _mottle;
+        /// <summary>Variació de to molt suau i gran (la pell no és mai d'un negre uniforme).</summary>
+        static TextureBrush Mottle()
+        {
+            if (_mottle != null) return _mottle;
+            var rnd = new Random(5);
+            const int n = 32;
+            var bmp = new Bitmap(n, n, PixelFormat.Format32bppArgb);
+            for (int y = 0; y < n; y++)
+                for (int x = 0; x < n; x++)
+                {
+                    float v = (float)rnd.NextDouble() * 2 - 1;
+                    bmp.SetPixel(x, y, v > 0 ? Color.FromArgb((int)(v * 5), 255, 255, 255) : Color.FromArgb((int)(-v * 8), 0, 0, 0));
+                }
+            _mottle = new TextureBrush(bmp, WrapMode.Tile);
+            return _mottle;
+        }
+
+        public override void Draw(Graphics g)
+        {
+            var bottom = _top.Select(p => new PointF(p.X, p.Y + _th)).ToArray();
+            var outline = _top.Concat(bottom.Reverse()).ToArray();
+            using var path = new GraphicsPath();
+            path.AddPolygon(outline);
+            // ombra suau i ampla sobre els panells de sota (la visera sobresurt)
+            Oh.SoftShadow(g, path, 0.6f, 3.4f, 4.5f, 170);
+            var st = g.Save();
+            g.SetClip(path, CombineMode.Intersect);
+            var oldIm = g.InterpolationMode;
+            // perfil arrodonit il·luminat, en franges paral·leles a la línia trencada
+            const int N = 64;
+            for (int i = 0; i < N; i++)
+            {
+                float t = (i + 0.5f) / N;
+                var (r, gg, b) = Shade(t);
+                var line = _top.Select(p => new PointF(p.X, p.Y + _th * t)).ToArray();
+                using var pen = new Pen(Color.FromArgb(Math.Clamp((int)r, 0, 255), Math.Clamp((int)gg, 0, 255), Math.Clamp((int)b, 0, 255)), _th / N + 0.5f) { LineJoin = LineJoin.Round };
+                g.DrawLines(pen, line);
+            }
+            // variació de to gran i suau
+            var mb = Mottle();
+            mb.ResetTransform(); mb.ScaleTransform(14f, 14f);
+            g.InterpolationMode = InterpolationMode.HighQualityBilinear;
+            g.FillPath(mb, path);
+            // gra de pell fi, escalat a píxels reals
+            var lb = Leather();
+            lb.ResetTransform(); lb.ScaleTransform(0.9f / Oh.PixelScale, 0.9f / Oh.PixelScale);
+            g.FillPath(lb, path);
+            g.InterpolationMode = oldIm;
+            // costura: punts de fil fosc a prop de la vora de baix, amb el seu petit relleu
+            float ty = _th * 0.80f;
+            var seam = _top.Select(p => new PointF(p.X, p.Y + ty)).ToArray();
+            using (var groove = new Pen(Color.FromArgb(120, 0, 0, 0), _th * 0.10f) { LineJoin = LineJoin.Round })
+                g.DrawLines(groove, seam);
+            float stitch = Math.Max(0.9f, _th * 0.09f);
+            using (var thread = new Pen(Color.FromArgb(150, 92, 92, 96), Math.Max(0.35f, _th * 0.045f)) { DashPattern = new[] { 2.2f, 1.6f }, LineJoin = LineJoin.Round })
+                g.DrawLines(thread, seam.Select(p => new PointF(p.X, p.Y - stitch * 0.15f)).ToArray());
+            g.Restore(st);
+            // vora de dalt: fil de llum rasant; vora de baix: plec fosc on la pell es gira cap a dins
+            using (var tp = new Pen(Color.FromArgb(70, 170, 176, 186), 0.6f) { LineJoin = LineJoin.Round })
+                g.DrawLines(tp, _top.Select(p => new PointF(p.X, p.Y + 0.4f)).ToArray());
+            using (var ep = new Pen(Color.FromArgb(220, 3, 3, 4), 1.0f) { LineJoin = LineJoin.Round })
+                g.DrawLines(ep, bottom);
         }
     }
 
@@ -1710,7 +2002,10 @@ namespace panelAIR1000
     {
         public const float LW = 1250f, LH = 1275f;
         /// <summary>Alçada lògica del panell principal (proporció de la imatge de referència 2286×1362).</summary>
-        public const float MainLH = 745f;
+        // Panell principal: pantalla fixa 16:9 (3840×2160 a 4K); el dibuix es retalla per sota
+        public const float MainLH = LW * 9f / 16f;
+        /// <summary>Espai buit de dalt del dibuix del panell principal que es retalla (la visera toca la vora de dalt).</summary>
+        public const float MainTopCut = 14.5f;
 
         // ── Pàgines: 0 = overhead, 1 = panell principal (glareshield + instruments) ──
         sealed class PageData
@@ -1718,6 +2013,7 @@ namespace panelAIR1000
             public readonly List<OhSilk> Silk = new();
             public List<OhElement> Els = new();
             public float LH;
+            public float Shift;   // unitats lògiques retallades per dalt (el dibuix es desplaça amunt)
             public PointF[] Frame = Array.Empty<PointF>();
             public int ScrollY;
             public bool Visited;
@@ -1729,6 +2025,7 @@ namespace panelAIR1000
         List<OhSilk> _silk => _pages[_page].Silk;
         List<OhElement> _els { get => _pages[_page].Els; set => _pages[_page].Els = value; }
         float CurLH => _pages[_page].LH;
+        float CurShift => _pages[_page].Shift;
         PointF[] CurFrame => _pages[_page].Frame;
         readonly Dictionary<string, OhElement> _byId = new();
         readonly HashSet<OhElement> _animating = new();
@@ -1788,13 +2085,199 @@ namespace panelAIR1000
         /// <summary>Es dispara quan l'usuari canvia un element: (id, estat). Punt d'enganx per a SimConnect.</summary>
         public event Action<string, int>? ElementChanged;
 
-        public A320OverheadControl()
+        /// <summary>
+        /// Control del mode A320: mostra el panell principal (fix, 4K) i, per sobre, l'overhead com una capa que
+        /// penja de dalt de la pantalla (botó OVHD). L'overhead és un control fill retallat amb la seva forma:
+        /// on no hi és es veu (i funciona) el panell principal.
+        /// </summary>
+        public A320OverheadControl() : this(false) { }
+
+        A320OverheadControl(bool overlay)
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.Opaque, true);
             SetStyle(ControlStyles.OptimizedDoubleBuffer, false); // ja tenim el nostre propi Bitmap
             BackColor = Color.Black;
+            _isOverlay = overlay;
             _anim.Tick += (s, e) => AnimTick();
             Build();
+            if (!overlay) { _page = 1; _pages[1].Visited = true; }
+        }
+
+        // ─────────────── Capa overhead per sobre del panell principal ───────────────
+        readonly bool _isOverlay;           // true: aquesta instància és la capa overhead
+        A320OverheadControl? _ov;           // (panell principal) la capa overhead
+        bool _closing;                      // (capa) animació de tancament en curs
+        bool _startAtCut;                   // (capa) el gest ha començat amb l'overhead al topall
+        /// <summary>Línia de tall de l'overhead (entre ANTI ICE / CABIN PRESS i EXT LT / APU / INT LT): topall superior.</summary>
+        const float OverheadCutY = 1079f;
+
+        event Action? OverlayMoved;
+        event Action? OverlayClosed;
+
+        bool OverlayOpen => _ov != null && _ov.Visible && !_ov._closing;
+
+        void CreateOverlay()
+        {
+            if (_ov != null || _isOverlay || IsDisposed) return;
+            _ov = new A320OverheadControl(true) { Visible = false, Bounds = ClientRectangle };
+            _ov.ElementChanged += (id, st) => ElementChanged?.Invoke(id, st);
+            _ov.OverlayMoved += OnOverlayMoved;
+            _ov.OverlayClosed += () => { InvalidateButtons(); OnOverlayMoved(); };
+            Controls.Add(_ov);
+            // es prepara el dibuix de l'overhead en segon pla, perquè obrir-lo sigui immediat
+            BeginInvoke(new Action(() => { if (_ov != null && !_ov.IsDisposed) _ov.EnsureBitmap(); }));
+        }
+
+        void ToggleOverlay()
+        {
+            CreateOverlay();
+            if (_ov == null) return;
+            if (OverlayOpen) _ov.BeginClose();
+            else _ov.OpenAtCut();
+            InvalidateButtons();
+        }
+
+        void InvalidateButtons() => Invalidate(Rectangle.Inflate(AllBtnsRect, 16, 16));
+
+        /// <summary>(capa) S'obre amb la línia de tall a la vora de dalt de la pantalla.</summary>
+        void OpenAtCut()
+        {
+            _closing = false;
+            if (!EnsureBitmap()) return;
+            _scrollY = MaxScroll;
+            UpdateOverlayRegion();
+            Visible = true;
+            BringToFront();
+            Invalidate();
+            OverlayMoved?.Invoke();
+        }
+
+        bool _opening;                      // (capa) animació d'obertura en curs (baixa des de dalt)
+        bool _edgeStart;                    // (panell principal) el gest ha començat a la vora de dalt
+        int EdgePx => Math.Max(6, Height / 60);   // franja sensible a dalt de la pantalla (36 px a 4K)
+
+        /// <summary>(capa) Baixa des de dalt de la pantalla, animada, fins a la línia de tall.</summary>
+        void OpenAnimated()
+        {
+            if (!EnsureBitmap()) return;
+            _closing = false;
+            _opening = true;
+            _flingV = 0; _hasPendingScroll = false; _down = false; _dragging = false;
+            _scrollY = (int)Math.Ceiling(LH * _s);    // tot l'overhead per sobre de la pantalla
+            UpdateOverlayRegion();
+            Visible = true;
+            BringToFront();
+            Invalidate();
+            StartAnim();
+        }
+
+        /// <summary>(panell principal) Obre l'overhead amb l'animació de baixada (lliscament des de dalt).</summary>
+        void OpenOverlayAnimated()
+        {
+            CreateOverlay();
+            if (_ov == null || OverlayOpen) return;
+            _ov.OpenAnimated();
+            InvalidateButtons();
+        }
+
+        /// <summary>(capa) Marxa cap amunt animada i s'amaga.</summary>
+        void BeginClose()
+        {
+            if (_closing) return;
+            _closing = true;
+            _flingV = 0; _hasPendingScroll = false; _down = false; _dragging = false;
+            StartAnim();
+        }
+
+        void FinishClose()
+        {
+            _closing = false;
+            Visible = false;
+            OverlayClosed?.Invoke();
+        }
+
+        /// <summary>(capa) Contorn de l'overhead en coordenades de pantalla.</summary>
+        PointF[]? ScreenFrame()
+        {
+            if (_bmp == null) return null;
+            return FramePoly.Select(p => new PointF(_offX + p.X * _s, -_scrollY + p.Y * _s)).ToArray();
+        }
+
+        int OverlayBottom => (int)Math.Ceiling(-_scrollY + LH * _s);
+
+        /// <summary>(capa) Retalla la finestra a la forma de l'overhead (fora d'ella es veu el panell principal).</summary>
+        void UpdateOverlayRegion()
+        {
+            var frame = ScreenFrame();
+            if (frame == null) return;
+            using var path = new GraphicsPath();
+            path.AddPolygon(frame);
+            var rg = new Region(path);
+            rg.Intersect(ClientRectangle);
+            if (Parent is A320OverheadControl main) rg.Exclude(Rectangle.Inflate(main.AllBtnsRect, 12, 12));
+            var old = Region;
+            Region = rg;
+            old?.Dispose();
+            OverlayMoved?.Invoke();
+        }
+
+        // Ombra de l'overhead: franges estretes sota les 3 vores de baix (diagonal dreta, base, diagonal esquerra).
+        // Només es dibuixen i es repinten aquestes franges (abans es repintava tota l'amplada i era molt lent).
+        static readonly byte[] ShadowAlpha = { 70, 46, 28, 14 };
+        const int ShadowBand = 7;
+        int ShadowDepth => ShadowAlpha.Length * ShadowBand;
+        PointF[][]? _shadowEdges;   // (panell principal) vores de l'última ombra dibuixada
+
+        /// <summary>(capa) Les 3 vores de baix de l'overhead en coordenades de pantalla.</summary>
+        PointF[][]? BottomEdges()
+        {
+            var f = ScreenFrame();
+            if (f == null) return null;
+            // FramePoly: 0..1 dalt, 2 dreta-diagonal, 3-4 base, 5 esquerra-diagonal
+            return new[] { new[] { f[2], f[3] }, new[] { f[3], f[4] }, new[] { f[4], f[5] } };
+        }
+
+        static Region ShadowRegion(PointF[][] edges, int depth)
+        {
+            using var path = new GraphicsPath();
+            foreach (var e in edges)
+                path.AddPolygon(new[] { new PointF(e[0].X, e[0].Y - 2), new PointF(e[1].X, e[1].Y - 2), new PointF(e[1].X, e[1].Y + depth + 2), new PointF(e[0].X, e[0].Y + depth + 2) });
+            return new Region(path);
+        }
+
+        /// <summary>(panell principal) La capa s'ha mogut: es repinten només les franges de l'ombra (vella i nova).</summary>
+        void OnOverlayMoved()
+        {
+            if (_ov == null) return;
+            var nw = _ov.Visible ? _ov.BottomEdges() : null;
+            if (_shadowEdges != null) using (var r = ShadowRegion(_shadowEdges, ShadowDepth)) Invalidate(r);
+            if (nw != null) using (var r = ShadowRegion(nw, ShadowDepth)) Invalidate(r);
+            _shadowEdges = nw;
+        }
+
+        /// <summary>(panell principal) Ombra de l'overhead sobre el panell, sota les seves vores (sense suavitzat: ràpid).</summary>
+        void DrawOverlayShadow(Graphics g, Rectangle r, Point origin)
+        {
+            if (_ov == null || !_ov.Visible) return;
+            var edges = _ov.BottomEdges();
+            if (edges == null) return;
+            var st = g.Save();
+            g.TranslateTransform(-origin.X, -origin.Y);
+            g.SetClip(r);
+            g.SmoothingMode = SmoothingMode.None;
+            for (int i = 0; i < ShadowAlpha.Length; i++)
+            {
+                using var b = new SolidBrush(Color.FromArgb(ShadowAlpha[i], 0, 0, 0));
+                float y0 = i * ShadowBand, y1 = (i + 1) * ShadowBand;
+                foreach (var e in edges)
+                {
+                    var q = new[] { new PointF(e[0].X, e[0].Y + y0), new PointF(e[1].X, e[1].Y + y0), new PointF(e[1].X, e[1].Y + y1), new PointF(e[0].X, e[0].Y + y1) };
+                    float minY = Math.Min(q[0].Y, q[1].Y), maxY = Math.Max(q[2].Y, q[3].Y);
+                    if (maxY < r.Top || minY > r.Bottom) continue;
+                    g.FillPolygon(b, q);
+                }
+            }
+            g.Restore(st);
         }
 
         // ───────────────────────────────── API pública ─────────────────────────────────
@@ -1878,7 +2361,7 @@ namespace panelAIR1000
             _s = cw / LW;
             _contentH = (int)Math.Ceiling(CurLH * _s);
             _offX = (Width - cw) / 2;
-            _offY = Math.Max(0, Height - _contentH); // si hi cap sencer, queda enganxat a baix
+            _offY = _isOverlay ? 0 : Math.Max(0, Height - _contentH); // si hi cap sencer, queda enganxat a baix
             if (!CreateSurface(cw, _contentH, out _hDib, out _bmp, out _memDC, out _oldObj)) return false;
             ClampScroll();
             if (_openAtBottom) { _scrollY = MaxScroll; _openAtBottom = false; }
@@ -1886,7 +2369,9 @@ namespace panelAIR1000
             return true;
         }
 
-        int ContentWidth => Math.Max(1, (int)Math.Round(Width * _zoom / 100.0));
+        // el panell principal sempre al 100% (sense zoom); l'overhead segons _zoom
+        int EffZoom => _page == 1 ? 100 : _zoom;
+        int ContentWidth => Math.Max(1, (int)Math.Round(Width * EffZoom / 100.0));
 
         /// <summary>Crea una DIB de Windows (memòria compartida entre GDI+ per dibuixar i GDI per copiar a pantalla).</summary>
         static bool CreateSurface(int w, int h, out IntPtr hDib, out Bitmap? bmp, out IntPtr memDC, out IntPtr oldObj)
@@ -1962,8 +2447,8 @@ namespace panelAIR1000
             // mentre es calcula un zoom en segon pla, no es dibuixa res (s'apunta i es repinta en acabar)
             if (_bgRendering) { _bgDirty.Add(logical); return; }
             var px = Rectangle.FromLTRB(
-                (int)Math.Floor(logical.Left * _s) - 1, (int)Math.Floor(logical.Top * _s) - 1,
-                (int)Math.Ceiling(logical.Right * _s) + 1, (int)Math.Ceiling(logical.Bottom * _s) + 1);
+                (int)Math.Floor(logical.Left * _s) - 1, (int)Math.Floor((logical.Top - CurShift) * _s) - 1,
+                (int)Math.Ceiling(logical.Right * _s) + 1, (int)Math.Ceiling((logical.Bottom - CurShift) * _s) + 1);
             px.Intersect(new Rectangle(0, 0, _bmp.Width, _bmp.Height));
             if (px.Width <= 0 || px.Height <= 0) return;
             DrawContent(_bmp, _s, px, CancellationToken.None);
@@ -1973,7 +2458,8 @@ namespace panelAIR1000
         /// <summary>Dibuixa la zona px (píxels del bitmap) del panell a l'escala s. Pot córrer en segon pla.</summary>
         void DrawContent(Bitmap target, float s, Rectangle px, CancellationToken ct)
         {
-            var lr = RectangleF.FromLTRB(px.Left / s, px.Top / s, px.Right / s, px.Bottom / s);
+            float sh = CurShift;
+            var lr = RectangleF.FromLTRB(px.Left / s, px.Top / s + sh, px.Right / s, px.Bottom / s + sh);
             using var g = Graphics.FromImage(target);
             g.SetClip(px);
             g.FillRectangle(Brushes.Black, px);
@@ -1982,6 +2468,7 @@ namespace panelAIR1000
             g.PixelOffsetMode = PixelOffsetMode.Half;
             g.InterpolationMode = InterpolationMode.HighQualityBilinear;
             g.ScaleTransform(s, s);
+            g.TranslateTransform(0, -sh);
             Oh.PixelScale = s;
             DrawFrame(g);
             foreach (var si in _silk)
@@ -2006,13 +2493,13 @@ namespace panelAIR1000
         /// central fins a baix i la zona dels genolls a l'esquerra (coordenades lògiques).</summary>
         static readonly PointF[] MainFramePoly =
         {
-            new(7, 119), new(681, 9), new(1241, 9), new(1241, 740), new(519, 740), new(519, 656), new(7, 656)
+            new(7, 124.5f), new(681, 14.5f), new(1241, 14.5f), new(1241, 740), new(519, 740), new(519, 656), new(7, 656)
         };
 
         /// <summary>Llum global del cockpit: una mica més clar a dalt, més fosc a baix i a les vores laterals.</summary>
         void DrawLighting(Graphics g)
         {
-            var full = new RectangleF(0, 0, LW, CurLH);
+            var full = new RectangleF(0, CurShift, LW, CurLH);
             var FramePoly = CurFrame;
             using (var v = new LinearGradientBrush(full, Color.Black, Color.Black, 90f)
             {
@@ -2034,7 +2521,7 @@ namespace panelAIR1000
 
         void DrawFrame(Graphics g)
         {
-            using var b = new LinearGradientBrush(new RectangleF(0, 0, LW, CurLH), Color.FromArgb(82, 110, 134), Oh.Frame, 90f);
+            using var b = new LinearGradientBrush(new RectangleF(0, CurShift, LW, CurLH), Oh.T(88, 108, 126, 82, 110, 134), Oh.Frame, 90f);
             g.FillPolygon(b, CurFrame);
         }
 
@@ -2042,11 +2529,13 @@ namespace panelAIR1000
         {
             var g = e.Graphics;
             if (!EnsureBitmap()) { g.Clear(Color.Black); return; }
+            if (!_isOverlay && _ov == null) BeginInvoke(new Action(CreateOverlay));
             var clip = e.ClipRectangle;
 
-            // La zona dels botons + / − es compon fora de pantalla (panell + botons) i es copia d'un sol cop:
-            // així no es veu mai el panell sense els botons a sobre (sense pampallugues en desplaçar).
-            var btnArea = Rectangle.Inflate(AllBtnsRect, 4, 4);
+            // La zona dels botons es compon fora de pantalla (panell + botons) i es copia d'un sol cop:
+            // així no es veu mai el panell sense els botons a sobre (sense pampallugues). La capa overhead
+            // no en dibuixa (els botons són del panell principal i la capa hi deixa un forat).
+            var btnArea = _isOverlay ? Rectangle.Empty : Rectangle.Inflate(AllBtnsRect, 14, 14);
             var ov = Rectangle.Intersect(clip, btnArea);
 
             // 1) tot el que no és la zona dels botons, directament a pantalla
@@ -2093,10 +2582,13 @@ namespace panelAIR1000
                 finally { g.ReleaseHdc(hdc); }
             }
             // franges negres fora del panell (laterals en reduir el zoom, i a dalt si hi cap sencer)
-            using var outside = new Region(r);
-            outside.Exclude(content);
-            outside.Translate(-origin.X, -origin.Y);
-            g.FillRegion(Brushes.Black, outside);
+            using (var outside = new Region(r))
+            {
+                outside.Exclude(content);
+                outside.Translate(-origin.X, -origin.Y);
+                g.FillRegion(Brushes.Black, outside);
+            }
+            if (!_isOverlay) DrawOverlayShadow(g, r, origin);
         }
 
         /// <summary>El rectangle a menys el rectangle b, en fins a 4 rectangles.</summary>
@@ -2111,13 +2603,16 @@ namespace panelAIR1000
 
         // ─────────────────────────── Zoom i botons + / − ───────────────────────────
 
-        int MaxScroll => Math.Max(0, _contentH - Height);
-        int ZoomBtnSize => Math.Max(48, Width / 34);
-        Point DefaultMinusPos => new(Width - ZoomBtnSize - 40, Height - ZoomBtnSize - 40);
-        Point DefaultPlusPos => new(Width - ZoomBtnSize - 40, Height - ZoomBtnSize * 2 - 56);
+        // panell principal: no es desplaça; capa overhead: de "tot desplegat" (0) fins al topall de la línia de tall
+        int MaxScroll => _page == 1 ? 0 : _isOverlay ? (int)Math.Round(OverheadCutY * _s) : Math.Max(0, _contentH - Height);
+        int ZoomBtnSize => Math.Max(40, (int)(80 * Width / 3840f));
+        // columna de botons sota l'indicador de pressió de frens (panell principal 4K)
+        Point BtnPos(float x, float y) => new((int)(x * Width / 3840f), (int)(y * Width / 3840f));
+        Point DefaultMinusPos => BtnPos(3646, 1988);
+        Point DefaultPlusPos => BtnPos(3646, 1894);
         Rectangle PlusRect => new(PlusLocation ?? DefaultPlusPos, new Size(ZoomBtnSize, ZoomBtnSize));
         Rectangle MinusRect => new(MinusLocation ?? DefaultMinusPos, new Size(ZoomBtnSize, ZoomBtnSize));
-        Point DefaultPagePos => new(Width - ZoomBtnSize - 40, Height - ZoomBtnSize * 3 - 72);
+        Point DefaultPagePos => BtnPos(3646, 1800);
         Rectangle PageRect => new(PageLocation ?? DefaultPagePos, new Size(ZoomBtnSize, ZoomBtnSize));
         Rectangle BtnRect(int b) => b == 1 ? PlusRect : b == 2 ? MinusRect : PageRect;
         Rectangle AllBtnsRect => Rectangle.Union(Rectangle.Union(PlusRect, MinusRect), PageRect);
@@ -2144,17 +2639,17 @@ namespace panelAIR1000
             var cur = _pages[_page];
             cur.ScrollY = _scrollY;
             cur.Bmp = _bmp; cur.HDib = _hDib; cur.MemDC = _memDC; cur.OldObj = _oldObj;
-            cur.ContentH = _contentH; cur.S = _s; cur.Zoom = _zoom;
+            cur.ContentH = _contentH; cur.S = _s; cur.Zoom = EffZoom;
             _bmp = null; _hDib = _memDC = _oldObj = IntPtr.Zero;
 
             _page = 1 - _page;
             var nxt = _pages[_page];
-            if (nxt.Bmp != null && nxt.Zoom == _zoom && nxt.Bmp.Width == ContentWidth)
+            if (nxt.Bmp != null && nxt.Zoom == EffZoom && nxt.Bmp.Width == ContentWidth)
             {
                 _bmp = nxt.Bmp; _hDib = nxt.HDib; _memDC = nxt.MemDC; _oldObj = nxt.OldObj;
                 _contentH = nxt.ContentH; _s = nxt.S;
                 _offX = (Width - _bmp.Width) / 2;
-                _offY = Math.Max(0, Height - _contentH);
+                _offY = _isOverlay ? 0 : Math.Max(0, Height - _contentH);
             }
             else FreeSurface(nxt.Bmp, nxt.MemDC, nxt.OldObj, nxt.HDib);
             nxt.Bmp = null; nxt.HDib = nxt.MemDC = nxt.OldObj = IntPtr.Zero;
@@ -2183,6 +2678,7 @@ namespace panelAIR1000
         {
             percent = Math.Clamp(percent, MinZoom, MaxZoom);
             if (percent == _zoom) return;
+            if (_page == 1) return;   // el panell principal no té zoom
             float frac = MaxScroll > 0 ? (float)_scrollY / MaxScroll : 1f; // es manté el punt relatiu
             _zoom = percent;
             if (_bmp == null) { Invalidate(); return; }   // no visible: es construirà en mostrar-se
@@ -2205,10 +2701,11 @@ namespace panelAIR1000
             _s = cw / LW;
             _contentH = ch;
             _offX = (Width - cw) / 2;
-            _offY = Math.Max(0, Height - _contentH);
+            _offY = _isOverlay ? 0 : Math.Max(0, Height - _contentH);
             _scrollY = (int)Math.Round(frac * MaxScroll);
             ClampScroll();
             Invalidate();
+            if (_isOverlay) UpdateOverlayRegion();
 
             // 2) render exacte en segon pla, a una superfície a part
             if (!CreateSurface(cw, ch, out var rH, out var rB, out var rDC, out var rOld)) return;
@@ -2244,23 +2741,55 @@ namespace panelAIR1000
             }, CancellationToken.None, TaskContinuationOptions.None, TaskScheduler.FromCurrentSynchronizationContext());
         }
 
+        /// <summary>Homogeneïtat de la textura (0 = granelluda, 1 = molt fina). Redibuixa els dos panells (provisional).</summary>
+        public void SetTexture(float t)
+        {
+            t = Math.Clamp(t, 0f, 1f);
+            if (Math.Abs(Oh.Texture - t) < 0.001f) return;
+            int keepScroll = _scrollY;
+            ReleaseCache();              // primer s'atura qualsevol render en segon pla que faci servir el gra
+            Oh.Texture = t;
+            Oh.RebuildGrain();
+            if (EnsureBitmap()) { _scrollY = keepScroll; ClampScroll(); }
+            Invalidate();
+        }
+
         /// <summary>La propera vegada que es mostri, el panell apareix amb la vora de baix a baix de la pantalla.</summary>
         public void OpenAtBottom()
         {
-            if (_page != 0) { _pages[0].ScrollY = int.MaxValue; _pages[0].Visited = true; return; }
+            // panell principal: en entrar al mode A320 es comença només amb el main (overhead tancat)
+            if (!_isOverlay && _page == 1)
+            {
+                if (_ov != null && _ov.Visible) { _ov._closing = false; _ov.Visible = false; }
+                InvalidateButtons();
+                return;
+            }
             _openAtBottom = true;
             if (_bmp != null) { _scrollY = MaxScroll; _openAtBottom = false; Invalidate(); }
         }
 
         void DrawZoomButtons(Graphics g, Rectangle clip)
         {
+            if (_isOverlay) return;
             var oldMode = g.SmoothingMode;
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            bool open = OverlayOpen;
+            int z = _ov?._zoom ?? 100;
+            // amb l'overhead obert, OVHD, + i − van dins un mateix marc: el zoom és només de l'overhead
+            if (open)
+            {
+                var grp = Rectangle.Inflate(AllBtnsRect, 9, 9);
+                using var gp = Oh.RoundRect(grp, ZoomBtnSize * 0.24f);
+                using (var gb = new SolidBrush(Color.FromArgb(70, 0, 0, 0))) g.FillPath(gb, gp);
+                using var pe = new Pen(Color.FromArgb(120, 255, 255, 255), Math.Max(1.5f, ZoomBtnSize / 40f)) { DashPattern = new[] { 3f, 2f } };
+                g.DrawPath(pe, gp);
+            }
             foreach (var (r, plus) in new[] { (PlusRect, true), (MinusRect, false) })
             {
+                if (!open) continue;
                 if (!r.IntersectsWith(clip)) continue;
                 bool pressed = _btnPressed == (plus ? 1 : 2);
-                bool enabled = plus ? _zoom < MaxZoom : _zoom > MinZoom;
+                bool enabled = plus ? z < MaxZoom : z > MinZoom;
                 using (var path = Oh.RoundRect(r, r.Width * 0.18f))
                 {
                     using (var b = new SolidBrush(Color.FromArgb(pressed ? 170 : 110, 0, 0, 0))) g.FillPath(b, path);
@@ -2287,13 +2816,13 @@ namespace panelAIR1000
                 using var tb = new SolidBrush(Color.FromArgb(230, 255, 255, 255));
                 var oldHint = g.TextRenderingHint;
                 g.TextRenderingHint = TextRenderingHint.AntiAlias;
-                g.DrawString(_page == 0 ? "MAIN" : "OVHD", f, tb, pr.X + pr.Width / 2f, pr.Y + pr.Height / 2f, Oh.Center);
+                g.DrawString("OVHD", f, tb, pr.X + pr.Width / 2f, pr.Y + pr.Height / 2f, Oh.Center);
                 g.TextRenderingHint = oldHint;
             }
             g.SmoothingMode = oldMode;
         }
 
-        int ZoomButtonAt(Point p) => PlusRect.Contains(p) ? 1 : MinusRect.Contains(p) ? 2 : PageRect.Contains(p) ? 3 : 0;
+        int ZoomButtonAt(Point p) => _isOverlay ? 0 : PageRect.Contains(p) ? 3 : !OverlayOpen ? 0 : PlusRect.Contains(p) ? 1 : MinusRect.Contains(p) ? 2 : 0;
 
         Rectangle ScrollBarRect()
         {
@@ -2321,6 +2850,25 @@ namespace panelAIR1000
 
             // Desplaçament amb el dit: com a màxim un cop per fotograma, amb l'última posició rebuda
             if (_hasPendingScroll) { _hasPendingScroll = false; ScrollTo(_pendingScroll); }
+
+            // (capa overhead) obertura: baixa des de dalt fins que la línia de tall arriba a la vora superior
+            if (_opening)
+            {
+                int target = MaxScroll;
+                int step = Math.Max(4, (int)(dt * Math.Max(Height * 1.0f, (_scrollY - target) / 0.30f)));
+                int ny = Math.Max(target, _scrollY - step);
+                ScrollTo(ny);
+                if (ny <= target) { _opening = false; ClampScroll(); }
+            }
+
+            // (capa overhead) tancament: puja accelerant fins que surt per dalt i s'amaga
+            if (_closing)
+            {
+                // velocitat: des del topall surt en ~0,3 s; si estava desplegat, una mica més
+                int step = Math.Max(4, (int)(dt * Math.Max(Height * 1.0f, OverlayBottom / 0.35f)));
+                ScrollTo(_scrollY + step);
+                if (OverlayBottom <= 0) FinishClose();
+            }
 
             foreach (var el in _animating.ToArray())
             {
@@ -2357,11 +2905,11 @@ namespace panelAIR1000
                 Invalidate(new Rectangle(Width - Math.Max(6, Width / 320) - 6, 0, Math.Max(6, Width / 320) + 6, Height));
             }
 
-            if (_animating.Count == 0 && _tests.Count == 0 && _flingV == 0 && !barPending && !_hasPendingScroll && !_down)
+            if (_animating.Count == 0 && _tests.Count == 0 && _flingV == 0 && !barPending && !_hasPendingScroll && !_down && !_closing && !_opening)
                 _anim.Stop();
         }
 
-        void ClampScroll() => _scrollY = Math.Clamp(_scrollY, 0, MaxScroll);
+        void ClampScroll() { if (!_closing && !_opening) _scrollY = Math.Clamp(_scrollY, 0, MaxScroll); }
 
         void ScrollTo(int y)
         {
@@ -2384,10 +2932,12 @@ namespace panelAIR1000
                 // deixat la còpia desplaçada (si no, queden rastres repetits en arrossegar).
                 // Es repinta tota la franja vertical de cada botó (de dalt a baix): qualsevol còpia
                 // desplaçada, d'aquest pas o d'un d'anterior, queda esborrada.
-                foreach (var zr in new[] { PlusRect, MinusRect, PageRect })
-                    Invalidate(new Rectangle(zr.X - 3, 0, zr.Width + 6, Height));
+                if (!_isOverlay)
+                    foreach (var zr in new[] { PlusRect, MinusRect, PageRect })
+                        Invalidate(new Rectangle(zr.X - 3, 0, zr.Width + 6, Height));
             }
             else Invalidate();
+            if (_isOverlay) UpdateOverlayRegion();
             Update();
         }
 
@@ -2423,8 +2973,13 @@ namespace panelAIR1000
                 else { _btnPressed = zb; Invalidate(BtnRect(zb)); }
                 return;
             }
+            if (_closing || _opening) return;
+            // (panell principal) gest des de la vora de dalt amb l'overhead tancat: obrirà l'overhead
+            _edgeStart = !_isOverlay && !OverlayOpen && e.Y <= EdgePx;
             _down = true; _dragging = false; _flingV = 0; _velY = 0;
             _downPt = e.Location; _downScroll = _scrollY;
+            // (capa) si el gest comença amb l'overhead al topall, arrossegar amunt el tanca
+            _startAtCut = _isOverlay && _scrollY >= MaxScroll - 1;
             _lastMoveY = e.Y; _lastMoveT = _clock.Elapsed.TotalSeconds;
         }
 
@@ -2443,6 +2998,8 @@ namespace panelAIR1000
             int dy = e.Y - _downPt.Y;
             if (!_dragging && Math.Abs(dy) > Math.Max(10, Width / 200)) _dragging = true;
             if (!_dragging) return;
+            if (_isOverlay && _startAtCut && dy < 0) { BeginClose(); return; }
+            if (_edgeStart && dy > 0) { _edgeStart = false; _down = false; _dragging = false; OpenOverlayAnimated(); return; }
             double t = _clock.Elapsed.TotalSeconds;
             double ddt = t - _lastMoveT;
             if (ddt > 0.001)
@@ -2467,8 +3024,8 @@ namespace panelAIR1000
                 Invalidate(PlusRect); Invalidate(MinusRect); Invalidate(PageRect);
                 if (ZoomButtonAt(e.Location) == b)
                 {
-                    if (b == 3) TogglePage();
-                    else SetZoom(_zoom + (b == 1 ? 10 : -10));
+                    if (b == 3) ToggleOverlay();
+                    else if (_ov != null) { _ov.SetZoom(_ov._zoom + (b == 1 ? 10 : -10)); InvalidateButtons(); }
                 }
                 return;
             }
@@ -2492,7 +3049,7 @@ namespace panelAIR1000
         void TapAt(Point pt)
         {
             if (!EnsureBitmap()) return;
-            var p = new PointF((pt.X - _offX) / _s, (pt.Y - _offY + _scrollY) / _s);
+            var p = new PointF((pt.X - _offX) / _s, (pt.Y - _offY + _scrollY) / _s + CurShift);
             for (int i = _els.Count - 1; i >= 0; i--)
                 if (_els[i].HitTest(p)) { _els[i].Tap(p); return; }
         }
@@ -2500,8 +3057,9 @@ namespace panelAIR1000
         protected override void OnResize(EventArgs e)
         {
             base.OnResize(e);
-            if (_bmp != null && _bmp.Width != Math.Max(1, (int)Math.Round(Width * _zoom / 100.0))) ReleaseCache();
-            _offY = Math.Max(0, Height - _contentH);
+            if (_ov != null) _ov.Bounds = ClientRectangle;
+            if (_bmp != null && _bmp.Width != ContentWidth) ReleaseCache();
+            _offY = _isOverlay ? 0 : Math.Max(0, Height - _contentH);
             ClampScroll();
             Invalidate();
         }
@@ -2509,7 +3067,10 @@ namespace panelAIR1000
         protected override void OnVisibleChanged(EventArgs e)
         {
             base.OnVisibleChanged(e);
-            if (!Visible) ReleaseCache();
+            // la capa overhead conserva el dibuix en amagar-se (tornar-la a obrir és immediat); el panell principal,
+            // en sortir del mode A320, allibera el seu i el de la capa
+            if (!Visible && !_isOverlay) { ReleaseCache(); _ov?.ReleaseCache(); }
+            if (_isOverlay && Visible) UpdateOverlayRegion();
         }
 
         protected override void Dispose(bool disposing)
@@ -2616,6 +3177,7 @@ namespace panelAIR1000
             // pàgina 1: panell principal
             _page = 1;
             _pages[1].LH = MainLH;
+            _pages[1].Shift = MainTopCut;
             _pages[1].Frame = MainFramePoly;
             _ls = 1f;
             BuildMain();
@@ -3001,11 +3563,16 @@ namespace panelAIR1000
 
             // ── Glareshield ──
             // vora superior fosca inclinada
-            _silk.Add(new OhPoly(new[] { Pt(12, 190), Pt(1090, 14), Pt(1985, 14), Pt(1985, 42), Pt(1092, 42), Pt(12, 218) },
-                                 Color.FromArgb(70, 76, 84), Color.FromArgb(30, 34, 38), true));
+            // visera de pell negra: 70% del gruix d'abans (28 → 19,6), mantenint la vora de baix al mateix lloc
+            _silk.Add(new OhVisor(new[] { Pt(12, 190 + 8.4f), Pt(1090, 14 + 8.4f), Pt(1985, 14 + 8.4f) }, 19.6f * k));
             // planxa esquerra (inclinada a dalt)
-            _silk.Add(new OhPanel(new[] { Pt(15, 222), Pt(882, 80), Pt(882, 288), Pt(15, 288) },
-                                  new[] { Pt(30, 222), Pt(868, 92), Pt(30, 276), Pt(868, 276) }));
+            // vora de dalt: la mateixa línia que l'EFIS (vora de baix de la visera + 10)
+            {
+                const float slope = 176f / 1078f;
+                float yA = 218f - (15f - 12f) * slope + 10f, yB = 218f - (882f - 12f) * slope + 10f;
+                _silk.Add(new OhPanel(new[] { Pt(15, yA), Pt(882, yB), Pt(882, 288), Pt(15, 288) },
+                                      new[] { Pt(30, yA + 22), Pt(868, yB + 34), Pt(30, 276), Pt(868, 276) }));
+            }
             Pb("MIP_AUTO_LAND", 175, 237, 50, 46, "AUTO", "LAND", true).UpperColor = Oh.Red;
             ((OhPushButton)_byId["MIP_AUTO_LAND"]).LowerColor = Oh.Red;
             var mw = Pb("MIP_MASTER_WARN", 580, 160, 50, 46, "MASTER", "WARN", true); mw.UpperColor = Oh.Red; mw.LowerColor = Oh.Red;
@@ -3015,8 +3582,14 @@ namespace panelAIR1000
             Lb("SIDE STICK PRIORITY", 812, 200);
             var ssp = Pb("MIP_SIDESTICK_PRIORITY", 813, 238, 46, 40, "→", "CAPT"); ssp.LowerColor = Oh.Green; ssp.UpperColor = Oh.White;
 
-            // panell EFIS
-            Panel(890 * k, 52 * k, (1296 - 890) * k, (288 - 52) * k);
+            // panell EFIS: la vora de dalt segueix la rampa de la visera fins al seu punt d'inflexió (x=1090) i
+            // després és horitzontal (mateixa separació de 10 que al tram pla)
+            {
+                const float slope = 176f / 1078f;                    // pendent de la vora de baix de la visera
+                float yL = 218f - (890f - 12f) * slope + 10f;          // alçada de la vora a x = 890
+                _silk.Add(new OhPanel(new[] { Pt(890, yL), Pt(1090, 52), Pt(1296, 52), Pt(1296, 288), Pt(890, 288) },
+                                      new[] { Pt(903, yL + 34), Pt(1283, 84), Pt(903, 268), Pt(1283, 268) }));
+            }
             Lb("QNH", 958, 110);
             _silk.Add(new OhDarkWindow(R(921, 120, 994, 150)));
             Lb("in Hg", 928, 168, 8.15f); Lb("h Pa", 990, 168, 8.15f);
@@ -3070,7 +3643,7 @@ namespace panelAIR1000
 
             // llavi inferior del glareshield amb les sortides d'aire
             _silk.Add(new OhPoly(new[] { Pt(12, 294), Pt(1985, 294), Pt(1985, 332), Pt(12, 332) },
-                                 Color.FromArgb(74, 94, 112), Color.FromArgb(30, 40, 50), true));
+                                 Oh.T(78, 88, 98, 74, 94, 112), Oh.T(34, 40, 46, 30, 40, 50), true));
             foreach (float vx in new float[] { 842, 1408, 1876 }) _silk.Add(new OhVent(vx * k, 314 * k, 28, 10));
 
             // ── Panell principal ──
@@ -3082,11 +3655,11 @@ namespace panelAIR1000
                                   new[] { Pt(894, 352), Pt(1968, 352), Pt(894, 1164), Pt(1968, 1164) }));
 
             // pantalles (en negre)
-            _silk.Add(new OhScreen(R(24, 372, 428, 772), R(38, 388, 414, 756), 4f, true));      // PFD
-            _silk.Add(new OhScreen(R(454, 372, 868, 772), R(470, 388, 852, 756), 4f, true));    // ND
-            _silk.Add(new OhBlock(R(520, 776, 812, 796), Color.FromArgb(116, 142, 164), Color.FromArgb(66, 88, 106), 3f));
-            _silk.Add(new OhScreen(R(1254, 344, 1686, 736), R(1280, 362, 1660, 728), 4f, true));  // ECAM superior
-            _silk.Add(new OhScreen(R(1254, 744, 1686, 1136), R(1282, 758, 1660, 1128), 4f, true)); // ECAM inferior
+            _silk.Add(new OhBezel(R(24, 372, 428, 772), R(38, 388, 414, 756)));      // PFD
+            _silk.Add(new OhBezel(R(454, 372, 868, 772), R(470, 388, 852, 756)));    // ND
+            _silk.Add(new OhBlock(R(520, 776, 812, 796), Oh.T(120, 132, 144, 116, 142, 164), Oh.T(70, 80, 90, 66, 88, 106), 3f));
+            _silk.Add(new OhBezel(R(1254, 344, 1686, 736), R(1280, 362, 1660, 728)));  // ECAM superior
+            _silk.Add(new OhBezel(R(1254, 744, 1686, 1136), R(1282, 758, 1660, 1128))); // ECAM inferior
 
             // zona dels genolls (fosca)
             _silk.Add(new OhBlock(R(15, 846, 660, 914), Color.FromArgb(70, 72, 76), Color.FromArgb(14, 14, 16), 12f));
@@ -3095,29 +3668,31 @@ namespace panelAIR1000
             Oh_BigScrews(new[] { Pt(676, 818), Pt(860, 948) });
 
             // TERR ON ND (capità)
-            Panel(890 * k, 655 * k, (1016 - 890) * k, (792 - 655) * k);
-            Lb("TERR ON ND", 945, 667);
-            Pb("MIP_TERR_ON_ND_1", 942, 698, 44, 40, "••", "ON");
+            // DCDU, tapa cega, TERR ON ND i ISIS pujats en bloc: la vora de baix del DCDU alineada amb la de l'ECAM inferior
+            const float Up = 40f;
+            Panel(890 * k, (655 - Up) * k, (1016 - 890) * k, (792 - 655) * k);
+            Lb("TERR ON ND", 945, 667 - Up);
+            Pb("MIP_TERR_ON_ND_1", 942, 698 - Up, 44, 40, "••", "ON");
 
             // ISIS (pantalla negra amb botons)
-            _silk.Add(new OhScreen(R(1030, 520, 1222, 714), R(1058, 548, 1196, 688), 12f, false));
-            Key("MIP_ISIS_BUGS", 1078 * k, 526 * k, 34 * k, 16 * k, "BUGS");
-            Key("MIP_ISIS_LS", 1144 * k, 526 * k, 30 * k, 16 * k, "LS");
-            Key("MIP_ISIS_PLUS", 1034 * k, 578 * k, 18 * k, 24 * k, "+");
-            Key("MIP_ISIS_MINUS", 1034 * k, 640 * k, 18 * k, 24 * k, "-");
-            Key("MIP_ISIS_ATT", 1052 * k, 694 * k, 30 * k, 15 * k, "ATT");
-            Key("MIP_ISIS_RST", 1088 * k, 694 * k, 30 * k, 15 * k, "RST");
-            Knob("MIP_ISIS_BARO", 1193 * k, 686 * k, 10f, 0, Enumerable.Range(0, 12).Select(i => i * 30f).ToArray(), KnobStyle.Round).Wrap = true;
+            _silk.Add(new OhScreen(R(1030, 520 - Up, 1222, 714 - Up), R(1058, 548 - Up, 1196, 688 - Up), 12f, false));
+            Key("MIP_ISIS_BUGS", 1078 * k, (526 - Up) * k, 34 * k, 16 * k, "BUGS");
+            Key("MIP_ISIS_LS", 1144 * k, (526 - Up) * k, 30 * k, 16 * k, "LS");
+            Key("MIP_ISIS_PLUS", 1034 * k, (578 - Up) * k, 18 * k, 24 * k, "+");
+            Key("MIP_ISIS_MINUS", 1034 * k, (640 - Up) * k, 18 * k, 24 * k, "-");
+            Key("MIP_ISIS_ATT", 1052 * k, (694 - Up) * k, 30 * k, 15 * k, "ATT");
+            Key("MIP_ISIS_RST", 1088 * k, (694 - Up) * k, 30 * k, 15 * k, "RST");
+            Knob("MIP_ISIS_BARO", 1193 * k, (686 - Up) * k, 10f, 0, Enumerable.Range(0, 12).Select(i => i * 30f).ToArray(), KnobStyle.Round).Wrap = true;
             // panell buit sota l'ISIS
-            _silk.Add(new OhPanel(new[] { Pt(1036, 730), Pt(1228, 730), Pt(1228, 970), Pt(1036, 970) },
-                                  new[] { Pt(1048, 744), Pt(1216, 744), Pt(1048, 956), Pt(1216, 956) }));
+            _silk.Add(new OhPanel(new[] { Pt(1036, 730 - Up), Pt(1228, 730 - Up), Pt(1228, 970 - Up), Pt(1036, 970 - Up) },
+                                  new[] { Pt(1048, 744 - Up), Pt(1216, 744 - Up), Pt(1048, 956 - Up), Pt(1216, 956 - Up) }));
 
             // DCDU (pantalla negra amb tecles laterals)
-            _silk.Add(new OhScreen(R(880, 996, 1206, 1176), R(930, 1016, 1156, 1152), 6f, true));
+            _silk.Add(new OhScreen(R(880, 996 - Up, 1206, 1176 - Up), R(930, 1016 - Up, 1156, 1152 - Up), 6f, true));
             string[] dl = { "BRT", "DIM", "MSG-", "MSG+", "", "" };
             string[] dr = { "PRINT", "PGE-", "PGE+", "", "" };
-            for (int i = 0; i < dl.Length; i++) Key("MIP_DCDU_L" + i, 890 * k, (1016 + i * 22) * k, 28 * k, 15 * k, dl[i]).Momentary = true;
-            for (int i = 0; i < dr.Length; i++) Key("MIP_DCDU_R" + i, 1166 * k, (1032 + i * 22) * k, 30 * k, 15 * k, dr[i]).Momentary = true;
+            for (int i = 0; i < dl.Length; i++) Key("MIP_DCDU_L" + i, 890 * k, (1016 - Up + i * 22) * k, 28 * k, 15 * k, dl[i]).Momentary = true;
+            for (int i = 0; i < dr.Length; i++) Key("MIP_DCDU_R" + i, 1166 * k, (1032 - Up + i * 22) * k, 30 * k, 15 * k, dr[i]).Momentary = true;
 
             // LDG GEAR / BRK FAN / AUTO BRK / A-SKID
             Panel(1720 * k, 340 * k, (1976 - 1720) * k, (522 - 340) * k);

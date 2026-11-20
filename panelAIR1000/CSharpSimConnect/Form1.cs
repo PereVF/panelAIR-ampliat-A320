@@ -5860,12 +5860,34 @@ namespace SimConnect3
             else
             {
                 if (_a320Overhead != null) _a320Overhead.Visible = false; // allibera el bitmap (OnVisibleChanged)
+                if (_tintPanel != null) _tintPanel.Visible = false;
                 pbMain.Visible = true;
                 _thrQuadrantBtn.Visible = _g3000Active;
                 pbMain.Invalidate();
             }
             ApplyCurrentRegion();
             UpdateCockpitModeButtons();
+        }
+
+        // ── PROVISIONAL (2026-11-20, Pere): regulador d'homogeneïtat de la textura de la planxa A320 (overhead i main) ──
+        private Panel? _tintPanel;
+        private System.Windows.Forms.Timer? _tintTimer;
+
+        private void EnsureTintSlider()
+        {
+            if (_tintPanel != null) return;
+            var font = new Font("Segoe UI", 18f, FontStyle.Bold, GraphicsUnit.Pixel);
+            _tintPanel = new Panel { BackColor = Color.FromArgb(30, 34, 40), Size = new Size(560, 96) };
+            var lbl = new Label { AutoSize = false, Location = new Point(12, 6), Size = new Size(536, 28), Font = font, ForeColor = Color.White };
+            var tb = new TrackBar { Minimum = 0, Maximum = 100, Value = (int)Math.Round(panelAIR1000.Oh.Texture * 100), TickFrequency = 25, Location = new Point(8, 38), Size = new Size(544, 50), BackColor = _tintPanel.BackColor };
+            lbl.Text = $"TEXTURA: GRANELLUDA ◀▶ FINA   {tb.Value}";
+            _tintTimer = new System.Windows.Forms.Timer { Interval = 250 };
+            _tintTimer.Tick += (s, e) => { _tintTimer.Stop(); _a320Overhead?.SetTexture(tb.Value / 100f); };
+            tb.ValueChanged += (s, e) => { lbl.Text = $"TEXTURA: GRANELLUDA ◀▶ FINA   {tb.Value}"; _tintTimer.Stop(); _tintTimer.Start(); };
+            _tintPanel.Controls.Add(lbl);
+            _tintPanel.Controls.Add(tb);
+            _tintPanel.Location = new Point(Math.Max(0, this.ClientSize.Width - _tintPanel.Width - 40), 40);
+            this.Controls.Add(_tintPanel);
         }
 
         private void SetG3000Active(bool active)
