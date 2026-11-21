@@ -53,11 +53,47 @@ namespace SimConnect3
             [("MIP_FCU_VS", "DEC")] = "sim/autopilot/vertical_speed_down",
             [("MIP_FCU_VS", "PUSH")] = "AirbusFBW/PushVSSel",
             [("MIP_FCU_VS", "PULL")] = "AirbusFBW/PullVSSel",
+            // botons rodons del FCU / glareshield
+            [("MIP_FCU_SPD_MACH", "PUSH")] = "toliss_airbus/ias_mach_button_push",
+            [("MIP_FCU_HDGTRK_VSFPA", "PUSH")] = "toliss_airbus/hdgtrk_button_push",
+            [("MIP_FCU_METRIC_ALT", "PUSH")] = "toliss_airbus/metric_alt_button_push",
+            [("MIP_CHRONO", "PUSH")] = "AirbusFBW/CaptChronoButton",
+            // obrir / tancar la finestra del PFD del capità (si ja s'ha fet pop-out un cop en aquesta sessió, surt com a finestra de Windows)
+            [("XP_POPUP_PFD1", "PUSH")] = "AirbusFBW/PopUpPFD1",
+            [("XP_POPUP_ND1", "PUSH")] = "AirbusFBW/PopUpND1",
+            [("XP_POPUP_EWD", "PUSH")] = "AirbusFBW/PopUpEWD",
+            [("XP_POPUP_SD", "PUSH")] = "AirbusFBW/PopUpSD",
+            // tecles del FCU
+            [("MIP_FCU_AP1", "PUSH")] = "toliss_airbus/ap1_push",
+            [("MIP_FCU_AP2", "PUSH")] = "toliss_airbus/ap2_push",
+            [("MIP_FCU_ATHR", "PUSH")] = "AirbusFBW/ATHRbutton",
+            [("MIP_FCU_LOC", "PUSH")] = "AirbusFBW/LOCbutton",
+            [("MIP_FCU_APPR", "PUSH")] = "AirbusFBW/APPRbutton",
+            [("MIP_FCU_EXPED", "PUSH")] = "AirbusFBW/EXPEDbutton",
+            // tecles de l'EFIS del capità
+            [("MIP_EFIS_FD", "PUSH")] = "toliss_airbus/fd1_push",
+            [("MIP_EFIS_LS", "PUSH")] = "toliss_airbus/dispcommands/CaptLSButtonPush",
+            [("MIP_EFIS_CSTR", "PUSH")] = "toliss_airbus/dispcommands/CaptCstrPushButton",
+            [("MIP_EFIS_WPT", "PUSH")] = "toliss_airbus/dispcommands/CaptWptPushButton",
+            [("MIP_EFIS_VORD", "PUSH")] = "toliss_airbus/dispcommands/CaptVorDPushButton",
+            [("MIP_EFIS_NDB", "PUSH")] = "toliss_airbus/dispcommands/CaptNdbPushButton",
+            [("MIP_EFIS_ARPT", "PUSH")] = "toliss_airbus/dispcommands/CaptArptPushButton",
+            // glareshield, TERR ON ND, frens
+            [("MIP_MASTER_WARN", "PUSH")] = "sim/annunciator/clear_master_warning",
+            [("MIP_MASTER_CAUT", "PUSH")] = "sim/annunciator/clear_master_caution",
+            [("MIP_TERR_ON_ND_1", "PUSH")] = "toliss_airbus/dispcommands/TerrOnND1Toggle",
+            [("MIP_TERR_ON_ND_2", "PUSH")] = "toliss_airbus/dispcommands/TerrOnND2Toggle",
+            [("MIP_AUTOBRK_LO", "PUSH")] = "AirbusFBW/AbrkLo",
+            [("MIP_AUTOBRK_MED", "PUSH")] = "AirbusFBW/AbrkMed",
+            [("MIP_AUTOBRK_MAX", "PUSH")] = "AirbusFBW/AbrkMax",
+            [("MIP_BRK_FAN", "PUSH")] = "toliss_airbus/gear/brake_fan",
         };
         static readonly Dictionary<(string id, string cmd), (string dataref, double value)> WriteMap = new()
         {
             [("MIP_BARO", "INHG")] = ("AirbusFBW/BaroUnitCapt", 0),   // 0 = inHg
             [("MIP_BARO", "HPA")] = ("AirbusFBW/BaroUnitCapt", 1),    // 1 = hPa
+            [("MIP_FCU_ALT", "STEP100")] = ("AirbusFBW/ALT100_1000", 0),    // 0 = 100 (comprovat al ToLiss)
+            [("MIP_FCU_ALT", "STEP1000")] = ("AirbusFBW/ALT100_1000", 1),   // 1 = 1000
         };
         // datarefs que es llegeixen (estat que es mostra al panell)
         static readonly string[] ReadDatarefs =
@@ -71,7 +107,48 @@ namespace SimConnect3
             "sim/cockpit/autopilot/heading_mag", "AirbusFBW/HDGdashed", "AirbusFBW/HDGmanaged", "AirbusFBW/HDGTRKmode",
             "sim/cockpit/autopilot/altitude", "AirbusFBW/ALTmanaged",
             "sim/cockpit/autopilot/vertical_velocity", "sim/cockpit2/autopilot/fpa", "AirbusFBW/VSdashed",
+            "AirbusFBW/ALT100_1000",                                        // selector ALT 100 (0) / 1000 (1)
         };
+
+        /// <summary>Llums de tecles i polsadors: element del panell → dataref (encès si el valor arriba al llindar).</summary>
+        static readonly (string id, string dataref, double min)[] LightMap =
+        {
+            ("MIP_FCU_AP1", "AirbusFBW/AP1Engage", 0.5),
+            ("MIP_FCU_AP2", "AirbusFBW/AP2Engage", 0.5),
+            ("MIP_FCU_ATHR", "AirbusFBW/ATHRmode", 0.5),
+            ("MIP_FCU_LOC", "AirbusFBW/LOCilluminated", 0.5),
+            ("MIP_FCU_APPR", "AirbusFBW/APPRilluminated", 0.5),
+            ("MIP_FCU_EXPED", "AirbusFBW/APVerticalMode", 112),   // EXPED encès quan el mode vertical és 112 o més
+            ("MIP_EFIS_FD", "AirbusFBW/FD1Engage", 0.5),
+            ("MIP_EFIS_LS", "AirbusFBW/ILSonCapt", 0.5),
+            ("MIP_EFIS_CSTR", "AirbusFBW/NDShowCSTRCapt", 0.5),
+            ("MIP_EFIS_WPT", "AirbusFBW/NDShowWPTCapt", 0.5),
+            ("MIP_EFIS_VORD", "AirbusFBW/NDShowVORDCapt", 0.5),
+            ("MIP_EFIS_NDB", "AirbusFBW/NDShowNDBCapt", 0.5),
+            ("MIP_EFIS_ARPT", "AirbusFBW/NDShowARPTCapt", 0.5),
+            ("MIP_MASTER_WARN", "AirbusFBW/MasterWarn", 0.5),
+            ("MIP_MASTER_CAUT", "AirbusFBW/MasterCaut", 0.5),
+            ("MIP_TERR_ON_ND_1", "AirbusFBW/TerrainSelectedND1", 0.5),
+            ("MIP_TERR_ON_ND_2", "AirbusFBW/TerrainSelectedND2", 0.5),
+            ("MIP_AUTOBRK_LO", "AirbusFBW/ABrkLoButtonAnim", 0.5),
+            ("MIP_AUTOBRK_MED", "AirbusFBW/ABrkMedButtonAnim", 0.5),
+            ("MIP_AUTOBRK_MAX", "AirbusFBW/ABrkMaxButtonAnim", 0.5),
+            ("MIP_BRK_FAN", "AirbusFBW/BrakeFanSwitchAnim", 0.5),
+        };
+        /// <summary>Selectors amb posicions numerades: element del panell → dataref (mateixa numeració a tots dos costats).</summary>
+        static readonly (string id, string dataref)[] PosMap =
+        {
+            ("MIP_ND_MODE", "AirbusFBW/NDmodeCapt"),                         // 0 LS, 1 VOR, 2 NAV, 3 ARC, 4 PLAN
+            ("MIP_ND_RANGE", "AirbusFBW/NDrangeCapt"),                       // 0 = 10 NM … 5 = 320 NM
+            ("MIP_EFIS_ADFVOR1", "sim/cockpit2/EFIS/EFIS_1_selection_pilot"), // 0 ADF, 1 OFF, 2 VOR
+            ("MIP_EFIS_ADFVOR2", "sim/cockpit2/EFIS/EFIS_2_selection_pilot"),
+        };
+        static IEnumerable<string> AllReads()
+        {
+            foreach (var n in ReadDatarefs) yield return n;
+            foreach (var l in LightMap) yield return l.dataref;
+            foreach (var p in PosMap) yield return p.dataref;
+        }
 
         /// <summary>true = hi ha un ToLiss carregat a X-Plane i l'enllaç està connectat.</summary>
         public bool A320Loaded { get; private set; }
@@ -81,6 +158,12 @@ namespace SimConnect3
         public event Action<bool, int, double, bool>? BaroChanged;
         /// <summary>Pantalla del FCU (al fil de la interfície).</summary>
         public event Action<panelAIR1000.FcuState>? FcuChanged;
+        /// <summary>Selector 100 / 1000 de l'ALT: true = 1000 (al fil de la interfície).</summary>
+        public event Action<bool>? AltStepChanged;
+        /// <summary>Llum d'una tecla o polsador (id de l'element, encès) (al fil de la interfície).</summary>
+        public event Action<string, bool>? LightChanged;
+        /// <summary>Posició d'un selector (id de l'element, índex) (al fil de la interfície).</summary>
+        public event Action<string, int>? PositionChanged;
 
         readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(10) };   // X-Plane respon al ritme dels seus frames (pot trigar)
         readonly SemaphoreSlim _sendLock = new(1, 1);
@@ -94,6 +177,9 @@ namespace SimConnect3
         int _reqId;
         (bool, int, double, bool)? _lastBaro;
         panelAIR1000.FcuState? _lastFcu;
+        bool? _lastAltStep;
+        readonly Dictionary<string, bool> _lastLights = new();
+        readonly Dictionary<string, int> _lastPos = new();
 
         public void Start()
         {
@@ -131,9 +217,9 @@ namespace SimConnect3
         /// <summary>Una sessió amb el ToLiss carregat: resol IDs, se subscriu i escolta fins que es tanca o canvia l'avió.</summary>
         async Task SessionAsync(CancellationToken ct)
         {
-            _cmdIds.Clear(); _drIds.Clear(); _drNames.Clear(); _values.Clear(); _lastBaro = null; _lastFcu = null;
-            foreach (var name in ReadDatarefs)
-                if (await LookupId("datarefs", name, ct) is long id) { _drIds[name] = id; _drNames[id] = name; }
+            _cmdIds.Clear(); _drIds.Clear(); _drNames.Clear(); _values.Clear(); _lastBaro = null; _lastFcu = null; _lastAltStep = null; _lastLights.Clear(); _lastPos.Clear();
+            foreach (var name in AllReads())
+                if (!_drIds.ContainsKey(name) && await LookupId("datarefs", name, ct) is long id) { _drIds[name] = id; _drNames[id] = name; }
             foreach (var w in WriteMap.Values)
                 if (!_drIds.ContainsKey(w.dataref) && await LookupId("datarefs", w.dataref, ct) is long id) _drIds[w.dataref] = id;
             foreach (var c in CommandMap.Values)
@@ -145,7 +231,7 @@ namespace SimConnect3
             try
             {
                 var subs = new List<object>();
-                foreach (var name in ReadDatarefs) if (_drIds.TryGetValue(name, out var id)) subs.Add(new { id });
+                foreach (var id in _drNames.Keys) subs.Add(new { id });
                 if (subs.Count > 0) await SendAsync(new { req_id = NextReq(), type = "dataref_subscribe_values", @params = new { datarefs = subs } });
                 SetLoaded(true);
 
@@ -198,7 +284,7 @@ namespace SimConnect3
                 if (v.ValueKind == JsonValueKind.Array) { if (v.GetArrayLength() == 0) continue; v = v[0]; }
                 if (v.ValueKind == JsonValueKind.Number) lock (_values) _values[name] = v.GetDouble();
             }
-            lock (_values) { PublishBaro(); PublishFcu(); }
+            lock (_values) { PublishBaro(); PublishFcu(); PublishLights(); PublishPositions(); }
         }
 
         void PublishBaro()
@@ -227,9 +313,36 @@ namespace SimConnect3
                 V("sim/cockpit/autopilot/heading_mag"), B("AirbusFBW/HDGdashed"), B("AirbusFBW/HDGmanaged"), B("AirbusFBW/HDGTRKmode"),
                 V("sim/cockpit/autopilot/altitude"), B("AirbusFBW/ALTmanaged"),
                 V("sim/cockpit/autopilot/vertical_velocity"), V("sim/cockpit2/autopilot/fpa"), B("AirbusFBW/VSdashed"));
-            if (s == _lastFcu) return;
-            _lastFcu = s;
-            Post(() => FcuChanged?.Invoke(s));
+            if (s != _lastFcu) { _lastFcu = s; Post(() => FcuChanged?.Invoke(s)); }
+            if (_values.ContainsKey("AirbusFBW/ALT100_1000"))
+            {
+                bool k = B("AirbusFBW/ALT100_1000");
+                if (k != _lastAltStep) { _lastAltStep = k; Post(() => AltStepChanged?.Invoke(k)); }
+            }
+        }
+
+        void PublishLights()
+        {
+            foreach (var (id, dr, min) in LightMap)
+            {
+                if (!_values.TryGetValue(dr, out var v)) continue;
+                bool on = v >= min;
+                if (_lastLights.TryGetValue(id, out var was) && was == on) continue;
+                _lastLights[id] = on;
+                Post(() => LightChanged?.Invoke(id, on));
+            }
+        }
+
+        void PublishPositions()
+        {
+            foreach (var (id, dr) in PosMap)
+            {
+                if (!_values.TryGetValue(dr, out var v)) continue;
+                int idx = (int)Math.Round(v);
+                if (_lastPos.TryGetValue(id, out var was) && was == idx) continue;
+                _lastPos[id] = idx;
+                Post(() => PositionChanged?.Invoke(id, idx));
+            }
         }
 
         void SetLoaded(bool on)
@@ -244,6 +357,17 @@ namespace SimConnect3
         {
             if (!A320Loaded || _ws == null) return;
             if (id == "MIP_BARO" && (cmd == "INC" || cmd == "DEC") && TryBaroHpaStep(cmd == "INC" ? 1 : -1)) return;
+            // selectors: "POS:n" → escriure n al dataref del selector
+            if (cmd.StartsWith("POS:") && int.TryParse(cmd.AsSpan(4), out var pos))
+            {
+                foreach (var (pid, dr) in PosMap)
+                    if (pid == id && _drIds.TryGetValue(dr, out var pdid))
+                    {
+                        lock (_values) _lastPos[id] = pos;   // ja és on toca: no cal tornar-lo a moure quan arribi l'eco
+                        _ = SendAsync(new { req_id = NextReq(), type = "dataref_set_values", @params = new { datarefs = new[] { new { id = pdid, value = (double)pos } } } });
+                    }
+                return;
+            }
             object? req = null;
             if (CommandMap.TryGetValue((id, cmd), out var c) && _cmdIds.TryGetValue(c, out var cid))
                 req = new { req_id = NextReq(), type = "command_set_is_active", @params = new { commands = new[] { new { id = cid, is_active = true, duration = 0.0 } } } };
@@ -278,6 +402,15 @@ namespace SimConnect3
             return true;
         }
 
+        /// <summary>Com SendCommand, però espera (fins a <paramref name="ms"/>) que l'ordre hagi sortit (p.ex. en tancar l'app).</summary>
+        public void SendCommandAndWait(string id, string cmd, int ms = 1000)
+        {
+            if (!A320Loaded || _ws == null) return;
+            if (!CommandMap.TryGetValue((id, cmd), out var c) || !_cmdIds.TryGetValue(c, out var cid)) return;
+            try { SendAsync(new { req_id = NextReq(), type = "command_set_is_active", @params = new { commands = new[] { new { id = cid, is_active = true, duration = 0.0 } } } }).Wait(ms); }
+            catch { }
+        }
+
         int NextReq() => Interlocked.Increment(ref _reqId) & 0x7FFFFFFF;
 
         async Task SendAsync(object payload)
@@ -301,6 +434,64 @@ namespace SimConnect3
                 foreach (var e in arr.EnumerateArray())
                     if (e.TryGetProperty("id", out var idEl) && idEl.TryGetInt64(out var id)) return id;
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Finestres d'X-Plane (pop-out) a Windows: troba una finestra d'X-Plane pel títol i la col·loca sense marc
+    /// exactament en un rectangle de pantalla, just darrere d'una altra finestra (la de l'app).
+    /// </summary>
+    internal static class XPlaneWindows
+    {
+        delegate bool EnumProc(IntPtr h, IntPtr l);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool EnumWindows(EnumProc cb, IntPtr l);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern int GetWindowThreadProcessId(IntPtr h, out int pid);
+        [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] static extern int GetWindowText(IntPtr h, StringBuilder s, int n);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr h);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
+        [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr(IntPtr h, int i);
+        [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "SetWindowLongPtrW")] static extern IntPtr SetWindowLongPtr(IntPtr h, int i, IntPtr v);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
+        struct RECT { public int L, T, R, B; }
+        const int GWL_STYLE = -16;
+        const long WS_POPUP = 0x80000000L, WS_FRAME = 0x00CF0000L;   // WS_OVERLAPPEDWINDOW: títol, vores, botons
+        const uint SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020, SWP_SHOWWINDOW = 0x0040;
+        const uint GW_HWNDPREV = 3;
+
+        /// <summary>Finestra visible d'X-Plane amb aquest títol (o IntPtr.Zero).</summary>
+        public static IntPtr Find(string title)
+        {
+            var pids = new HashSet<int>();
+            foreach (var p in System.Diagnostics.Process.GetProcessesByName("X-Plane")) { pids.Add(p.Id); p.Dispose(); }
+            if (pids.Count == 0) return IntPtr.Zero;
+            IntPtr found = IntPtr.Zero;
+            EnumWindows((h, l) =>
+            {
+                GetWindowThreadProcessId(h, out int pid);
+                if (!pids.Contains(pid) || !IsWindowVisible(h)) return true;
+                var sb = new StringBuilder(256);
+                GetWindowText(h, sb, 256);
+                if (sb.ToString() == title) { found = h; return false; }
+                return true;
+            }, IntPtr.Zero);
+            return found;
+        }
+
+        /// <summary>
+        /// Treu el marc a la finestra i la posa exactament a <paramref name="screen"/>, just darrere de <paramref name="behind"/>.
+        /// Només toca la finestra si no hi és ja (es pot cridar sovint).
+        /// </summary>
+        public static void Place(IntPtr h, System.Drawing.Rectangle screen, IntPtr behind)
+        {
+            long style = GetWindowLongPtr(h, GWL_STYLE).ToInt64();
+            bool framed = (style & WS_FRAME) != 0;
+            if (framed) SetWindowLongPtr(h, GWL_STYLE, new IntPtr((style & ~WS_FRAME) | WS_POPUP));
+            GetWindowRect(h, out var r);
+            bool placed = r.L == screen.Left && r.T == screen.Top && r.R == screen.Right && r.B == screen.Bottom;
+            bool zOk = GetWindow(h, GW_HWNDPREV) == behind;   // la finestra de just a sobre és la de l'app
+            if (framed || !placed || !zOk)
+                SetWindowPos(h, behind, screen.X, screen.Y, screen.Width, screen.Height, SWP_NOACTIVATE | SWP_SHOWWINDOW | (framed ? SWP_FRAMECHANGED : 0));
         }
     }
 }

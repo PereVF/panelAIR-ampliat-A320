@@ -580,8 +580,9 @@ namespace panelAIR1000
             Oh.Text(g, s.SpdMach ? "MACH" : "SPD", X(0.040f), ly, lh, Lit);
             Oh.Text(g, s.TrkFpa ? "TRK" : "HDG", X(s.TrkFpa ? 0.288f : 0.235f), ly, lh, Lit);
             Oh.Text(g, "LAT", X(0.338f), ly, lh, Lit);
-            Oh.Text(g, s.TrkFpa ? "TRK" : "HDG", X(0.448f), Y(0.80f), lh, Lit);
-            Oh.Text(g, s.TrkFpa ? "FPA" : "V/S", X(0.540f), Y(0.80f), lh, Lit);
+            // a sobre dels rètols HDG/TRK (x 1586) i V/S/FPA (x 1668) del botó que els commuta
+            Oh.Text(g, s.TrkFpa ? "TRK" : "HDG", X((1586f - 1345f) / 605f), Y(0.80f), lh, Lit);
+            Oh.Text(g, s.TrkFpa ? "FPA" : "V/S", X((1668f - 1345f) / 605f), Y(0.80f), lh, Lit);
             Oh.Text(g, "ALT", X(0.725f), ly, lh, Lit);
             // ┌── LVL/CH ──┐
             using (var lp = new Pen(Lit, Math.Max(0.5f, lh * 0.12f)))
@@ -595,13 +596,13 @@ namespace panelAIR1000
 
             // ── valors ──
             string spd = s.SpdDashed ? "---" : s.SpdMach ? s.Spd.ToString("0.00", ic) : Math.Round(s.Spd).ToString("0", ic);
-            Cells(g, X(0.012f), dy, cw, dh, 4, spd);
+            Cells(g, X(0.043f), dy, cw, dh, 3, spd);   // 3 dígits (Mach: 0.78 amb el punt al primer)
             if (s.SpdManaged) Dot(g, X(0.150f), dy + dh * 0.5f, dh);
             string hdg = s.HdgDashed ? "---" : (((int)Math.Round(s.Hdg) % 360 + 360) % 360).ToString("000", ic);
             Cells(g, X(0.218f), dy, cw, dh, 3, hdg);
             if (s.HdgManaged) Dot(g, X(0.328f), dy + dh * 0.5f, dh);
             Cells(g, X(0.638f), dy, cw, dh, 5, Math.Max(0, Math.Round(s.Alt)).ToString("00000", ic));
-            if (s.AltManaged) Dot(g, X(0.802f), dy + dh * 0.5f, dh);
+            if (s.AltManaged) Dot(g, X(0.809f), dy + dh * 0.5f, dh);
             float vx = X(0.840f);
             if (s.VsDashed) Cells(g, vx, dy, cw, dh, 5, "-----");
             else
@@ -632,7 +633,7 @@ namespace panelAIR1000
         }
         static void Dot(Graphics g, float x, float cy, float h)
         {
-            float d = h * 0.2f;
+            float d = h * 0.32f;   // punt de managed ben visible
             using var b = new SolidBrush(Lit);
             g.FillEllipse(b, x - d / 2, cy - d / 2, d, d);
         }
@@ -834,7 +835,8 @@ namespace panelAIR1000
 
         public override void Tap(PointF p)
         {
-            if (Momentary) { _hold = 0.16f; Changed(); return; }
+            Owner.RaiseCommand(Id, "PUSH");
+            if (Momentary || Owner.SimDriven) { _hold = 0.16f; Changed(); return; }
             In = !In;
             if (LowerFollowsState) LowerLevel = (In == LowerLitWhenIn) ? 1f : 0f;
             Changed();
@@ -1015,7 +1017,18 @@ namespace panelAIR1000
             else ni = Math.Clamp(ni, 0, _angles.Length - 1);
             if (ni == Index) return;
             if (Wrap && Math.Abs(_angles[ni] - _ang) > 180) _ang += _angles[ni] > _ang ? 360 : -360;
-            Index = ni; Changed();
+            Index = ni;
+            Owner.RaiseCommand(Id, "POS:" + ni);   // posició nova cap a l'avió
+            Changed();
+        }
+        /// <summary>Posició llegida del simulador (sense enviar cap ordre). Retorna true si ha canviat.</summary>
+        public bool SetIndex(int ni)
+        {
+            ni = Math.Clamp(ni, 0, _angles.Length - 1);
+            if (ni == Index) return false;
+            if (Wrap && Math.Abs(_angles[ni] - _ang) > 180) _ang += _angles[ni] > _ang ? 360 : -360;
+            Index = ni;
+            return true;
         }
 
         // ─── Rotatiu 3D calculat per píxel (sense PNG) ───
@@ -1367,7 +1380,16 @@ namespace panelAIR1000
             if (ni == Index) return;
             Index = ni;
             if (SpringToCenter && _n == 3 && ni != 1) _spring = 0.45f;
+            Owner.RaiseCommand(Id, "POS:" + ni);   // posició nova cap a l'avió
             Changed();
+        }
+        /// <summary>Posició llegida del simulador (sense enviar cap ordre). Retorna true si ha canviat.</summary>
+        public bool SetIndex(int ni)
+        {
+            ni = Math.Clamp(ni, 0, _n - 1);
+            if (ni == Index) return false;
+            Index = ni;
+            return true;
         }
 
         public override void Draw(Graphics g)
@@ -1580,7 +1602,7 @@ namespace panelAIR1000
             if (_hold > 0) _hold = Math.Max(0, _hold - dt);
             _depth = Approach(_depth, _hold > 0 ? 1 : 0, dt * 14f);
         }
-        public override void Tap(PointF p) { _hold = 0.18f; Changed(); }
+        public override void Tap(PointF p) { _hold = 0.18f; Owner.RaiseCommand(Id, "PUSH"); Changed(); }
         public override void Draw(Graphics g)
         {
             var o = new RectangleF(_cx - _r, _cy - _r, _r * 2, _r * 2);
@@ -1675,7 +1697,9 @@ namespace panelAIR1000
         public override void Tick(float dt) => _hold = Math.Max(0, _hold - dt);
         public override void Tap(PointF p)
         {
-            if (Momentary) { _hold = 0.16f; Changed(); return; }
+            // ordre cap a l'avió; amb el simulador connectat, el llum el decideix l'avió (aquí només l'efecte de prémer)
+            Owner.RaiseCommand(Id, "PUSH");
+            if (Momentary || Owner.SimDriven) { _hold = 0.16f; Changed(); return; }
             if (Group != null) { if (On) return; On = true; Owner.ClearGroup(Group, this); }
             else On = !On;
             Changed();
@@ -2793,6 +2817,96 @@ namespace panelAIR1000
         /// QNH del capità llegit del simulador (bidireccional): finestra de l'EFIS i anell in Hg / hPa.
         /// mode: 0 = STD, 1 = QNH, 2 = QFE. Sense corrent la finestra queda apagada.
         /// </summary>
+        /// <summary>Posició de l'anell negre d'un rotatiu doble llegida del simulador (QNH: true = hPa; ALT: true = 1000).</summary>
+        public void SetKnobRing(string id, bool right)
+        {
+            if (_byId.TryGetValue(id, out var k) && k is OhBaroKnob bk && bk.Hpa != right)
+            {
+                bk.Hpa = right;
+                Redraw(TopDirty(bk));
+                if (bk.Animating) { _animating.Add(bk); StartAnim(); }
+            }
+            _ov?.SetKnobRing(id, right);
+        }
+
+        bool _simDriven;
+        /// <summary>
+        /// true = hi ha un simulador connectat que governa els llums: les tecles i polsadors no canvien d'estat
+        /// en tocar-los (només envien l'ordre i fan l'efecte de prémer); el llum arriba amb SetLight.
+        /// </summary>
+        public bool SimDriven { get => _simDriven; set { _simDriven = value; if (_ov != null) _ov.SimDriven = value; } }
+
+        // vidres de les pantalles del panell principal (coordenades del panell): forats de la finestra
+        readonly List<RectangleF> _screenGlass = new();
+        /// <summary>Els forats de les pantalles han canviat (l'overhead s'ha mogut, obert o tancat, o la mida ha canviat).</summary>
+        public event Action? HolesChanged;
+
+        /// <summary>
+        /// Forats de les pantalles PFD, ND i ECAM (coordenades de client d'aquest control): el vidre de cada pantalla,
+        /// menys la part que tapa l'overhead quan és obert. null si no n'hi ha (overhead a pantalla completa, etc.).
+        /// </summary>
+        public Region? ScreenHoles()
+        {
+            if (_isOverlay || _page != 1 || _screenGlass.Count == 0 || Width <= 0) return null;
+            float s = _s > 0 ? _s : Width / LW;
+            float sh = CurShift;
+            var rg = new Region(Rectangle.Empty);
+            foreach (var gl in _screenGlass)
+                rg.Union(Rectangle.FromLTRB(
+                    (int)Math.Ceiling(_offX + gl.Left * s), (int)Math.Ceiling(_offY - _scrollY + (gl.Top - sh) * s),
+                    (int)Math.Floor(_offX + gl.Right * s), (int)Math.Floor(_offY - _scrollY + (gl.Bottom - sh) * s)));
+            if (_ov != null && _ov.Visible && _ov.Region != null) rg.Exclude(_ov.Region);
+            return rg;
+        }
+
+        /// <summary>Vidre d'una pantalla (0 PFD, 1 ND, 2 ECAM superior, 3 ECAM inferior) en coordenades de pantalla de Windows.</summary>
+        public Rectangle? GlassScreenRect(int index)
+        {
+            if (_isOverlay || index < 0 || index >= _screenGlass.Count || Width <= 0 || !IsHandleCreated) return null;
+            float s = _s > 0 ? _s : Width / LW;
+            var gl = _screenGlass[index];
+            var rc = Rectangle.FromLTRB(
+                (int)Math.Ceiling(_offX + gl.Left * s), (int)Math.Ceiling(_offY - _scrollY + (gl.Top - CurShift) * s),
+                (int)Math.Floor(_offX + gl.Right * s), (int)Math.Floor(_offY - _scrollY + (gl.Bottom - CurShift) * s));
+            return RectangleToScreen(rc);
+        }
+
+        /// <summary>Posició d'un selector (rotatiu o palanca) llegida del simulador.</summary>
+        public void SetPosition(string id, int index)
+        {
+            if (_byId.TryGetValue(id, out var e))
+            {
+                bool ch = e is OhKnob kn ? kn.SetIndex(index) : e is OhToggle tg && tg.SetIndex(index);
+                if (ch)
+                {
+                    Redraw(TopDirty(e));
+                    if (e.Animating) { _animating.Add(e); StartAnim(); }
+                }
+            }
+            _ov?.SetPosition(id, index);
+        }
+
+        /// <summary>Llum d'una tecla o polsador llegit del simulador.</summary>
+        public void SetLight(string id, bool on)
+        {
+            if (_byId.TryGetValue(id, out var e))
+            {
+                if (e is OhKey key) { if (key.On != on) { key.On = on; Redraw(key.DirtyBounds); } }
+                else if (e is OhPushButton pb)
+                {
+                    float lv = on ? 1f : 0f;
+                    if (pb.Momentary) { if (pb.UpperLevel != lv || pb.LowerLevel != lv) { pb.UpperLevel = lv; pb.LowerLevel = lv; Redraw(TopDirty(pb)); } }
+                    else if (pb.LowerLevel != lv || pb.In != on)
+                    {
+                        pb.LowerLevel = lv; pb.In = on;
+                        Redraw(TopDirty(pb));
+                        if (pb.Animating) { _animating.Add(pb); StartAnim(); }
+                    }
+                }
+            }
+            _ov?.SetLight(id, on);
+        }
+
         /// <summary>Pantalla del FCU llegida del simulador.</summary>
         public void SetFcu(FcuState s)
         {
@@ -2981,6 +3095,7 @@ namespace panelAIR1000
         void OnOverlayMoved()
         {
             if (_ov == null) return;
+            HolesChanged?.Invoke();
             var nw = _ov.Visible ? _ov.BottomEdges() : null;
             if (_shadowEdges != null) using (var r = ShadowRegion(_shadowEdges, ShadowDepth)) Invalidate(r);
             if (nw != null) using (var r = ShadowRegion(nw, ShadowDepth)) Invalidate(r);
@@ -3924,6 +4039,7 @@ namespace panelAIR1000
             _offY = _isOverlay ? 0 : Math.Max(0, Height - _contentH);
             ClampScroll();
             Invalidate();
+            if (!_isOverlay) HolesChanged?.Invoke();
         }
 
         protected override void OnVisibleChanged(EventArgs e)
@@ -4551,8 +4667,10 @@ namespace panelAIR1000
                                   new[] { Pt(894, 352), Pt(1968, 352), Pt(894, 1164), Pt(1968, 1164) }));
 
             // pantalles (en negre)
+            // pantalles: el vidre de cadascuna és un forat a la finestra de l'app (s'hi veuen les pantalles d'X-Plane de sota)
             _silk.Add(new OhBezel(R(24, 372, 428, 772), R(38, 388, 414, 756)));      // PFD
             _silk.Add(new OhBezel(R(454, 372, 868, 772), R(470, 388, 852, 756)));    // ND
+            _screenGlass.AddRange(new[] { R(38, 388, 414, 756), R(470, 388, 852, 756), R(1280, 362, 1660, 728), R(1282, 758, 1660, 1128) });
             _silk.Add(new OhBlock(R(520, 776, 812, 796), Oh.T(120, 132, 144, 116, 142, 164), Oh.T(70, 80, 90, 66, 88, 106), 3f));
             _silk.Add(new OhBezel(R(1254, 344, 1686, 736), R(1280, 362, 1660, 728)));  // ECAM superior
             _silk.Add(new OhBezel(R(1254, 744, 1686, 1136), R(1282, 758, 1660, 1128))); // ECAM inferior

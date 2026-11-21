@@ -921,7 +921,12 @@ namespace SimConnect3
         private A320BaroStruct? _a320Baro;
         private XPlaneLink? _xp;                                      // enllaç amb X-Plane 12 (ToLiss)
         private (bool p, int m, double v, bool hg)? _xpBaro;          // última lectura del QNH des d'X-Plane
-        private panelAIR1000.FcuState? _xpFcu;                       // última lectura de la pantalla del FCU des d'X-Plane   // última lectura del QNH de l'A320 (veure RequestA320Baro)
+        private panelAIR1000.FcuState? _xpFcu;
+        private bool? _xpAltStep;
+        private System.Windows.Forms.Timer? _xpPfdTimer;
+
+        private readonly Dictionary<string, bool> _xpLights = new();
+        private readonly Dictionary<string, int> _xpPos = new();       // posicions de selectors des d'X-Plane   // llums de tecles/polsadors des d'X-Plane                                     // selector ALT 100/1000 des d'X-Plane (true = 1000)                       // última lectura de la pantalla del FCU des d'X-Plane   // última lectura del QNH de l'A320 (veure RequestA320Baro)
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct ElecGenStruct { public double value; }
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -5250,8 +5255,18 @@ namespace SimConnect3
                 _a320Overhead?.SetBaro(p, m, v, hg);
             };
             _xp.FcuChanged += s => { _xpFcu = s; _a320Overhead?.SetFcu(s); };
+            _xp.AltStepChanged += k => { _xpAltStep = k; _a320Overhead?.SetKnobRing("MIP_FCU_ALT", k); };
+            _xp.LightChanged += (id, on) => { _xpLights[id] = on; _a320Overhead?.SetLight(id, on); };
+            _xp.PositionChanged += (id, i) => { _xpPos[id] = i; _a320Overhead?.SetPosition(id, i); };
+            _xp.A320Changed += on => { if (!on) { _xpLights.Clear(); _xpPos.Clear(); } if (_a320Overhead != null) _a320Overhead.SimDriven = on; };
             _xp.A320Changed += on => { if (!on) { _xpFcu = null; _a320Overhead?.SetFcu(new panelAIR1000.FcuState(false, 0, false, false, false, 0, false, false, false, 0, false, 0, 0, false)); } };
             _xp.Start();
+
+            // PFD del ToLiss (pop-out d'X-Plane) encaixat al forat del PFD de l'app, automàticament
+            _xpPfdTimer = new System.Windows.Forms.Timer { Interval = 1000 };
+            _xpPfdTimer.Tick += (s, ev) => PlaceXPlanePfd();
+            _xpPfdTimer.Start();
+            _xp.A320Changed += on => { if (!on) Array.Clear(_xpScreenAsked); };
 
             // Timer per refrescar estat de connexió rotAIR
             var statusTimer = new System.Windows.Forms.Timer();
@@ -5261,6 +5276,7 @@ namespace SimConnect3
         }
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
+            try { CloseXPlaneScreens(); } catch { }
             _xp?.Dispose();
             _sfsCheckTimer?.Dispose();
             stopHidThread1 = true;
@@ -5843,9 +5859,85 @@ namespace SimConnect3
         /// <summary>Forats de la Region segons el mode actual (A320 no en té: l'overhead ocupa tota la pantalla).</summary>
         private void ApplyCurrentRegion()
         {
-            if (_a320Active) { this.Region = null; return; }
+            if (_a320Active) { ApplyA320Region(); return; }
             if (_g3000Active) ApplyG3000Region(); else ApplyPfdRegion();
         }
+
+        /// <summary>
+        /// A320: forats a la finestra sobre el vidre de les pantalles PFD, ND i ECAM (s'hi veuen les finestres
+        /// de les pantalles del simulador col·locades a sota). La part que tapa l'overhead obert no és forat.
+        /// Només es torna a aplicar si els forats han canviat (l'overhead es mou molts cops per segon).
+        /// </summary>
+        /// <summary>
+        /// Cada segon, amb el ToLiss carregat: busca la finestra del PFD del capità ("ToLiss Captain Left DU") i
+        /// l'encaixa sense marc al forat del PFD, just darrere de l'app. Si no hi és, la demana un sol cop amb
+        /// AirbusFBW/PopUpPFD1 (surt com a finestra de Windows si s'ha fet pop-out un cop en aquesta sessió d'X-Plane).
+        /// </summary>
+        /// <summary>
+        /// Pantalles del ToLiss (pop-out d'X-Plane) → forat de l'app: índex del vidre (0 PFD, 1 ND, 2 ECAM superior,
+        /// 3 ECAM inferior), títol de la finestra de Windows i ordre que l'obre / tanca. Títol null = encara no el sabem.
+        /// </summary>
+        private static readonly (int glass, string? title, string cmd)[] XpScreens =
+        {
+            (0, "ToLiss Captain Left DU", "XP_POPUP_PFD1"),
+            (1, "ToLiss Captain Right DU", "XP_POPUP_ND1"),
+            (2, "ToLiss Upper ECAM", "XP_POPUP_EWD"),
+            (3, "ToLiss Lower ECAM", "XP_POPUP_SD"),
+        };
+        private readonly bool[] _xpScreenAsked = new bool[4];
+
+        private void PlaceXPlanePfd()
+        {
+            // els forats de les pantalles de l'A320 es revisen cada segon (només es tornen a aplicar si han canviat)
+            if (_a320Active) ApplyA320Region();
+            if (_xp == null || !_xp.A320Loaded || !_a320Active || _a320Overhead == null || !_a320Overhead.Visible) return;
+            foreach (var (glass, title, cmd) in XpScreens)
+            {
+                if (title == null) continue;
+                try
+                {
+                    var h = XPlaneWindows.Find(title);
+                    if (h == IntPtr.Zero)
+                    {
+                        // la demana un sol cop per sessió del ToLiss (l'ordre obre / tanca: no es repeteix)
+                        if (!_xpScreenAsked[glass]) { _xpScreenAsked[glass] = true; _xp.SendCommand(cmd, "PUSH"); }
+                        continue;
+                    }
+                    _xpScreenAsked[glass] = true;
+                    if (_a320Overhead.GlassScreenRect(glass) is Rectangle rc) XPlaneWindows.Place(h, rc, this.Handle);
+                }
+                catch { }
+            }
+        }
+
+        /// <summary>En tancar l'app: tanca a X-Plane les pantalles del ToLiss que l'app tenia encaixades.</summary>
+        private void CloseXPlaneScreens()
+        {
+            if (_xp == null || !_xp.A320Loaded) return;
+            foreach (var (_, title, cmd) in XpScreens)
+                if (title != null && XPlaneWindows.Find(title) != IntPtr.Zero) _xp.SendCommandAndWait(cmd, "PUSH");
+        }
+
+        private void ApplyA320Region()
+        {
+            using var holes = _a320Overhead != null && _a320Overhead.Visible ? _a320Overhead.ScreenHoles() : null;
+            if (holes == null) { if (this.Region != null) this.Region = null; _a320HolesKey = ""; _a320RegionSet = null; return; }
+            // control → coordenades del Form
+            var off = this.PointToClient(_a320Overhead!.PointToScreen(Point.Empty));
+            holes.Translate(off.X, off.Y);
+            string key;
+            using (var m = new System.Drawing.Drawing2D.Matrix())
+                key = string.Join(";", holes.GetRegionScans(m).Select(r => $"{r.X},{r.Y},{r.Width},{r.Height}"));
+            // (si una altra part de l'app ha canviat la regió de la finestra, es torna a posar la de l'A320)
+            if (key == _a320HolesKey && _a320RegionSet != null && ReferenceEquals(this.Region, _a320RegionSet)) return;
+            _a320HolesKey = key;
+            var formRegion = new Region(new Rectangle(0, 0, this.Width, this.Height));
+            formRegion.Exclude(holes);
+            this.Region = formRegion;
+            _a320RegionSet = this.Region;
+        }
+        private string _a320HolesKey = "";
+        private Region? _a320RegionSet;
 
         /// <summary>
         /// Ordres del panell A320 cap a l'avió (FlyByWire). L'estat que es veu al panell torna sempre des
@@ -5901,9 +5993,17 @@ namespace SimConnect3
                         AreasLocation = _a320AreasBtnPos
                     };
                     _a320Overhead.Command += OnA320Command;
+                    _a320Overhead.HolesChanged += () => { if (_a320Active) ApplyA320Region(); };
                     if (_xp != null && _xp.A320Loaded && _xpBaro is var (xp, xm, xv, xhg))
                         _a320Overhead.SetBaro(xp, xm, xv, xhg);
                     if (_xp != null && _xp.A320Loaded && _xpFcu != null) _a320Overhead.SetFcu(_xpFcu);
+                    if (_xp != null && _xp.A320Loaded && _xpAltStep is bool xs) _a320Overhead.SetKnobRing("MIP_FCU_ALT", xs);
+                    if (_xp != null && _xp.A320Loaded)
+                    {
+                        _a320Overhead.SimDriven = true;
+                        foreach (var kv in _xpLights) _a320Overhead.SetLight(kv.Key, kv.Value);
+                        foreach (var kv in _xpPos) _a320Overhead.SetPosition(kv.Key, kv.Value);
+                    }
                     else if (_a320Baro is A320BaroStruct ab)
                         _a320Overhead.SetBaro(ab.powered > 0.5, (int)Math.Round(ab.mode), ab.value, ab.isInhg > 0.5);
                     _a320Overhead.ZoomButtonsMoved += () =>
@@ -5923,6 +6023,8 @@ namespace SimConnect3
                 this.Controls.SetChildIndex(_a320Overhead, this.Controls.GetChildIndex(pbMain));
                 _a320Overhead.Visible = true;
                 pbMain.Visible = false;
+                // els forats depenen de la mida i posició finals del panell: es tornen a calcular quan ja s'ha col·locat
+                BeginInvoke(new Action(() => { if (_a320Active) ApplyA320Region(); }));
                 _thrQuadrantBtn.Visible = false;
                 if (_popoutReminderForm != null && !_popoutReminderForm.IsDisposed) _popoutReminderForm.Close();
             }
