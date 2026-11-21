@@ -777,6 +777,8 @@ namespace SimConnect3
             LtsTestWrite,
             GenericRpnClientDataDef,
             AircraftTitle,
+            A320BaroRead,        // A320 FBW: QNH del capità (valor, mode, unitat, alimentació)
+            A320BaroUnitWrite,   // A320 FBW: L:A32NX_FCU_EFIS_L_BARO_IS_INHG
             FlapsNumPosRead,
             FlapsHandleIndexRead,
             ElevatorTrimRead,
@@ -912,6 +914,14 @@ namespace SimConnect3
 
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct ElecSrcStruct { public double value; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct A320BaroStruct { public double value, mode, isInhg, powered; }
+        [StructLayout(LayoutKind.Sequential, Pack = 1)]
+        struct A320BaroUnitStruct { public double isInhg; }
+        private A320BaroStruct? _a320Baro;
+        private XPlaneLink? _xp;                                      // enllaç amb X-Plane 12 (ToLiss)
+        private (bool p, int m, double v, bool hg)? _xpBaro;          // última lectura del QNH des d'X-Plane
+        private panelAIR1000.FcuState? _xpFcu;                       // última lectura de la pantalla del FCU des d'X-Plane   // última lectura del QNH de l'A320 (veure RequestA320Baro)
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct ElecGenStruct { public double value; }
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
@@ -1072,6 +1082,7 @@ namespace SimConnect3
         enum REQUESTS
         {
             RequestAircraftTitle,
+            RequestA320Baro,
             RequestFlapsNumPos,
             RequestFlapsHandleIndex,
             RequestElevatorTrimPos,
@@ -1461,6 +1472,7 @@ namespace SimConnect3
             ENGINE_MASTER_1_SET,
             ENGINE_MASTER_2_SET,
             AUTOPILOT_DISENGAGE_TOGGLE,
+            A32NX_BARO_L_INC, A32NX_BARO_L_DEC, A32NX_BARO_L_PUSH, A32NX_BARO_L_PULL,
             RUDDER_TRIM_DISABLED_SET,
             AILERON_TRIM_DISABLED_SET,
             AXIS_AILERONTRIM_SET,
@@ -1800,7 +1812,7 @@ namespace SimConnect3
         private bool  _a320Active = false;
         private panelAIR1000.A320OverheadControl? _a320Overhead;
         // Posició (calibració F12) dels botons de zoom + / − de l'overhead; null = per defecte a baix a la dreta.
-        private Point? _a320ZoomPlusPos, _a320ZoomMinusPos, _a320PageBtnPos;
+        private Point? _a320ZoomPlusPos, _a320ZoomMinusPos, _a320PageBtnPos, _a320AreasBtnPos;
 
         private bool  _tb21Dragging;
         private Point _tb21DragOffset;
@@ -5224,6 +5236,23 @@ namespace SimConnect3
 
             this.FormClosing += Form1_FormClosing;
 
+            // X-Plane 12 (ToLiss A320): enllaç per l'API web d'X-Plane. Es busca sol cada 3 s; quan hi ha un ToLiss
+            // carregat activa el mode A320 i les ordres del panell van a X-Plane en lloc de l'MSFS.
+            _xp = new XPlaneLink();
+            _xp.A320Changed += on =>
+            {
+                if (on) SetA320Active(true);
+                else if (!IsA320FBW()) SetA320Active(false);
+            };
+            _xp.BaroChanged += (p, m, v, hg) =>
+            {
+                _xpBaro = (p, m, v, hg);
+                _a320Overhead?.SetBaro(p, m, v, hg);
+            };
+            _xp.FcuChanged += s => { _xpFcu = s; _a320Overhead?.SetFcu(s); };
+            _xp.A320Changed += on => { if (!on) { _xpFcu = null; _a320Overhead?.SetFcu(new panelAIR1000.FcuState(false, 0, false, false, false, 0, false, false, false, 0, false, 0, 0, false)); } };
+            _xp.Start();
+
             // Timer per refrescar estat de connexió rotAIR
             var statusTimer = new System.Windows.Forms.Timer();
             statusTimer.Interval = 1000; // cada 1 segon
@@ -5232,6 +5261,7 @@ namespace SimConnect3
         }
         private void Form1_FormClosing(object sender, FormClosingEventArgs e)
         {
+            _xp?.Dispose();
             _sfsCheckTimer?.Dispose();
             stopHidThread1 = true;
             stopHidThread2 = true;
@@ -5818,6 +5848,37 @@ namespace SimConnect3
         }
 
         /// <summary>
+        /// Ordres del panell A320 cap a l'avió (FlyByWire). L'estat que es veu al panell torna sempre des
+        /// del simulador (bidireccional): aquí només s'envia l'acció.
+        /// </summary>
+        private void OnA320Command(string id, string cmd)
+        {
+            // amb un ToLiss carregat a X-Plane, les ordres van cap a X-Plane
+            if (_xp != null && _xp.A320Loaded) { _xp.SendCommand(id, cmd); return; }
+            if (simconnect == null) return;
+            if (id == "MIP_BARO")
+            {
+                SIMCONNECT_EVENTS? ev = cmd switch
+                {
+                    "INC" => SIMCONNECT_EVENTS.A32NX_BARO_L_INC,
+                    "DEC" => SIMCONNECT_EVENTS.A32NX_BARO_L_DEC,
+                    "PUSH" => SIMCONNECT_EVENTS.A32NX_BARO_L_PUSH,
+                    "PULL" => SIMCONNECT_EVENTS.A32NX_BARO_L_PULL,
+                    _ => null
+                };
+                try
+                {
+                    if (ev is SIMCONNECT_EVENTS e)
+                        simconnect.TransmitClientEvent(SimConnect.SIMCONNECT_OBJECT_ID_USER, e, 0, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    else if (cmd == "INHG" || cmd == "HPA")
+                        simconnect.SetDataOnSimObject(DEFINITIONS.A320BaroUnitWrite, SimConnect.SIMCONNECT_OBJECT_ID_USER,
+                            SIMCONNECT_DATA_SET_FLAG.DEFAULT, new A320BaroUnitStruct { isInhg = cmd == "INHG" ? 1 : 0 });
+                }
+                catch { }
+            }
+        }
+
+        /// <summary>
         /// Entra/surt del mode A320. L'overhead és un control propi que se situa just a sobre de pbMain
         /// (la resta de botons del Form, com ⚙, queden per sobre). pbMain s'amaga mentre dura el mode
         /// perquè no consumeixi CPU repintant-se per sota.
@@ -5836,13 +5897,21 @@ namespace SimConnect3
                         Visible = false,
                         PlusLocation = _a320ZoomPlusPos,
                         MinusLocation = _a320ZoomMinusPos,
-                        PageLocation = _a320PageBtnPos
+                        PageLocation = _a320PageBtnPos,
+                        AreasLocation = _a320AreasBtnPos
                     };
+                    _a320Overhead.Command += OnA320Command;
+                    if (_xp != null && _xp.A320Loaded && _xpBaro is var (xp, xm, xv, xhg))
+                        _a320Overhead.SetBaro(xp, xm, xv, xhg);
+                    if (_xp != null && _xp.A320Loaded && _xpFcu != null) _a320Overhead.SetFcu(_xpFcu);
+                    else if (_a320Baro is A320BaroStruct ab)
+                        _a320Overhead.SetBaro(ab.powered > 0.5, (int)Math.Round(ab.mode), ab.value, ab.isInhg > 0.5);
                     _a320Overhead.ZoomButtonsMoved += () =>
                     {
                         _a320ZoomPlusPos = _a320Overhead.PlusLocation;
                         _a320ZoomMinusPos = _a320Overhead.MinusLocation;
                         _a320PageBtnPos = _a320Overhead.PageLocation;
+                        _a320AreasBtnPos = _a320Overhead.AreasLocation;
                         try { ExportCalibrationPositions(silent: true); } catch { }
                     };
                     this.Controls.Add(_a320Overhead);
@@ -7129,6 +7198,22 @@ namespace SimConnect3
                 simconnect.AddToDataDefinition(DEFINITIONS.AircraftTitle, "TITLE", null, SIMCONNECT_DATATYPE.STRING256, 0, SimConnect.SIMCONNECT_UNUSED);
                 simconnect.RegisterDataDefineStruct<AircraftInfoStruct>(DEFINITIONS.AircraftTitle);
                 simconnect.RequestDataOnSimObject(REQUESTS.RequestAircraftTitle, DEFINITIONS.AircraftTitle, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.SECOND, SIMCONNECT_DATA_REQUEST_FLAG.DEFAULT, 0, 0, 0);
+
+                // A320 FBW — QNH del capità (bidireccional): es llegeix el que mostra la finestra de l'EFIS
+                // (valor, mode 0=STD/1=QNH/2=QFE, unitat) i si el bus DC ESS (FCU) té corrent; només arriba
+                // quan canvia. Ordres: esdeveniments A32NX.FCU_EFIS_L_BARO_* i escriptura de la unitat.
+                simconnect.AddToDataDefinition(DEFINITIONS.A320BaroRead, "L:A32NX_FCU_EFIS_L_DISPLAY_BARO_VALUE", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.A320BaroRead, "L:A32NX_FCU_EFIS_L_DISPLAY_BARO_MODE", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.A320BaroRead, "L:A32NX_FCU_EFIS_L_BARO_IS_INHG", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.AddToDataDefinition(DEFINITIONS.A320BaroRead, "L:A32NX_ELEC_DC_ESS_BUS_IS_POWERED", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<A320BaroStruct>(DEFINITIONS.A320BaroRead);
+                simconnect.RequestDataOnSimObject(REQUESTS.RequestA320Baro, DEFINITIONS.A320BaroRead, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_PERIOD.VISUAL_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.CHANGED, 0, 0, 0);
+                simconnect.AddToDataDefinition(DEFINITIONS.A320BaroUnitWrite, "L:A32NX_FCU_EFIS_L_BARO_IS_INHG", "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED);
+                simconnect.RegisterDataDefineStruct<A320BaroUnitStruct>(DEFINITIONS.A320BaroUnitWrite);
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.A32NX_BARO_L_INC, "A32NX.FCU_EFIS_L_BARO_INC");
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.A32NX_BARO_L_DEC, "A32NX.FCU_EFIS_L_BARO_DEC");
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.A32NX_BARO_L_PUSH, "A32NX.FCU_EFIS_L_BARO_PUSH");
+                simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.A32NX_BARO_L_PULL, "A32NX.FCU_EFIS_L_BARO_PULL");
 
                 // Flaps — definicions pròpies i separades (veure comentari a FlapsNumPosStruct).
                 simconnect.AddToDataDefinition(DEFINITIONS.FlapsNumPosRead, "FLAPS NUM HANDLE POSITIONS", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -8522,6 +8607,13 @@ namespace SimConnect3
 
         private void Simconnect_OnRecvSimobjectData(SimConnect sender, SIMCONNECT_RECV_SIMOBJECT_DATA data)
         {
+            if (data.dwRequestID == (uint)REQUESTS.RequestA320Baro)
+            {
+                var b = (A320BaroStruct)data.dwData[0];
+                _a320Baro = b;   // només arriba quan canvia: es guarda per aplicar-lo si el panell A320 es crea després
+                if (_xp == null || !_xp.A320Loaded) _a320Overhead?.SetBaro(b.powered > 0.5, (int)Math.Round(b.mode), b.value, b.isInhg > 0.5);
+                return;
+            }
             //Debug.WriteLine(">>> OnRecvSimobjectData CALLED");
             if (data.dwRequestID == (uint)REQUESTS.RequestAircraftTitle)
             {
@@ -12634,6 +12726,7 @@ namespace SimConnect3
             if (_a320ZoomPlusPos is Point zp) sb.AppendLine($"A320ZOOMPLUS:a320zoom:{zp.X}:{zp.Y}");
             if (_a320ZoomMinusPos is Point zm) sb.AppendLine($"A320ZOOMMINUS:a320zoom:{zm.X}:{zm.Y}");
             if (_a320PageBtnPos is Point pgp) sb.AppendLine($"A320PAGEBTN:a320page:{pgp.X}:{pgp.Y}");
+            if (_a320AreasBtnPos is Point arp) sb.AppendLine($"A320AREASBTN:a320areas:{arp.X}:{arp.Y}");
             sb.AppendLine($"THRQBTN:tq:{_thrQuadrantBtn.Location.X}:{_thrQuadrantBtn.Location.Y}:0:0");
             if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
             if (_appVersionPanel != null) sb.AppendLine($"APPVER:apv:{_appVersionPanel.Location.X}:{_appVersionPanel.Location.Y}");
@@ -12844,6 +12937,11 @@ namespace SimConnect3
                 {
                     _a320PageBtnPos = new Point(x, y);
                     if (_a320Overhead != null) _a320Overhead.PageLocation = _a320PageBtnPos;
+                }
+                else if (type == "A320AREASBTN")
+                {
+                    _a320AreasBtnPos = new Point(x, y);
+                    if (_a320Overhead != null) _a320Overhead.AreasLocation = _a320AreasBtnPos;
                 }
                 else if (type == "THRQBTN")
                 {

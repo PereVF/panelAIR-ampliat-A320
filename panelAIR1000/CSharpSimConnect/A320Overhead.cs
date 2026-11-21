@@ -279,6 +279,28 @@ namespace panelAIR1000
             return f;
         }
 
+        /// <summary>Arrodoneix el vèrtex i d'una polilínia amb un arc de radi r (mostrejat amb 32 punts).</summary>
+        public static PointF[] RoundAt(PointF[] pts, int i, float r)
+        {
+            if (r <= 0.3f || i <= 0 || i >= pts.Length - 1) return pts;
+            var p = pts[i]; var a = pts[i - 1]; var b = pts[i + 1];
+            float ux = a.X - p.X, uy = a.Y - p.Y, vx = b.X - p.X, vy = b.Y - p.Y;
+            float lu = MathF.Sqrt(ux * ux + uy * uy), lv = MathF.Sqrt(vx * vx + vy * vy);
+            ux /= lu; uy /= lu; vx /= lv; vy /= lv;
+            float theta = MathF.Acos(Math.Clamp(ux * vx + uy * vy, -1f, 1f));
+            float d = Math.Min(r / MathF.Tan(theta / 2), Math.Min(lu, lv) * 0.9f);
+            float rr = d * MathF.Tan(theta / 2);
+            var A = new PointF(p.X + ux * d, p.Y + uy * d); var B = new PointF(p.X + vx * d, p.Y + vy * d);
+            float bx = ux + vx, by = uy + vy, lb = MathF.Sqrt(bx * bx + by * by); bx /= lb; by /= lb;
+            float cd = rr / MathF.Sin(theta / 2);
+            var C = new PointF(p.X + bx * cd, p.Y + by * cd);
+            double a0 = Math.Atan2(A.Y - C.Y, A.X - C.X), a1 = Math.Atan2(B.Y - C.Y, B.X - C.X), da = a1 - a0;
+            while (da > Math.PI) da -= 2 * Math.PI; while (da < -Math.PI) da += 2 * Math.PI;
+            var arc = new List<PointF>();
+            for (int k = 0; k <= 32; k++) { double t = a0 + da * k / 32; arc.Add(new PointF(C.X + (float)Math.Cos(t) * rr, C.Y + (float)Math.Sin(t) * rr)); }
+            return pts.Take(i).Concat(arc).Concat(pts.Skip(i + 1)).ToArray();
+        }
+
         public static bool Boxed(string s) => s is "OFF" or "ON" or "MAN" or "ALTN" or "OVRD" or "ALIGN";
 
         public static Color LegendColor(string s) => s switch
@@ -479,6 +501,150 @@ namespace panelAIR1000
         }
     }
 
+    /// <summary>Finestra del QNH a l'EFIS: mode (QNH/QFE) en petit a dalt i valor en 7 segments taronja; "Std" en estàndard.</summary>
+    internal sealed class OhBaroWindow : OhElement
+    {
+        readonly RectangleF _r;
+        bool _on; int _mode = 1; string _val = "";
+        public OhBaroWindow(string id, RectangleF r) { Id = id; _r = r; Bounds = RectangleF.Inflate(r, 3, 3); }
+        /// <summary>Actualitza el que mostra; retorna true si ha canviat.</summary>
+        public bool Set(bool powered, int mode, double value, bool inHg)
+        {
+            // el format es tria pel valor (no per la unitat): en canviar d'unitat, la unitat i el valor poden arribar
+            // en lectures diferents i, per un instant, es dibuixaria "1016.00" (desquadrat) en lloc de 1016
+            string v = !powered ? "" : mode == 0 ? "Std" : value < 100 ? value.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) : Math.Round(value).ToString("0");
+            if (powered == _on && mode == _mode && v == _val) return false;
+            _on = powered; _mode = mode; _val = v;
+            return true;
+        }
+        public override bool HitTest(PointF p) => false;
+        public override void Draw(Graphics g)
+        {
+            using (var p = Oh.RoundRect(RectangleF.Inflate(_r, 2, 2), 2)) using (var b = new SolidBrush(Color.FromArgb(46, 50, 54))) g.FillPath(b, p);
+            using (var b = new SolidBrush(Color.FromArgb(10, 12, 14))) g.FillRectangle(b, _r);
+            if (!_on) return;
+            // com a l'avió: QNH / QFE petit a la meitat dreta, a dalt; dígits baixos i amples, sense segments apagats
+            if (_mode != 0) Oh.Text(g, _mode == 2 ? "QFE" : "QNH", _r.X + _r.Width * 0.70f, _r.Y + _r.Height * 0.2f, _r.Height * 0.24f, Color.FromArgb(240, 242, 244));
+            var cells = new List<(char c, bool dp)>();
+            foreach (char ch in _val)
+            {
+                if (ch == '.' && cells.Count > 0) cells[^1] = (cells[^1].c, true);
+                else cells.Add((ch, false));
+            }
+            const int n = 4;
+            if (cells.Count > n) cells.RemoveRange(0, cells.Count - n);
+            var area = RectangleF.FromLTRB(_r.X + _r.Width * 0.035f, _r.Y + _r.Height * 0.40f, _r.Right - _r.Width * 0.02f, _r.Y + _r.Height * 0.90f);
+            float cw = area.Width / n;
+            int start = n - cells.Count;
+            for (int i = 0; i < cells.Count; i++)
+                OhSeg7.Digit(g, area.X + (start + i) * cw, area.Y, cw, area.Height, cells[i].c, cells[i].dp, thick: 0.22f, ghost: false, padF: 0.05f, color: Color.FromArgb(240, 242, 244));
+        }
+    }
+
+    /// <summary>Estat de la pantalla del FCU (llegit del simulador).</summary>
+    public sealed record FcuState(
+        bool On,
+        double Spd, bool SpdMach, bool SpdDashed, bool SpdManaged,
+        double Hdg, bool HdgDashed, bool HdgManaged, bool TrkFpa,
+        double Alt, bool AltManaged,
+        double Vs, double Fpa, bool VsDashed);
+
+    /// <summary>
+    /// Pantalla del FCU: dígits de 7 segments clars (amb els segments apagats lleugerament visibles) i rètols.
+    /// Mode HDG-V/S o TRK-FPA canvia els rètols i el format del V/S (+12oo) o FPA (+0.8). Punt de "managed" a la dreta
+    /// de SPD, HDG i ALT. Posicions preses de la pantalla del ToLiss (fraccions de l'amplada / alçada de la finestra).
+    /// </summary>
+    internal sealed class OhFcuDisplay : OhElement
+    {
+        readonly RectangleF _r;
+        public FcuState? State0;
+        static readonly Color Lit = Color.FromArgb(232, 234, 226);
+        public OhFcuDisplay(string id, RectangleF r) { Id = id; _r = r; Bounds = RectangleF.Inflate(r, 3, 3); }
+        public override bool HitTest(PointF p) => false;
+        float X(float f) => _r.X + _r.Width * f;
+        float Y(float f) => _r.Y + _r.Height * f;
+
+        public override void Draw(Graphics g)
+        {
+            using (var p = Oh.RoundRect(RectangleF.Inflate(_r, 2, 2), 2)) using (var b = new SolidBrush(Color.FromArgb(46, 50, 54))) g.FillPath(b, p);
+            using (var b = new SolidBrush(Color.FromArgb(10, 12, 14))) g.FillRectangle(b, _r);
+            var s = State0;
+            if (s == null || !s.On) return;
+            float lh = _r.Height * 0.20f;              // mida dels rètols
+            float ly = Y(0.24f);                       // fila dels rètols
+            float dy = Y(0.40f), dh = _r.Height * 0.50f; // dígits
+            float cw = _r.Width * 0.031f;              // amplada de cada dígit
+            var ic = System.Globalization.CultureInfo.InvariantCulture;
+
+            // ── rètols ──
+            Oh.Text(g, s.SpdMach ? "MACH" : "SPD", X(0.040f), ly, lh, Lit);
+            Oh.Text(g, s.TrkFpa ? "TRK" : "HDG", X(s.TrkFpa ? 0.288f : 0.235f), ly, lh, Lit);
+            Oh.Text(g, "LAT", X(0.338f), ly, lh, Lit);
+            Oh.Text(g, s.TrkFpa ? "TRK" : "HDG", X(0.448f), Y(0.80f), lh, Lit);
+            Oh.Text(g, s.TrkFpa ? "FPA" : "V/S", X(0.540f), Y(0.80f), lh, Lit);
+            Oh.Text(g, "ALT", X(0.725f), ly, lh, Lit);
+            // ┌── LVL/CH ──┐
+            using (var lp = new Pen(Lit, Math.Max(0.5f, lh * 0.12f)))
+            {
+                float bx0 = X(0.757f), bx1 = X(0.906f), tw = _r.Width * 0.075f, cx = X(0.8315f), by = ly - lh * 0.05f;
+                g.DrawLines(lp, new[] { new PointF(bx0, by + lh * 0.45f), new PointF(bx0, by), new PointF(cx - tw / 2, by) });
+                g.DrawLines(lp, new[] { new PointF(cx + tw / 2, by), new PointF(bx1, by), new PointF(bx1, by + lh * 0.45f) });
+            }
+            Oh.Text(g, "LVL/CH", X(0.8315f), ly, lh, Lit);
+            Oh.Text(g, s.TrkFpa ? "FPA" : "V/S", X(s.TrkFpa ? 0.975f : 0.962f), ly, lh, Lit);
+
+            // ── valors ──
+            string spd = s.SpdDashed ? "---" : s.SpdMach ? s.Spd.ToString("0.00", ic) : Math.Round(s.Spd).ToString("0", ic);
+            Cells(g, X(0.012f), dy, cw, dh, 4, spd);
+            if (s.SpdManaged) Dot(g, X(0.150f), dy + dh * 0.5f, dh);
+            string hdg = s.HdgDashed ? "---" : (((int)Math.Round(s.Hdg) % 360 + 360) % 360).ToString("000", ic);
+            Cells(g, X(0.218f), dy, cw, dh, 3, hdg);
+            if (s.HdgManaged) Dot(g, X(0.328f), dy + dh * 0.5f, dh);
+            Cells(g, X(0.638f), dy, cw, dh, 5, Math.Max(0, Math.Round(s.Alt)).ToString("00000", ic));
+            if (s.AltManaged) Dot(g, X(0.802f), dy + dh * 0.5f, dh);
+            float vx = X(0.840f);
+            if (s.VsDashed) Cells(g, vx, dy, cw, dh, 5, "-----");
+            else
+            {
+                double v = s.TrkFpa ? s.Fpa : s.Vs;
+                Sign(g, vx, dy, cw * 0.75f, dh, v < -0.0001);
+                string body = s.TrkFpa ? Math.Min(9.9, Math.Abs(s.Fpa)).ToString("0.0", ic)
+                                       : Math.Min(99, Math.Round(Math.Abs(s.Vs) / 100.0)).ToString("00", ic) + "oo";
+                Cells(g, vx + cw * 0.8f, dy, cw, dh, s.TrkFpa ? 2 : 4, body);
+            }
+        }
+
+        static void Cells(Graphics g, float x, float y, float cw, float h, int n, string text)
+        {
+            var cells = new List<(char c, bool dp)>();
+            foreach (char ch in text)
+            {
+                if (ch == '.' && cells.Count > 0) cells[^1] = (cells[^1].c, true);
+                else cells.Add((ch, false));
+            }
+            if (cells.Count > n) cells.RemoveRange(0, cells.Count - n);
+            int start = n - cells.Count;
+            for (int i = 0; i < n; i++)
+            {
+                var c = i >= start ? cells[i - start] : (' ', false);
+                OhSeg7.Digit(g, x + i * cw, y, cw, h, c.Item1, c.Item2, thick: 0.2f, ghost: true, padF: 0.08f, color: Lit);
+            }
+        }
+        static void Dot(Graphics g, float x, float cy, float h)
+        {
+            float d = h * 0.2f;
+            using var b = new SolidBrush(Lit);
+            g.FillEllipse(b, x - d / 2, cy - d / 2, d, d);
+        }
+        static void Sign(Graphics g, float x, float y, float w, float h, bool minus)
+        {
+            float t = Math.Max(0.5f, w * 0.17f), cy = y + h * 0.5f, cx = x + w * 0.5f, a = w * 0.36f;
+            using var b = new SolidBrush(Lit);
+            g.FillRectangle(b, cx - a, cy - t / 2, a * 2, t);
+            if (!minus) g.FillRectangle(b, cx - t / 2, cy - a, t, a * 2);
+        }
+    }
+
     internal sealed class OhDarkWindow : OhSilk
     {
         readonly RectangleF _r;
@@ -559,11 +725,12 @@ namespace panelAIR1000
         public override void Draw(Graphics g)
         {
             const float head = 3.2f;
-            float aStop = _a1 - head / _r * 180f / MathF.PI;      // l'arc acaba on comença la punta
+            float dir = _a1 >= _a0 ? 1f : -1f;                     // sentit de la fletxa (horari / antihorari)
+            float aStop = _a1 - dir * head / _r * 180f / MathF.PI;      // l'arc acaba on comença la punta
             var rect = new RectangleF(_cx - _r, _cy - _r, _r * 2, _r * 2);
             using (var p = new Pen(Oh.Silk, 2.2f)) g.DrawArc(p, rect, _a0 - 90, aStop - _a0);
             double ae = (_a1 - 90) * Math.PI / 180.0;
-            float tx = -(float)Math.Sin(ae), ty = (float)Math.Cos(ae);   // tangent en sentit horari
+            float tx = -(float)Math.Sin(ae) * dir, ty = (float)Math.Cos(ae) * dir;   // tangent en el sentit de la fletxa
             float nx = (float)Math.Cos(ae), ny = (float)Math.Sin(ae);
             float px = _cx + nx * _r, py = _cy + ny * _r;
             using var b = new SolidBrush(Oh.Silk);
@@ -619,6 +786,11 @@ namespace panelAIR1000
         public virtual bool HitTest(PointF p) => RectangleF.Inflate(Bounds, 3, 3).Contains(p);
         public abstract void Draw(Graphics g);
         public virtual void Tap(PointF p) { }
+        /// <summary>El dit es posa a sobre de l'element (abans del Tap) / s'aixeca o comença a arrossegar.</summary>
+        public virtual void PressStart(PointF p) { }
+        public virtual void PressEnd() { }
+        /// <summary>Zones clicables (coordenades del panell) que es ressalten amb el botó "mostrar àrees".</summary>
+        public virtual IEnumerable<RectangleF> HitAreas { get { yield return RectangleF.Inflate(Bounds, 3, 3); } }
         public virtual bool Animating => false;
         public virtual void Tick(float dt) { }
         public virtual int State => 0;
@@ -1145,7 +1317,7 @@ namespace panelAIR1000
         }
     }
 
-    internal enum ToggleStyle { Bat, Paddle, Land }
+    internal enum ToggleStyle { Bat, Paddle, Land, Metal }
 
     /// <summary>
     /// Interruptor dins un sòcol fosc. 2 posicions: qualsevol toc el commuta.
@@ -1164,6 +1336,15 @@ namespace panelAIR1000
             float hw = style == ToggleStyle.Land ? size * 1.25f : size * 1.1f;
             Bounds = new RectangleF(cx - hw, cy - size * 1.7f, hw * 2, size * 3.4f);
         }
+        /// <summary>Palanca horitzontal: posició 0 a l'esquerra, última a la dreta (p.ex. ADF / OFF / VOR).</summary>
+        public bool Horizontal { get; private set; }
+        public OhToggle MakeHorizontal()
+        {
+            Horizontal = true;
+            var b = Bounds; float cx = b.X + b.Width / 2, cy = b.Y + b.Height / 2;
+            Bounds = new RectangleF(cx - b.Height / 2, cy - b.Width / 2, b.Height, b.Width);
+            return this;
+        }
         float TargetPos => _n == 2 ? (Index == 0 ? -1f : 1f) : Index - 1f;
         public override int State => Index;
         public override bool Animating => Math.Abs(_pos - TargetPos) > 0.001f || _spring > 0;
@@ -1181,7 +1362,8 @@ namespace panelAIR1000
 
         public override void Tap(PointF p)
         {
-            int ni = _n == 2 ? 1 - Index : Math.Clamp(Index + (p.Y < _cy ? -1 : 1), 0, _n - 1);
+            bool first = Horizontal ? p.X < _cx : p.Y < _cy;
+            int ni = _n == 2 ? 1 - Index : Math.Clamp(Index + (first ? -1 : 1), 0, _n - 1);
             if (ni == Index) return;
             Index = ni;
             if (SpringToCenter && _n == 3 && ni != 1) _spring = 0.45f;
@@ -1190,12 +1372,40 @@ namespace panelAIR1000
 
         public override void Draw(Graphics g)
         {
+            if (Horizontal)
+            {
+                // es dibuixa la palanca vertical girada 90° (amunt → esquerra)
+                var st = g.Save();
+                g.TranslateTransform(_cx, _cy); g.RotateTransform(-90); g.TranslateTransform(-_cx, -_cy);
+                DrawVertical(g);
+                g.Restore(st);
+            }
+            else DrawVertical(g);
+        }
+
+        void DrawVertical(Graphics g)
+        {
             float R = _sz * 1.02f;
             DrawSocket(g, R);
             float ext = 1f - Math.Abs(_pos);             // 0 = palanca estirada, 1 = apuntant a l'observador
             float dir = _pos >= 0 ? 1f : -1f;
             switch (Style)
             {
+                case ToggleStyle.Metal:
+                {
+                    // palanca metàl·lica cromada (ADF/VOR de l'EFIS)
+                    float L = R * 1.15f;
+                    float tipY = _cy + _pos * L;
+                    // doble de gruix i cònica: estreta a la base, ampla a la punta
+                    float bw = R * 0.20f, tw = R * 0.44f;
+                    Collar(g, R);
+                    Shaft(g, bw, tw, tipY, Color.FromArgb(70, 74, 80), Color.FromArgb(232, 236, 240));
+                    float br = Math.Max(R * (0.30f + 0.10f * ext), tw * 1.12f);
+                    var ball = new RectangleF(_cx - br, tipY - br * (0.9f + 0.1f * ext), br * 2, br * (1.8f + 0.2f * ext));
+                    Oh.SoftShadowEllipse(g, ball, 1.2f, 1.8f, 2f, 120);
+                    Oh.Specular(g, ball, Color.FromArgb(250, 252, 255), Color.FromArgb(96, 102, 110));
+                    break;
+                }
                 case ToggleStyle.Bat:
                 {
                     float L = R * 1.05f;
@@ -1356,6 +1566,10 @@ namespace panelAIR1000
     internal sealed class OhRoundButton : OhElement
     {
         readonly float _cx, _cy, _r; float _hold, _depth;
+        /// <summary>Marge de la zona de toc al voltant del botó (0 = just el voltant negre).</summary>
+        public float HitPad = 3f;
+        public override bool HitTest(PointF p) => RectangleF.Inflate(Bounds, HitPad, HitPad).Contains(p);
+        public override IEnumerable<RectangleF> HitAreas { get { yield return RectangleF.Inflate(Bounds, HitPad, HitPad); } }
         public OhRoundButton(string id, float cx, float cy, float r)
         {
             Id = id; _cx = cx; _cy = cy; _r = r; Bounds = new RectangleF(cx - r, cy - r, r * 2, r * 2);
@@ -1387,7 +1601,8 @@ namespace panelAIR1000
         static readonly Dictionary<char, string> Map = new()
         {
             ['0'] = "abcdef", ['1'] = "bc", ['2'] = "abged", ['3'] = "abgcd", ['4'] = "fgbc", ['5'] = "afgcd",
-            ['6'] = "afgedc", ['7'] = "abc", ['8'] = "abcdefg", ['9'] = "abcdfg", ['-'] = "g", [' '] = ""
+            ['6'] = "afgedc", ['7'] = "abc", ['8'] = "abcdefg", ['9'] = "abcdfg", ['-'] = "g", [' '] = "",
+            ['S'] = "afgcd", ['t'] = "fged", ['d'] = "bcdeg", ['o'] = "cdeg"
         };
         public OhSeg7(string id, RectangleF r, string text, int cells, string suffix)
         {
@@ -1420,11 +1635,13 @@ namespace panelAIR1000
             if (sw > 0) Oh.Text(g, _suffix, win.Right - sw / 2f, win.Y + win.Height * 0.3f, win.Height * 0.36f, Oh.SegAmber);
         }
 
-        static void Digit(Graphics g, float x, float y, float w, float h, char c, bool dp)
+        /// <param name="thick">gruix dels segments respecte de l'amplada del dígit</param>
+        /// <param name="ghost">dibuixa els segments apagats (lleugerament visibles)</param>
+        internal static void Digit(Graphics g, float x, float y, float w, float h, char c, bool dp, float thick = 0.19f, bool ghost = true, float padF = 0.12f, Color? color = null)
         {
-            float pad = w * 0.12f;
+            float pad = w * padF;
             float sx = x + pad, swd = w - pad * 2 - w * 0.1f;
-            float t = Math.Max(0.9f, swd * 0.19f);
+            float t = Math.Max(0.9f, swd * thick);
             float hh = h / 2f;
             Map.TryGetValue(c, out var segs);
             segs ??= "";
@@ -1434,14 +1651,16 @@ namespace panelAIR1000
                 ('g', new RectangleF(sx + t * 0.6f, y + hh - t / 2, swd - t * 1.2f, t)),
                 ('d', new RectangleF(sx + t * 0.6f, y + h - t, swd - t * 1.2f, t)),
                 ('f', new RectangleF(sx, y + t * 0.6f, t, hh - t * 0.9f)),
-                ('b', new RectangleF(sx + swd - t, y + t * 0.6f, t, hh - t * 0.9f)),
+                // l'1 (només b i c) ocupa tota l'alçada, igual que la resta de dígits
+                ('b', c == '1' ? new RectangleF(sx + swd - t, y, t, hh - t * 0.15f) : new RectangleF(sx + swd - t, y + t * 0.6f, t, hh - t * 0.9f)),
                 ('e', new RectangleF(sx, y + hh + t * 0.3f, t, hh - t * 0.9f)),
-                ('c', new RectangleF(sx + swd - t, y + hh + t * 0.3f, t, hh - t * 0.9f)),
+                ('c', c == '1' ? new RectangleF(sx + swd - t, y + hh + t * 0.15f, t, hh - t * 0.15f) : new RectangleF(sx + swd - t, y + hh + t * 0.3f, t, hh - t * 0.9f)),
             };
-            using var on = new SolidBrush(Oh.SegAmber);
-            using var off = new SolidBrush(Color.FromArgb(26, Oh.SegAmber));
-            foreach (var (n, rr) in rects) g.FillRectangle(segs.IndexOf(n) >= 0 ? on : off, rr);
-            g.FillRectangle(dp ? on : off, sx + swd + w * 0.03f, y + h - t, t, t);
+            var col = color ?? Oh.SegAmber;
+            using var on = new SolidBrush(col);
+            using var off = new SolidBrush(Color.FromArgb(ghost ? 26 : 0, col));
+            foreach (var (n, rr) in rects) if (ghost || segs.IndexOf(n) >= 0) g.FillRectangle(segs.IndexOf(n) >= 0 ? on : off, rr);
+            if (ghost || dp) g.FillRectangle(dp ? on : off, sx + swd + w * 0.03f, y + h - t, t, t);
         }
     }
 
@@ -1906,13 +2125,14 @@ namespace panelAIR1000
     internal sealed class OhVisorShadow : OhElement
     {
         // valors triats per en Pere (2026-11-20), en unitats de la imatge de referència
-        const float Len = 60f, Darkness = 0.60f, Softness = 1.45f, Offset = 12f;
+        const float Len = 60f, Softness = 1.45f, Offset = 12f;
+        readonly float Darkness;   // 0.60 (franja); la visera +25% = 0.75
         readonly PointF[] _edge;   // vora de baix de la visera (unitats del panell)
         readonly float _k;
 
-        public OhVisorShadow(PointF[] edge, float k, string id)
+        public OhVisorShadow(PointF[] edge, float k, string id, float darkness = 0.60f)
         {
-            Id = id; Z = 50; _edge = edge; _k = k;
+            Id = id; Z = 50; _edge = edge; _k = k; Darkness = darkness;
             float ext = (Len + Offset) * k + 2;
             Bounds = RectangleF.FromLTRB(edge.Min(p => p.X), edge.Min(p => p.Y) - 1, edge.Max(p => p.X), edge.Max(p => p.Y) + ext);
         }
@@ -2007,6 +2227,331 @@ namespace panelAIR1000
             using (var b = new LinearGradientBrush(new RectangleF(_cx - _w / 2, _cy - _h / 2, _w, _h), Color.FromArgb(70, 72, 76), Color.FromArgb(18, 18, 20), 90f)) g.FillPolygon(b, poly);
             using var p = new Pen(Color.FromArgb(120, 150, 152, 156), 0.6f);
             for (int i = 1; i < 4; i++) { float y = _cy - _h / 2 + _h * i / 4f; float hw = _w / 2 - (_w * 0.18f) * i / 4f; g.DrawLine(p, _cx - hw + 1, y, _cx + hw - 1, y); }
+        }
+    }
+
+    /// <summary>
+    /// Rotatiu doble del QNH: base negra estriada de 2 posicions (índex blanc a "in Hg" o "hPa") i, al mig, un pom
+    /// blanc "PULL STD" (es prem/estira). Tocar l'anell exterior canvia la unitat; tocar el pom, PULL STD.
+    /// </summary>
+    internal enum KnobFace { Baro, Alt, Spd, Hdg }
+
+    internal sealed class OhBaroKnob : OhElement
+    {
+        readonly float _cx, _cy, _r;
+        readonly float _zw;     // mig ample de les zones de toc (en radis)
+        readonly bool _alt;     // variant ALT del FCU: pom sense lletres amb estriat de 8 ones; anell 100 / 1000
+        readonly KnobFace _face;
+        /// <summary>Rotatiu simple (SPD / HDG): sense anell negre de selecció; només 4 zones de toc.</summary>
+        bool Simple => _face == KnobFace.Spd || _face == KnobFace.Hdg;
+        /// <summary>
+        /// PUSH i PULL comparteixen una sola zona (la columna del mig). Toc curt = PUSH;
+        /// dit quiet més d'1 s = PULL (en complir-se el segon, sense esperar a aixecar el dit). Si el dit es mou
+        /// és un arrossegament: no fa res. Les zones de gir (esquerra / dreta) es mantenen igual.
+        /// </summary>
+        public bool SingleZone = true;
+        const float PullHold = 1f;
+        bool _pullArmed, _pullDone; double _pullStart;
+        RectangleF ZOne => RectangleF.FromLTRB(_cx - _r * (_zw / 3f), _cy - _r * 1.45f, _cx + _r * (_zw / 3f), _cy + _r * 1.31f);
+        public bool Hpa = true, Std;
+        // pom momentani: repòs al mig (0); PUSH → endins (-1) 0,25 s; PULL → enfora (+1) 0,25 s
+        float _ang, _push, _pushTarget, _pushHold;
+        const float HoldTime = 0.25f;
+        // gir del pom PULL STD: cada toc a les zones de sota in Hg / hPa el gira 10º (esquerra / dreta)
+        float _knob, _knobTarget;
+        const float KnobStep = 10f;
+        // mantenint el dit a les zones de gir més de 0,6 s: gir continu a 50º/s fins que s'aixeca
+        // (temps real, no dt: el tic d'animació limita dt i el gir quedaria curt)
+        static readonly System.Diagnostics.Stopwatch s_clock = System.Diagnostics.Stopwatch.StartNew();
+        int _holdDir; float _holdT, _holdBase; double _holdStart; bool _skipTap;
+        int _stepsSent;   // passos de 10º ja enviats a l'avió (cada pas = 1 INC / DEC)
+
+        /// <summary>Envia un INC / DEC per cada pas de 10º que el pom hagi girat des de l'últim enviament.</summary>
+        void SendSteps()
+        {
+            int steps = (int)Math.Floor(_knobTarget / KnobStep + 1e-4f);
+            while (_stepsSent < steps) { _stepsSent++; Owner.RaiseCommand(Id, "INC"); }
+            while (_stepsSent > steps) { _stepsSent--; Owner.RaiseCommand(Id, "DEC"); }
+        }
+        const float HoldDelay = 0.6f, HoldSpeed = 100f;
+        // zones de toc: "in Hg" i "hPa" (rètols de dalt) giren l'anell; entre els dos rètols = PUSH; meitat de baix del rotatiu = PULL
+        // tres franges d'amplada igual (4r / 3 cadascuna)
+        // in Hg i hPa: pujades un 50% de la seva alçada (1,45r) respecte de PUSH
+        RectangleF ZInHg => RectangleF.FromLTRB(_cx - _r * _zw, _cy - _r * 2.175f, _cx - _r * (_zw / 3f), _cy - _r * 0.725f);
+        RectangleF ZHpa => RectangleF.FromLTRB(_cx + _r * (_zw / 3f), _cy - _r * 2.175f, _cx + _r * _zw, _cy - _r * 0.725f);
+        RectangleF ZPush => RectangleF.FromLTRB(_cx - _r * (_zw / 3f), _cy - _r * 1.45f, _cx + _r * (_zw / 3f), _cy);
+        RectangleF ZPull => Simple ? RectangleF.FromLTRB(_cx - _r * (_zw / 3f), _cy, _cx + _r * (_zw / 3f), _cy + _r * 1.31f)
+                                    : RectangleF.FromLTRB(_cx - _r * 0.7f, _cy, _cx + _r * 0.7f, _cy + _r * 1.31f);   // baixa fins al mateix nivell que les zones de gir   // 30% més estreta
+        // sota in Hg / hPa (mateixa amplada), fins a les tecles FD / LS: giren el pom 10º a l'esquerra / a la dreta
+        // (rotatiu simple: les zones de gir ocupen tota l'alçada, de dalt de PUSH a baix de PULL)
+        RectangleF ZLeft => RectangleF.FromLTRB(_cx - _r * _zw, _cy - _r * (Simple ? 1.45f : 0.725f), _cx - _r * (_zw / 3f), _cy + _r * 1.31f);
+        RectangleF ZRight => RectangleF.FromLTRB(_cx + _r * (_zw / 3f), _cy - _r * (Simple ? 1.45f : 0.725f), _cx + _r * _zw, _cy + _r * 1.31f);
+        public override IEnumerable<RectangleF> HitAreas
+        {
+            get
+            {
+                if (SingleZone)
+                {
+                    if (!Simple) { yield return ZInHg; yield return ZHpa; }
+                    yield return ZOne; yield return ZLeft; yield return ZRight; yield break;
+                }
+                if (!Simple) { yield return ZInHg; yield return ZHpa; }
+                yield return ZPush; yield return ZLeft; yield return ZRight; yield return ZPull;
+            }
+        }
+        public override bool HitTest(PointF p) => SingleZone ? (!Simple && (ZInHg.Contains(p) || ZHpa.Contains(p))) || ZOne.Contains(p) || ZLeft.Contains(p) || ZRight.Contains(p) : (!Simple && (ZInHg.Contains(p) || ZHpa.Contains(p))) || ZPush.Contains(p) || ZPull.Contains(p) || ZLeft.Contains(p) || ZRight.Contains(p);
+        const float InHgAng = -38f, HpaAng = 38f;
+        public OhBaroKnob(string id, float cx, float cy, float r, bool alt = false, float zoneHalfWidth = 2f, KnobFace face = KnobFace.Baro)
+        {
+            _face = alt ? KnobFace.Alt : face;
+            Id = id; _cx = cx; _cy = cy; _r = r; _ang = HpaAng; _alt = _face == KnobFace.Alt; _zw = zoneHalfWidth;
+            Bounds = new RectangleF(cx - r, cy - r, r * 2, r * 2);
+        }
+        public override int State => (Hpa ? 1 : 0) + (Std ? 2 : 0);
+        float TargetAng => Hpa ? HpaAng : InHgAng;
+        public override bool Animating => Math.Abs(_ang - TargetAng) > 0.05f || _pushHold > 0 || Math.Abs(_push - _pushTarget) > 0.001f || Math.Abs(_knob - _knobTarget) > 0.05f || _holdDir != 0 || _pullArmed;
+        public override void Tick(float dt)
+        {
+            _ang = Approach(_ang, TargetAng, dt * 400f);
+            if (_pushHold > 0) { _pushHold -= dt; if (_pushHold <= 0) { _pushHold = 0; _pushTarget = 0; } }
+            if (_pullArmed && s_clock.Elapsed.TotalSeconds - _pullStart >= PullHold)
+            {
+                _pullArmed = false; _pullDone = true;
+                Std = true; _pushTarget = 1; _pushHold = HoldTime;
+                Owner.RaiseCommand(Id, "PULL");
+            }
+            _push = Approach(_push, _pushTarget, dt * 8f);
+            if (_holdDir != 0)
+            {
+                _holdT = (float)(s_clock.Elapsed.TotalSeconds - _holdStart);
+                if (_holdT > HoldDelay)
+                {
+                    _knobTarget = _holdBase + _holdDir * HoldSpeed * (_holdT - HoldDelay);   // només el temps passat d'1 s
+                    _knob = _knobTarget;                                                      // continu, sense retard
+                    SendSteps();                                                              // 50º/s = 5 passos/s
+                }
+            }
+            _knob = Approach(_knob, _knobTarget, dt * 200f);
+        }
+        public override void PressStart(PointF p)
+        {
+            _pullArmed = SingleZone && ZOne.Contains(p); _pullDone = false;
+            _pullStart = s_clock.Elapsed.TotalSeconds;
+            _holdDir = ZLeft.Contains(p) ? -1 : ZRight.Contains(p) ? 1 : 0;
+            _holdT = 0; _skipTap = false;
+            _holdStart = s_clock.Elapsed.TotalSeconds; _holdBase = _knobTarget;
+        }
+        public override void PressEnd()
+        {
+            _pullArmed = false;
+            // si ja ha girat de manera contínua, en aixecar el dit no s'hi suma el pas de 10º
+            if (_holdDir != 0 && s_clock.Elapsed.TotalSeconds - _holdStart > HoldDelay)
+            {
+                _skipTap = true;
+                _knobTarget = _holdBase + _holdDir * HoldSpeed * (float)(s_clock.Elapsed.TotalSeconds - _holdStart - HoldDelay);
+                _knob = _knobTarget;
+                SendSteps();
+            }
+            _holdDir = 0;
+        }
+        public override RectangleF DirtyBounds => RectangleF.Inflate(Bounds, 4 + _r * 0.25f, 4 + _r * 0.25f);   // (simple: anell a 1,18r)
+        public override void Tap(PointF p)
+        {
+            if (SingleZone && ZOne.Contains(p))
+            {
+                if (_pullDone) { _pullDone = false; return; }   // ja ha fet PULL mentre es mantenia el dit
+                Std = false; _pushTarget = -1; _pushHold = HoldTime;
+                Owner.RaiseCommand(Id, "PUSH");
+                Changed();
+                return;
+            }
+            if (!Simple && ZInHg.Contains(p)) { if (!Hpa) return; Hpa = false; Owner.RaiseCommand(Id, _alt ? "STEP100" : "INHG"); }
+            else if (!Simple && ZHpa.Contains(p)) { if (Hpa) return; Hpa = true; Owner.RaiseCommand(Id, _alt ? "STEP1000" : "HPA"); }
+            else if (ZPull.Contains(p) || ZPush.Contains(p))
+            {
+                bool pull = ZPull.Contains(p);
+                Std = pull;                       // estirar = STD; prémer = torna a QNH
+                _pushTarget = pull ? 1 : -1; _pushHold = HoldTime;
+                Owner.RaiseCommand(Id, pull ? "PULL" : "PUSH");
+            }
+            else if (_skipTap) { _skipTap = false; return; }
+            else if (ZLeft.Contains(p)) { _knobTarget -= KnobStep; SendSteps(); }   // gira 10º a l'esquerra = 1 DEC
+            else if (ZRight.Contains(p)) { _knobTarget += KnobStep; SendSteps(); }  // gira 10º a la dreta = 1 INC
+            Changed();
+        }
+        /// <summary>Pom de l'ALT: sense lletres, contorn amb estriat de 8 ones (gira amb el pom; la llum queda fixa).</summary>
+        void DrawLobed(Graphics g, float ir)
+        {
+            const int N = 128;
+            var pts = new PointF[N];
+            double rot = _knob * Math.PI / 180.0;
+            for (int i = 0; i < N; i++)
+            {
+                double a = i * 2 * Math.PI / N;
+                float rr = ir * (0.93f + 0.07f * (float)Math.Cos(8 * a));
+                pts[i] = new PointF(_cx + rr * (float)Math.Sin(a + rot), _cy - rr * (float)Math.Cos(a + rot));
+            }
+            using var p = new GraphicsPath();
+            p.AddPolygon(pts);
+            float dk = 1f - 0.18f * Math.Max(0, -_push);
+            Color C(int r, int gg, int b) => Color.FromArgb((int)(r * dk), (int)(gg * dk), (int)(b * dk));
+            using (var pg = new PathGradientBrush(p) { CenterColor = C(206, 214, 224), SurroundColors = new[] { C(112, 122, 134) }, CenterPoint = new PointF(_cx - ir * 0.3f, _cy - ir * 0.35f) })
+                g.FillPath(pg, p);
+            // relleu de les ones: llum a les crestes de dalt a l'esquerra i ombra a les de baix a la dreta
+            using (var hl = new Pen(Color.FromArgb(90, 255, 255, 255), Math.Max(0.4f, ir * 0.05f)))
+            using (var dl = new Pen(Color.FromArgb(80, 20, 24, 30), Math.Max(0.4f, ir * 0.05f)))
+            {
+                var st = g.Save();
+                g.SetClip(p, CombineMode.Intersect);
+                g.DrawArc(hl, _cx - ir * 0.9f, _cy - ir * 0.9f, ir * 1.8f, ir * 1.8f, 180, 110);
+                g.DrawArc(dl, _cx - ir * 0.9f, _cy - ir * 0.9f, ir * 1.8f, ir * 1.8f, 0, 110);
+                g.Restore(st);
+            }
+            using (var op = new Pen(Color.FromArgb(120, 70, 78, 88), 0.5f)) g.DrawPath(op, p);
+        }
+
+        /// <summary>Rotatiu simple del FCU (SPD / HDG): anell clar fi al voltant, base metàl·lica i el pom a sobre.</summary>
+        void DrawSimple(Graphics g)
+        {
+            float rr = _r * 1.18f;
+            var ring = new RectangleF(_cx - rr, _cy - rr, rr * 2, rr * 2);
+            using (var db = new SolidBrush(Color.FromArgb(70, 20, 24, 30))) g.FillEllipse(db, ring);
+            using (var rp = new Pen(Color.FromArgb(196, 202, 210), Math.Max(0.5f, _r * 0.055f))) g.DrawEllipse(rp, ring);
+            var o = new RectangleF(_cx - _r, _cy - _r, _r * 2, _r * 2);
+            Oh.SoftShadowEllipse(g, o, 1.2f, 1.8f, 2.2f, 130);
+            using (var lg = new LinearGradientBrush(o, Color.FromArgb(200, 206, 214), Color.FromArgb(84, 90, 100), 55f)) g.FillEllipse(lg, o);
+            using (var ep = new Pen(Color.FromArgb(60, 66, 74), 0.6f)) g.DrawEllipse(ep, o);
+            // pom: estirat (+1) més gran i amb més ombra; endinsat (-1) més petit i més fosc. Tot el pom (ombra, cara,
+            // estries, triangle) s'escala junt al voltant del centre, perquè l'efecte sigui uniforme
+            float ir = _r * 0.72f;
+            var i0 = new RectangleF(_cx - ir, _cy - ir, ir * 2, ir * 2);
+            var gs = g.Save();
+            float sc = 1f + 0.065f * _push;
+            g.TranslateTransform(_cx, _cy); g.ScaleTransform(sc, sc); g.TranslateTransform(-_cx, -_cy);
+            float sh = Math.Max(0f, 1f + _push);   // 0 endinsat, 1 repòs, 2 estirat
+            Oh.SoftShadowEllipse(g, i0, 0.25f + 0.55f * sh, 0.35f + 0.85f * sh, 1.2f + 0.4f * sh, (int)(60 + 80 * Math.Min(1f, sh)));
+            if (_push < 0)
+            {
+                // endinsat: ombra fosca que envolta l'estriat (el pom queda dins el forat)
+                float P = -_push;
+                using var hp = new GraphicsPath();
+                hp.AddPolygon(FacePts(ir));
+                using var dp = new Pen(Color.FromArgb((int)(190 * P), 4, 5, 7), ir * 0.16f) { LineJoin = LineJoin.Round };
+                g.DrawPath(dp, hp);
+            }
+            try { DrawSimpleFace(g, ir); } finally { g.Restore(gs); }
+        }
+
+        /// <summary>Contorn de la cara del pom simple: 8 ones (HDG) o 40 estries (SPD), girat amb el pom.</summary>
+        PointF[] FacePts(float ir)
+        {
+            const int N = 240;
+            var pts = new PointF[N];
+            double rot = _knob * Math.PI / 180.0;
+            bool hdg = _face == KnobFace.Hdg;
+            for (int i = 0; i < N; i++)
+            {
+                double a = i * 2 * Math.PI / N;
+                float q = hdg ? ir * (0.93f + 0.07f * (float)Math.Cos(8 * a)) : ir * (0.975f + 0.025f * (float)Math.Cos(40 * a));
+                pts[i] = new PointF(_cx + q * (float)Math.Sin(a + rot), _cy - q * (float)Math.Cos(a + rot));
+            }
+            return pts;
+        }
+
+        void DrawSimpleFace(Graphics g, float ir)
+        {
+            if (_face == KnobFace.Hdg)
+            {
+                DrawLobed(g, ir);
+                // triangle blau dibuixat a la cara (gira amb el pom)
+                var st = g.Save();
+                g.TranslateTransform(_cx, _cy); g.RotateTransform(_knob);
+                float tr = ir * 0.5f;
+                var tri = new[] { new PointF(0, -tr), new PointF(tr * 0.866f, tr * 0.5f), new PointF(-tr * 0.866f, tr * 0.5f) };
+                float tdk = 1f - 0.18f * Math.Max(0, -_push);
+                using (var tp = new Pen(Color.FromArgb((int)(40 * tdk), (int)(96 * tdk), (int)(210 * tdk)), Math.Max(0.5f, ir * 0.09f)) { LineJoin = LineJoin.Round }) g.DrawPolygon(tp, tri);
+                g.Restore(st);
+                return;
+            }
+            // SPD: unes 40 estries al voltant i un cercle blanc molt a tocar del perímetre
+            const int N = 240;
+            var pts = new PointF[N];
+            double rot = _knob * Math.PI / 180.0;
+            for (int i = 0; i < N; i++)
+            {
+                double a = i * 2 * Math.PI / N;
+                float q = ir * (0.975f + 0.025f * (float)Math.Cos(40 * a));
+                pts[i] = new PointF(_cx + q * (float)Math.Sin(a + rot), _cy - q * (float)Math.Cos(a + rot));
+            }
+            float dk = 1f - 0.18f * Math.Max(0, -_push);
+            Color C(int r, int gg, int b) => Color.FromArgb((int)(r * dk), (int)(gg * dk), (int)(b * dk));
+            using (var p = new GraphicsPath())
+            {
+                p.AddPolygon(pts);
+                using (var pg = new PathGradientBrush(p) { CenterColor = C(214, 220, 228), SurroundColors = new[] { C(110, 118, 130) }, CenterPoint = new PointF(_cx - ir * 0.3f, _cy - ir * 0.35f) })
+                    g.FillPath(pg, p);
+                using (var op = new Pen(Color.FromArgb(120, 60, 66, 76), 0.4f)) g.DrawPath(op, p);
+            }
+            float wr = ir * 0.86f;
+            using (var wp = new Pen(Color.FromArgb(240, 242, 244), Math.Max(0.5f, ir * 0.07f))) g.DrawEllipse(wp, _cx - wr, _cy - wr, wr * 2, wr * 2);
+        }
+
+        public override void Draw(Graphics g)
+        {
+            if (Simple) { DrawSimple(g); return; }
+            var o = new RectangleF(_cx - _r, _cy - _r, _r * 2, _r * 2);
+            Oh.SoftShadowEllipse(g, o, 1.2f, 1.8f, 2.2f, 130);
+            // anell exterior negre estriat
+            using (var p = new GraphicsPath())
+            {
+                p.AddEllipse(o);
+                using var pg = new PathGradientBrush(p) { CenterColor = Color.FromArgb(58, 60, 64), SurroundColors = new[] { Color.FromArgb(10, 10, 12) }, CenterPoint = new PointF(_cx - _r * 0.3f, _cy - _r * 0.35f) };
+                g.FillPath(pg, p);
+            }
+            var st = g.Save();
+            g.TranslateTransform(_cx, _cy); g.RotateTransform(_ang);
+            using (var kp = new Pen(Color.FromArgb(150, 0, 0, 0), Math.Max(0.35f, _r * 0.05f)))
+            using (var kl = new Pen(Color.FromArgb(70, 160, 165, 170), Math.Max(0.3f, _r * 0.03f)))
+                for (int i = 0; i < 36; i++)
+                {
+                    g.RotateTransform(10);
+                    g.DrawLine(kp, 0, -_r * 0.98f, 0, -_r * 0.82f);
+                    g.DrawLine(kl, _r * 0.04f, -_r * 0.98f, _r * 0.04f, -_r * 0.84f);
+                }
+            // índex blanc a l'anell
+            using (var ib = new SolidBrush(Color.FromArgb(240, 240, 236))) g.FillRectangle(ib, -_r * 0.05f, -_r * 0.99f, _r * 0.1f, _r * 0.26f);
+            g.Restore(st);
+            using (var ep = new Pen(Color.FromArgb(5, 5, 6), 0.6f)) g.DrawEllipse(ep, o);
+            // pom central "PULL STD": estirat (+1) s'apropa (més gran, més ombra); endinsat (-1) s'allunya (més petit, sense ombra, més fosc)
+            float ir = _r * ((_alt ? 0.70f : 0.62f) + 0.045f * _push);
+            var i0 = new RectangleF(_cx - ir, _cy - ir, ir * 2, ir * 2);
+            float sh = Math.Max(0f, 1f + _push);   // 0 endinsat, 1 repòs, 2 estirat
+            if (sh > 0.02f) Oh.SoftShadowEllipse(g, i0, 0.8f * sh, 1.2f * sh, 1.4f + 0.6f * Math.Max(0, _push), (int)(140 * Math.Min(1f, sh)));
+            if (_push < 0)
+            {
+                // forat fosc al voltant quan s'endinsa
+                var hole = RectangleF.Inflate(i0, ir * 0.06f * -_push, ir * 0.06f * -_push);
+                using var hb = new SolidBrush(Color.FromArgb((int)(200 * -_push), 4, 4, 5));
+                g.FillEllipse(hb, hole);
+            }
+            if (_alt) { DrawLobed(g, ir); return; }
+            using (var p = new GraphicsPath())
+            {
+                p.AddEllipse(i0);
+                // cara del pom una mica més fosca perquè les lletres clares es llegeixin bé
+                float dk = 1f - 0.18f * Math.Max(0, -_push);
+                Color C(int r, int gg, int b) => Color.FromArgb((int)(r * dk), (int)(gg * dk), (int)(b * dk));
+                using var pg = new PathGradientBrush(p) { CenterColor = C(182, 187, 192), SurroundColors = new[] { C(104, 110, 116) }, CenterPoint = new PointF(_cx - ir * 0.35f, _cy - ir * 0.4f) };
+                g.FillPath(pg, p);
+            }
+            using (var ip = new Pen(Color.FromArgb(110, 116, 122), 0.5f)) g.DrawEllipse(ip, i0);
+            var tc = Color.FromArgb(244, 246, 248);
+            // el text gira amb el pom (la llum i l'ombra es queden fixes)
+            var ts = g.Save();
+            g.TranslateTransform(_cx, _cy); g.RotateTransform(_knob); g.TranslateTransform(-_cx, -_cy);
+            Oh.Text(g, "PULL", _cx, _cy - ir * 0.28f, ir * 0.5f, tc);
+            Oh.Text(g, "STD", _cx, _cy + ir * 0.3f, ir * 0.5f, tc);
+            g.Restore(ts);
         }
     }
 
@@ -2240,6 +2785,32 @@ namespace panelAIR1000
 
         /// <summary>Es dispara quan l'usuari canvia un element: (id, estat). Punt d'enganx per a SimConnect.</summary>
         public event Action<string, int>? ElementChanged;
+        /// <summary>Ordre d'un element cap a l'avió (id, ordre), p.ex. ("MIP_BARO", "INC").</summary>
+        public event Action<string, string>? Command;
+        internal void RaiseCommand(string id, string cmd) => Command?.Invoke(id, cmd);
+
+        /// <summary>
+        /// QNH del capità llegit del simulador (bidireccional): finestra de l'EFIS i anell in Hg / hPa.
+        /// mode: 0 = STD, 1 = QNH, 2 = QFE. Sense corrent la finestra queda apagada.
+        /// </summary>
+        /// <summary>Pantalla del FCU llegida del simulador.</summary>
+        public void SetFcu(FcuState s)
+        {
+            if (_byId.TryGetValue("MIP_FCU_DISP", out var e) && e is OhFcuDisplay d && d.State0 != s) { d.State0 = s; Redraw(d.DirtyBounds); }
+            _ov?.SetFcu(s);
+        }
+
+        public void SetBaro(bool powered, int mode, double value, bool inHg)
+        {
+            if (_byId.TryGetValue("MIP_BARO_WIN", out var w) && w is OhBaroWindow bw && bw.Set(powered, mode, value, inHg)) Redraw(bw.DirtyBounds);
+            if (_byId.TryGetValue("MIP_BARO", out var k) && k is OhBaroKnob bk && bk.Hpa == inHg)
+            {
+                bk.Hpa = !inHg;
+                Redraw(TopDirty(bk));
+                if (bk.Animating) { _animating.Add(bk); StartAnim(); }
+            }
+            _ov?.SetBaro(powered, mode, value, inHg);
+        }
 
         /// <summary>
         /// Control del mode A320: mostra el panell principal (fix, 4K) i, per sobre, l'overhead com una capa que
@@ -2277,6 +2848,7 @@ namespace panelAIR1000
             if (_ov != null || _isOverlay || IsDisposed) return;
             _ov = new A320OverheadControl(true) { Visible = false, Bounds = ClientRectangle };
             _ov.ElementChanged += (id, st) => ElementChanged?.Invoke(id, st);
+            _ov.Command += (id, c) => Command?.Invoke(id, c);
             _ov.OverlayMoved += OnOverlayMoved;
             _ov.OverlayClosed += () => { InvalidateButtons(); OnOverlayMoved(); };
             Controls.Add(_ov);
@@ -2293,7 +2865,7 @@ namespace panelAIR1000
             InvalidateButtons();
         }
 
-        void InvalidateButtons() => Invalidate(Rectangle.Inflate(AllBtnsRect, 16, 16));
+        void InvalidateButtons() { Invalidate(Rectangle.Inflate(AllBtnsRect, 16, 16)); Invalidate(Rectangle.Inflate(AreasRect, 6, 6)); }
 
         /// <summary>(capa) S'obre amb la línia de tall a la vora de dalt de la pantalla.</summary>
         void OpenAtCut()
@@ -2370,7 +2942,11 @@ namespace panelAIR1000
             path.AddPolygon(frame);
             var rg = new Region(path);
             rg.Intersect(ClientRectangle);
-            if (Parent is A320OverheadControl main) rg.Exclude(Rectangle.Inflate(main.AllBtnsRect, 12, 12));
+            if (Parent is A320OverheadControl main)
+            {
+                rg.Exclude(Rectangle.Inflate(main.AllBtnsRect, 12, 12));
+                rg.Exclude(Rectangle.Inflate(main.AreasRect, 4, 4));   // el botó taronja sempre visible
+            }
             var old = Region;
             Region = rg;
             old?.Dispose();
@@ -2469,6 +3045,15 @@ namespace panelAIR1000
         {
             if (_annMode == 0 || test) return 1f;
             return _annMode == 2 ? level * 0.55f : level;
+        }
+
+        OhElement? _pressEl;   // element amb el dit a sobre (per a accions mantingudes)
+
+        void EndPress()
+        {
+            var el = _pressEl;
+            _pressEl = null;
+            el?.PressEnd();
         }
 
         internal void NotifyChanged(OhElement el)
@@ -2714,6 +3299,10 @@ namespace panelAIR1000
                 g.CompositingMode = oldMode;
             }
 
+            // 3) zones clicables ressaltades i botó taronja per mostrar-les
+            DrawHitAreas(g, clip);
+            if (!_isOverlay && AreasRect.IntersectsWith(clip)) DrawAreasButton(g);
+
             if (DateTime.UtcNow < _barHideAt && _contentH > Height)
             {
                 var bar = ScrollBarRect();
@@ -2770,7 +3359,16 @@ namespace panelAIR1000
         Rectangle MinusRect => new(MinusLocation ?? DefaultMinusPos, new Size(ZoomBtnSize, ZoomBtnSize));
         Point DefaultPagePos => BtnPos(3646, 1800);
         Rectangle PageRect => new(PageLocation ?? DefaultPagePos, new Size(ZoomBtnSize, ZoomBtnSize));
-        Rectangle BtnRect(int b) => b == 1 ? PlusRect : b == 2 ? MinusRect : PageRect;
+        // botó taronja "mostrar àrees clicables" (com el de la banda G1000): cantonada de dalt a l'esquerra
+        Point DefaultAreasPos => BtnPos(24, 48);
+        Rectangle AreasRect => new(AreasLocation ?? DefaultAreasPos, new Size(ZoomBtnSize, ZoomBtnSize));
+        /// <summary>Posició del botó "mostrar àrees clicables" (null = cantonada de dalt a l'esquerra).</summary>
+        public Point? AreasLocation { get; set; }
+        /// <summary>Si es ressalten les zones clicables (compartit pel panell principal i l'overhead).</summary>
+        static bool s_showAreas;
+        /// <summary>Color del botó "mostrar àrees": taronja, dibuixat molt subtil (poca opacitat) (a joc amb el panell A320).</summary>
+        static readonly Color AreasColor = Color.Orange;
+        Rectangle BtnRect(int b) => b == 1 ? PlusRect : b == 2 ? MinusRect : b == 4 ? AreasRect : PageRect;
         Rectangle AllBtnsRect => Rectangle.Union(Rectangle.Union(PlusRect, MinusRect), PageRect);
 
         /// <summary>Posició dels botons de zoom (null = posició per defecte a baix a la dreta).</summary>
@@ -2978,7 +3576,67 @@ namespace panelAIR1000
             g.SmoothingMode = oldMode;
         }
 
-        int ZoomButtonAt(Point p) => _isOverlay ? 0 : PageRect.Contains(p) ? 3 : !OverlayOpen ? 0 : PlusRect.Contains(p) ? 1 : MinusRect.Contains(p) ? 2 : 0;
+        int ZoomButtonAt(Point p) => _isOverlay ? 0 : Rectangle.Inflate(AreasRect, 8, 8).Contains(p) ? 4 : PageRect.Contains(p) ? 3 : !OverlayOpen ? 0 : PlusRect.Contains(p) ? 1 : MinusRect.Contains(p) ? 2 : 0;
+
+        void ToggleShowAreas()
+        {
+            s_showAreas = !s_showAreas;
+            Invalidate();
+            _ov?.Invalidate();
+        }
+
+        /// <summary>Ressalta en taronja les zones clicables dels elements (si el botó "mostrar àrees" està actiu).</summary>
+        void DrawHitAreas(Graphics g, Rectangle clip)
+        {
+            if (!s_showAreas) return;
+            var oldMode = g.SmoothingMode;
+            g.SmoothingMode = SmoothingMode.None;
+            using var fill = new SolidBrush(Color.FromArgb(60, Color.Orange));
+            using var pen = new Pen(Color.Orange, 2);
+            float sh = CurShift;
+            foreach (var el in _els)
+                foreach (var r in el.HitAreas)
+                {
+                    // només el que respon de veritat a un toc (fora ombres, indicadors, etc.)
+                    if (!IsTappable(el) || !el.HitTest(new PointF(r.X + r.Width / 2, r.Y + r.Height / 2))) continue;
+                    var sr = Rectangle.Round(new RectangleF(_offX + r.X * _s, _offY - _scrollY + (r.Y - sh) * _s, r.Width * _s, r.Height * _s));
+                    if (!sr.IntersectsWith(clip)) continue;
+                    g.FillRectangle(fill, sr);
+                    g.DrawRectangle(pen, sr);
+                }
+            g.SmoothingMode = oldMode;
+        }
+
+        static readonly Dictionary<Type, bool> s_tappable = new();
+        /// <summary>true si el tipus d'element redefineix Tap (és a dir, fa alguna cosa en tocar-lo).</summary>
+        static bool IsTappable(OhElement el)
+        {
+            var t = el.GetType();
+            if (!s_tappable.TryGetValue(t, out bool ok))
+                s_tappable[t] = ok = t.GetMethod(nameof(OhElement.Tap))!.DeclaringType != typeof(OhElement);
+            return ok;
+        }
+
+        void DrawAreasButton(Graphics g)
+        {
+            var r = AreasRect;
+            var oldMode = g.SmoothingMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            bool on = s_showAreas, pressed = _btnPressed == 4;
+            using (var path = Oh.RoundRect(r, r.Width * 0.18f))
+            {
+                using (var b = new SolidBrush(on ? Color.FromArgb(pressed ? 110 : 70, AreasColor) : Color.FromArgb(pressed ? 120 : 50, 0, 0, 0))) g.FillPath(b, path);
+                using var p = new Pen(CalibrationMode ? Color.FromArgb(220, 255, 140, 0) : Color.FromArgb(on ? 150 : 80, AreasColor), Math.Max(1.5f, r.Width / 40f));
+                g.DrawPath(p, path);
+            }
+            using var f = new Font("Segoe UI Emoji", Math.Max(12f, r.Width * 0.5f), FontStyle.Bold, GraphicsUnit.Pixel);
+            using var tb = new SolidBrush(on ? Color.FromArgb(200, 255, 235, 200) : Color.FromArgb(95, AreasColor));
+            var oldHint = g.TextRenderingHint;
+            g.TextRenderingHint = TextRenderingHint.AntiAlias;
+            g.DrawString("👆", f, tb, r.X + r.Width / 2f, r.Y + r.Height / 2f, Oh.Center);
+            g.TextRenderingHint = oldHint;
+            g.SmoothingMode = oldMode;
+        }
 
         Rectangle ScrollBarRect()
         {
@@ -3126,7 +3784,7 @@ namespace panelAIR1000
                     var r = BtnRect(zb);
                     _btnDragOff = new Point(e.X - r.X, e.Y - r.Y);
                 }
-                else { _btnPressed = zb; Invalidate(BtnRect(zb)); }
+                else { _btnPressed = zb; Invalidate(Rectangle.Inflate(BtnRect(zb), 6, 6)); }
                 return;
             }
             if (_closing || _opening) return;
@@ -3137,6 +3795,44 @@ namespace panelAIR1000
             // (capa) si el gest comença amb l'overhead al topall, arrossegar amunt el tanca
             _startAtCut = _isOverlay && _scrollY >= MaxScroll - 1;
             _lastMoveY = e.Y; _lastMoveT = _clock.Elapsed.TotalSeconds;
+            // acció mantinguda (p.ex. gir continu del rotatiu PULL STD); amb el dit ja s'ha començat a WM_POINTERDOWN
+            if (!_touchPress && !_edgeStart) BeginPress(e.Location);
+        }
+
+        void BeginPress(Point pt)
+        {
+            if (_bmp == null || ElementAt(pt, out var pp) is not OhElement pe) return;
+            _pressEl = pe;
+            pe.PressStart(pp);
+            if (pe.Animating) { _animating.Add(pe); StartAnim(); }
+        }
+
+        // Amb el dit, Windows no envia el WM_LBUTTONDOWN fins que el dit s'aixeca o es mou: per a les accions
+        // mantingudes es fa servir directament el WM_POINTERDOWN / WM_POINTERUP tàctil (la resta, igual que abans).
+        const int WM_POINTERDOWN = 0x0246, WM_POINTERUP = 0x0247;
+        [DllImport("user32.dll")] static extern bool GetPointerType(uint pointerId, out int pointerType);
+        bool _touchPress;   // el toc actual l'ha començat un WM_POINTERDOWN tàctil (fins al OnMouseUp següent)
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == WM_POINTERDOWN || m.Msg == WM_POINTERUP)
+            {
+                uint id = (uint)((long)m.WParam & 0xFFFF);
+                if (GetPointerType(id, out int type) && type == 2 /* PT_TOUCH */)
+                {
+                    long lp = (long)m.LParam;
+                    var pt = PointToClient(new Point((short)(lp & 0xFFFF), (short)((lp >> 16) & 0xFFFF)));
+                    if (m.Msg == WM_POINTERDOWN)
+                    {
+                        EndPress();
+                        _touchPress = true;
+                        if (ZoomButtonAt(pt) == 0 && !_closing && !_opening && !(!_isOverlay && !OverlayOpen && pt.Y <= EdgePx))
+                            BeginPress(pt);
+                    }
+                    else EndPress();
+                }
+            }
+            base.WndProc(ref m);
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
@@ -3146,13 +3842,14 @@ namespace panelAIR1000
             {
                 var old = BtnRect(_btnDrag);
                 var np = new Point(Math.Clamp(e.X - _btnDragOff.X, 0, Width - old.Width), Math.Clamp(e.Y - _btnDragOff.Y, 0, Height - old.Height));
-                if (_btnDrag == 1) PlusLocation = np; else if (_btnDrag == 2) MinusLocation = np; else PageLocation = np;
-                Invalidate(old); Invalidate(BtnRect(_btnDrag));
+                if (_btnDrag == 1) PlusLocation = np; else if (_btnDrag == 2) MinusLocation = np; else if (_btnDrag == 4) AreasLocation = np; else PageLocation = np;
+                Invalidate(Rectangle.Inflate(old, 6, 6)); Invalidate(Rectangle.Inflate(BtnRect(_btnDrag), 6, 6));
+                if (_ov != null && _ov.Visible) _ov.UpdateOverlayRegion();
                 return;
             }
             if (!_down) return;
             int dy = e.Y - _downPt.Y;
-            if (!_dragging && Math.Abs(dy) > Math.Max(10, Width / 200)) _dragging = true;
+            if (!_dragging && Math.Abs(dy) > Math.Max(10, Width / 200)) { _dragging = true; EndPress(); }
             if (!_dragging) return;
             if (_isOverlay && _startAtCut && dy < 0) { BeginClose(); return; }
             if (_edgeStart && dy > 0) { _edgeStart = false; _down = false; _dragging = false; OpenOverlayAnimated(); return; }
@@ -3177,16 +3874,19 @@ namespace panelAIR1000
             {
                 int b = _btnPressed;
                 _btnPressed = 0;
-                Invalidate(PlusRect); Invalidate(MinusRect); Invalidate(PageRect);
+                Invalidate(PlusRect); Invalidate(MinusRect); Invalidate(PageRect); Invalidate(Rectangle.Inflate(AreasRect, 6, 6));
                 if (ZoomButtonAt(e.Location) == b)
                 {
-                    if (b == 3) ToggleOverlay();
+                    if (b == 4) ToggleShowAreas();
+                    else if (b == 3) ToggleOverlay();
                     else if (_ov != null) { _ov.SetZoom(_ov._zoom + (b == 1 ? 10 : -10)); InvalidateButtons(); }
                 }
                 return;
             }
             if (!_down) return;
             _down = false;
+            EndPress();
+            _touchPress = false;
             if (_dragging)
             {
                 bool recent = _clock.Elapsed.TotalSeconds - _lastMoveT < 0.08;
@@ -3202,12 +3902,18 @@ namespace panelAIR1000
             ScrollTo(_scrollY - e.Delta * Math.Max(1, Height / 12) / 120);
         }
 
+        OhElement? ElementAt(Point pt, out PointF p)
+        {
+            p = new PointF((pt.X - _offX) / _s, (pt.Y - _offY + _scrollY) / _s + CurShift);
+            for (int i = _els.Count - 1; i >= 0; i--)
+                if (_els[i].HitTest(p)) return _els[i];
+            return null;
+        }
+
         void TapAt(Point pt)
         {
             if (!EnsureBitmap()) return;
-            var p = new PointF((pt.X - _offX) / _s, (pt.Y - _offY + _scrollY) / _s + CurShift);
-            for (int i = _els.Count - 1; i >= 0; i--)
-                if (_els[i].HitTest(p)) { _els[i].Tap(p); return; }
+            ElementAt(pt, out var p)?.Tap(p);
         }
 
         protected override void OnResize(EventArgs e)
@@ -3720,14 +4426,15 @@ namespace panelAIR1000
             // ── Glareshield ──
             // vora superior fosca inclinada
             // visera de pell negra: 70% del gruix d'abans (28 → 19,6), mantenint la vora de baix al mateix lloc
-            _silk.Add(new OhVisor(new[] { Pt(12, 190 + 8.4f), Pt(1090, 14 + 8.4f), Pt(1985, 14 + 8.4f) }, 19.6f * k));
+            // colze arrodonit (radi 500 de la maqueta)
+            _silk.Add(new OhVisor(Oh.RoundAt(new[] { Pt(12, 190 + 8.4f), Pt(1090, 14 + 8.4f), Pt(1985, 14 + 8.4f) }, 1, 500 * k), 19.6f * k));
             // planxa esquerra (inclinada a dalt)
             // vora de dalt: la mateixa línia que l'EFIS (vora de baix de la visera + 10)
             {
                 const float slope = 176f / 1078f;
                 float yA = 218f - (15f - 12f) * slope + 10f, yB = 218f - (882f - 12f) * slope + 10f;
                 _silk.Add(new OhPanel(new[] { Pt(15, yA), Pt(882, yB), Pt(882, 288), Pt(15, 288) },
-                                      new[] { Pt(30, yA + 22), Pt(868, yB + 34), Pt(30, 276), Pt(868, 276) }));
+                                      new[] { Pt(29, 228f - 17f * slope + 12), Pt(868, 228f - 856f * slope + 12), Pt(30, 276), Pt(868, 276) }));
             }
             Pb("MIP_AUTO_LAND", 175, 237, 44, 44, "AUTO", "LAND", true).UpperColor = Oh.White;
             ((OhPushButton)_byId["MIP_AUTO_LAND"]).LowerColor = Oh.White;
@@ -3743,42 +4450,59 @@ namespace panelAIR1000
             {
                 const float slope = 176f / 1078f;                    // pendent de la vora de baix de la visera
                 float yL = 218f - (890f - 12f) * slope + 10f;          // alçada de la vora a x = 890
-                _silk.Add(new OhPanel(new[] { Pt(890, yL), Pt(1090, 52), Pt(1296, 52), Pt(1296, 288), Pt(890, 288) },
-                                      new[] { Pt(903, yL + 34), Pt(1283, 84), Pt(903, 268), Pt(1283, 268) }));
+                _silk.Add(new OhPanel(Oh.RoundAt(new[] { Pt(890, yL), Pt(1090, 52), Pt(1296, 52), Pt(1296, 288), Pt(890, 288) }, 1, 500 * k),
+                                      new[] { Pt(904, 228f - 892f * slope + 12), Pt(1282, 64), Pt(904, 276), Pt(1282, 276) }));
             }
-            Lb("QNH", 958, 110);
-            _silk.Add(new OhDarkWindow(R(921, 120, 994, 150)));
-            Lb("in Hg", 928, 168, 8.15f); Lb("h Pa", 990, 168, 8.15f);
-            Knob("MIP_BARO", 958 * k, 202 * k, 15f, 4, new float[] { -120, -90, -60, -30, 0, 30, 60, 90, 120 }, KnobStyle.Round);
-            KeyL("MIP_EFIS_ILS", 937, 262, 42, 28, "ILS");
-            var fd = KeyL("MIP_EFIS_FD", 987, 262, 42, 28, "FD"); fd.On = true;
+            // finestra del QNH (el rètol QNH/QFE va a dins, en taronja, i el valor el dona el simulador)
+            Add(new OhBaroWindow("MIP_BARO_WIN", R(921, 104, 994, 150)));
+            // QNH: rotatiu doble (base negra in Hg / hPa + pom blanc PULL STD) amb arc indicador a sobre
+            Lb("in Hg", 910, 166, 8.15f); Lb("hPa", 1006, 166, 8.15f);
+            _silk.Add(new OhArcDial(958 * k, 202 * k, 24.5f, -38, 38, new float[] { -38, 38 }, false));
+            Add(new OhBaroKnob("MIP_BARO", 958 * k, 202 * k, 20.8f));   // 30% més gran
+            // ratlla vertical que separa la zona QNH de la zona EFIS (ND)
+            // (comença a l'alçada del centre del rotatiu de mode, com a la referència)
+            _silk.Add(new OhLine(Oh.Silk, 1.1f, new[] { Pt(1019, 174), Pt(1019, 284) }));
+            var fd = KeyL("MIP_EFIS_FD", 937, 262, 42, 28, "FD"); fd.On = true;
+            KeyL("MIP_EFIS_LS", 987, 262, 42, 28, "LS");
             string[] ndKeys = { "CSTR", "WPT", "VOR.D", "NDB", "ARPT" };
-            float[] ndX = { 1077, 1122, 1166, 1211, 1256 };
+            // 5 tecles repartides com si n'hi hagués 6 (ARPT al seu lloc, CSTR més a l'esquerra)
+            float[] ndX = { 1031, 1087.25f, 1143.5f, 1199.75f, 1256 };
             for (int i = 0; i < 5; i++) KeyL("MIP_EFIS_" + ndKeys[i].Replace(".", ""), ndX[i], 95, 42, 30, ndKeys[i]);
             // selector de mode del ND
-            float[] modeAng = { -105, -55, -10, 40, 90 };
-            _silk.Add(new OhArcDial(1095 * k, 178 * k, 25, -105, 90, modeAng, false));
-            Knob("MIP_ND_MODE", 1095 * k, 178 * k, 19f, 2, modeAng);
-            Lb("ROSE", 1050, 126); Lb("LS", 1046, 178); Lb("VOR", 1060, 144); Lb("NAV", 1093, 129); Lb("ARC", 1128, 140); Lb("PLAN", 1153, 182);
+            // LS a 270º, NAV a 360º (dalt), PLAN a 90º; posicions repartides cada 45º
+            float[] modeAng = { -90, -45, 0, 45, 90 };
+            _silk.Add(new OhArcDial(1095 * k, 178 * k, 21f, -90, 90, modeAng, false));   // arc ajustat al rotatiu
+            // quart de cercle ROSE: de LS a NAV per fora de l'escala, interromput per la paraula ROSE
+            _silk.Add(new OhArcDial(1095 * k, 178 * k, 64f * k, -86, -74, Array.Empty<float>(), false));   // tram LS → ROSE
+            _silk.Add(new OhArcDial(1095 * k, 178 * k, 64f * k, -56, -16, Array.Empty<float>(), false));   // tram ROSE → NAV
+            Knob("MIP_ND_MODE", 1095 * k, 178 * k, 17.1f, 2, modeAng);   // 10% més petit
+            // etiquetes acostades a l'arc (menys del que s'ha reduït l'arc, perquè quedin més espaiades)
+            Lb("ROSE", 1037, 151); Lb("LS", 1045, 178); Lb("VOR", 1062.9f, 139.7f); Lb("NAV", 1095, 129); Lb("ARC", 1127.1f, 139.7f); Lb("PLAN", 1155, 178);
             // selector d'abast del ND
-            float[] rngAng = { -105, -55, 0, 55, 100, 140 };
-            _silk.Add(new OhArcDial(1236 * k, 178 * k, 25, -105, 140, rngAng, false));
-            Knob("MIP_ND_RANGE", 1236 * k, 178 * k, 19f, 2, rngAng);
-            Lb("10", 1182, 178); Lb("20", 1196, 144); Lb("40", 1233, 126); Lb("80", 1272, 144); Lb("160", 1282, 186); Lb("320", 1272, 216);
-            // ADF/VOR 1 i 2 (3 posicions; OFF a baix)
-            float[] adfAng = { 290, 180, 70 };
-            Knob("MIP_EFIS_ADFVOR1", 1096 * k, 250 * k, 9f, 1, adfAng);
-            Lb("ADF1", 1055, 252); Lb("VOR1", 1137, 252); Lb("OFF", 1097, 280);
-            Knob("MIP_EFIS_ADFVOR2", 1236 * k, 250 * k, 9f, 1, adfAng);
-            Lb("ADF2", 1195, 252); Lb("VOR2", 1277, 252); Lb("OFF", 1237, 280);
+            // 10 a 270º, 40 a 360º, 160 a 90º; posicions repartides cada 45º
+            float[] rngAng = { -90, -45, 0, 45, 90, 135 };
+            _silk.Add(new OhArcDial(1236 * k, 178 * k, 21f, -90, 135, rngAng, false));   // arc ajustat al rotatiu
+            Knob("MIP_ND_RANGE", 1236 * k, 178 * k, 17.1f, 2, rngAng);   // 10% més petit
+            Lb("10", 1184, 178); Lb("20", 1202.8f, 144.8f); Lb("40", 1236, 129); Lb("80", 1269.2f, 144.8f); Lb("160", 1286, 178); Lb("320", 1270.6f, 212.6f);
+            // ADF / OFF / VOR: palanques metàl·liques horitzontals (OFF al centre)
+            TogS("MIP_EFIS_ADFVOR1", 1096 * k, 250 * k, 3, 1, ToggleStyle.Metal, 9.5f).MakeHorizontal();
+            Lb("1", 1097, 222); Lb("ADF", 1055, 252); Lb("VOR", 1137, 252); Lb("OFF", 1097, 280);
+            TogS("MIP_EFIS_ADFVOR2", 1236 * k, 250 * k, 3, 1, ToggleStyle.Metal, 9.5f).MakeHorizontal();
+            Lb("2", 1237, 222); Lb("ADF", 1195, 252); Lb("VOR", 1277, 252); Lb("OFF", 1237, 280);
 
             // FCU
-            Panel(1302 * k, 50 * k, (1980 - 1302) * k, (288 - 50) * k);
-            _silk.Add(new OhDarkWindow(R(1345, 60, 1950, 115)));
-            Lb("SPD", 1330, 125); Lb("MACH", 1330, 170);
-            Round("MIP_FCU_SPD_MACH", 1330 * k, 146 * k, 8f);
-            Knob("MIP_FCU_SPD", 1388 * k, 176 * k, 20f, 0, Enumerable.Range(0, 12).Select(i => i * 30f).ToArray(), KnobStyle.Round).Wrap = true;
-            Knob("MIP_FCU_HDG", 1505 * k, 176 * k, 20f, 0, Enumerable.Range(0, 12).Select(i => i * 30f).ToArray(), KnobStyle.Round).Wrap = true;
+            // cargols a les cantonades, mateix patró que el de baix a la dreta del mòdul de WARN/CAUT (14 del costat, 12 de dalt/baix)
+            _silk.Add(new OhPanel(new[] { Pt(1302, 50), Pt(1980, 50), Pt(1980, 288), Pt(1302, 288) },
+                                  new[] { Pt(1316, 62), Pt(1966, 62), Pt(1316, 276), Pt(1966, 276) }));
+            Add(new OhFcuDisplay("MIP_FCU_DISP", R(1345, 60, 1950, 115)));   // pantalla del FCU (dades del simulador)
+            // SPD / HDG: rotatius simples (sense anell de selecció), 4 zones de toc: PUSH, PULL, gir esquerra / dreta.
+            // Les zones dels dos rotatius gairebé es toquen (mig ample 1,8r); SPD/MACH queda just a l'esquerra de les del SPD.
+            const float fcuZw = 1.8f;
+            const float spdMachX = (1388f * 0.625f - fcuZw * 20f - 8f) / 0.625f;
+            Lb("SPD", spdMachX, 125); Lb("MACH", spdMachX, 170);
+            Round("MIP_FCU_SPD_MACH", spdMachX * k, 146 * k, 8f).HitPad = 0f;
+            Add(new OhBaroKnob("MIP_FCU_SPD", 1388 * k, 176 * k, 20f, zoneHalfWidth: fcuZw, face: KnobFace.Spd));
+            Add(new OhBaroKnob("MIP_FCU_HDG", 1505 * k, 176 * k, 20f, zoneHalfWidth: fcuZw, face: KnobFace.Hdg) { SingleZone = true });
             KeyL("MIP_FCU_LOC", 1505, 258, 46, 30, "LOC");
             WLn(1558 * k, 128 * k, 1558 * k, 272 * k);
             Lb("HDG", 1586, 133); Lb("TRK", 1586, 147); Lb("V/S", 1668, 133); Lb("FPA", 1668, 147);
@@ -3787,18 +4511,27 @@ namespace panelAIR1000
             KeyL("MIP_FCU_AP2", 1657, 192, 44, 44, "AP2");
             KeyL("MIP_FCU_ATHR", 1628, 250, 44, 44, "A/THR");
             WLn(1700 * k, 128 * k, 1700 * k, 272 * k);
-            Lb("100", 1722, 128); Lb("1000", 1783, 128);
-            Knob("MIP_FCU_ALT", 1750 * k, 176 * k, 20f, 0, Enumerable.Range(0, 12).Select(i => i * 30f).ToArray(), KnobStyle.Round).Wrap = true;
-            Lb("METRIC", 1820, 168); Lb("ALT", 1820, 182);
-            Round("MIP_FCU_METRIC_ALT", 1818 * k, 145 * k, 8f);
+            // ALT: rotatiu doble com el del QNH (anell negre 100 / 1000 + pom estriat de 8 ones, PUSH / PULL),
+            // amb un anell circular al voltant i les marques de 100 i 1000
+            _silk.Add(new OhArcDial(1750 * k, 176 * k, 24.5f, -180, 180, new float[] { -38, 38 }, false));
+            Lb("100", 1716, 131); Lb("1000", 1785, 131);
+            Add(new OhBaroKnob("MIP_FCU_ALT", 1750 * k, 176 * k, 20.8f, alt: true));   // mateixes zones de toc que el QNH
+            // METRIC ALT entre l'ALT i el V/S (fora de les zones de toc de l'ALT)
+            // zona de toc just el voltant negre, tocant la zona de la dreta de l'ALT (cx + 2r)
+            const float metricX = (1750f * 0.625f + 2f * 20.8f + 8f) / 0.625f;
+            Lb("METRIC", metricX, 168); Lb("ALT", metricX, 182);
+            Round("MIP_FCU_METRIC_ALT", metricX * k, 145 * k, 8f).HitPad = 0f;
             KeyL("MIP_FCU_EXPED", 1755, 255, 48, 30, "EXPED");
-            Lb("UP", 1906, 128); Lb("DN", 1906, 218);
-            Knob("MIP_FCU_VS", 1900 * k, 172 * k, 19f, 0, Enumerable.Range(0, 12).Select(i => i * 30f).ToArray(), KnobStyle.Round).Wrap = true;
+            // V/S: idèntic al SPD, amb dues fletxes en semicercle a l'esquerra (UP amunt, DN avall)
+            _silk.Add(new OhArrowArc(1900 * k, 172 * k, 19f * 1.4f, -95, -30));
+            _silk.Add(new OhArrowArc(1900 * k, 172 * k, 19f * 1.4f, -85, -150));
+            Lb("UP", 1893, 128); Lb("DN", 1893, 216);   // just a continuació de la punta de cada fletxa
+            Add(new OhBaroKnob("MIP_FCU_VS", 1900 * k, 172 * k, 19f, zoneHalfWidth: fcuZw, face: KnobFace.Spd));
             Lb("PUSH", 1958, 150); Lb("TO", 1958, 164); Lb("LEVEL", 1958, 178); Lb("OFF", 1958, 192);
             KeyL("MIP_FCU_APPR", 1908, 255, 48, 30, "APPR");
 
             // ombra de la visera sobre el mòdul esquerre, l'EFIS i el FCU (per sobre dels botons)
-            Add(new OhVisorShadow(new[] { Pt(7, 218.8f), Pt(12, 218), Pt(1090, 42), Pt(1990, 42) }, k, "MIP_VISOR_SHADOW"));
+            Add(new OhVisorShadow(Oh.RoundAt(new[] { Pt(7, 218.8f), Pt(12, 218), Pt(1090, 42), Pt(1990, 42) }, 2, 500 * k), k, "MIP_VISOR_SHADOW", 0.75f));
 
             // llavi inferior del glareshield amb les sortides d'aire
             _silk.Add(new OhPoly(new[] { Pt(12, 294), Pt(1985, 294), Pt(1985, 332), Pt(12, 332) },
