@@ -16,6 +16,7 @@ namespace SimConnect3
     {
         // identificadors propis (fora del rang dels enums de l'app): SimConnect accepta qualsevol valor d'enum
         enum A320MsfsEvent : uint { Base = 7000 }
+        const A320MsfsEvent FbwThr1 = (A320MsfsEvent)7090, FbwThr2 = (A320MsfsEvent)7091;
         const uint MsfsA320ReadDef = 7100, MsfsA320ReadReq = 7100, MsfsA320WriteDefBase = 7200;
 
         /// <summary>Element del panell + acció → esdeveniment del FlyByWire.</summary>
@@ -86,10 +87,71 @@ namespace SimConnect3
             "A32NX_FCU_AFS_DISPLAY_VS_FPA_VALUE", "A32NX_FCU_AFS_DISPLAY_VS_FPA_DASHES",
             "A32NX_ELEC_DC_ESS_BUS_IS_POWERED",                                    // corrent (pantalla encesa / apagada)
             "A32NX_FCU_ALT_INCREMENT_1000",                                        // selector ALT 100 (0) / 1000 (1)
+            "A32NX_AUTOTHRUST_TLA:1", "A32NX_AUTOTHRUST_TLA:2",                    // angle de les palanques de gas (graus)
+            // configuració de l'eix de gas a l'EFB (rangs de cada detent, -1 … 1) per poder enviar posicions
+            "A32NX_THROTTLE_MAPPING_USE_REVERSE_ON_AXIS:1",
+            "A32NX_THROTTLE_MAPPING_REVERSE_LOW:1", "A32NX_THROTTLE_MAPPING_REVERSE_HIGH:1",
+            "A32NX_THROTTLE_MAPPING_REVERSE_IDLE_LOW:1", "A32NX_THROTTLE_MAPPING_REVERSE_IDLE_HIGH:1",
+            "A32NX_THROTTLE_MAPPING_IDLE_LOW:1", "A32NX_THROTTLE_MAPPING_IDLE_HIGH:1",
+            "A32NX_THROTTLE_MAPPING_CLIMB_LOW:1", "A32NX_THROTTLE_MAPPING_CLIMB_HIGH:1",
+            "A32NX_THROTTLE_MAPPING_FLEXMCT_LOW:1", "A32NX_THROTTLE_MAPPING_FLEXMCT_HIGH:1",
+            "A32NX_THROTTLE_MAPPING_TOGA_LOW:1", "A32NX_THROTTLE_MAPPING_TOGA_HIGH:1",
         };
 
         // lectura: pantalla + llums + selectors, tot en un sol bloc de nombres
-        const int MsfsA320ReadCount = 14 + 15 + 4;
+        const int MsfsA320ReadCount = 29 + 15 + 4;
+
+        /// <summary>Configuració de l'eix del FBW: reversa a l'eix i rang (baix, alt) de cada detent (REV, REV IDLE, IDLE, CL, FLX, TOGA).</summary>
+        private bool _fbwRevOnAxis = true;
+        private readonly (double lo, double hi)[] _fbwRange =
+            { (-1, -0.95), (-0.85, -0.75), (-0.55, -0.45), (-0.05, 0.05), (0.45, 0.55), (0.95, 1) };
+        /// <summary>TLA (graus) de cada detent del FBW, en el mateix ordre que _fbwRange.</summary>
+        static readonly double[] FbwDetTla = { -20, -6, 0, 25, 35, 45 };
+
+        /// <summary>
+        /// Posició de l'app (-1 … 1) → valor de l'eix del FBW (-1 … 1) segons la configuració de l'EFB: a un detent,
+        /// el centre del seu rang; entre dos detents, interpolat entre la vora alta d'un i la baixa del següent.
+        /// </summary>
+        private double FbwAxisFor(float appPos)
+        {
+            double tla = FbwAppToTla(appPos);
+            int first = _fbwRevOnAxis ? 0 : 2;        // sense reversa a l'eix, l'eix comença al ralentí
+            if (tla <= FbwDetTla[first]) return Mid(first);
+            for (int i = first; i < FbwDetTla.Length - 1; i++)
+            {
+                if (Math.Abs(tla - FbwDetTla[i]) < 0.3) return Mid(i);
+                if (Math.Abs(tla - FbwDetTla[i + 1]) < 0.3) return Mid(i + 1);
+                if (tla < FbwDetTla[i + 1])
+                {
+                    double t = (tla - FbwDetTla[i]) / (FbwDetTla[i + 1] - FbwDetTla[i]);
+                    return _fbwRange[i].hi + t * (_fbwRange[i + 1].lo - _fbwRange[i].hi);
+                }
+            }
+            return Mid(FbwDetTla.Length - 1);
+            double Mid(int i) => (_fbwRange[i].lo + _fbwRange[i].hi) / 2;
+        }
+        private static double FbwAppToTla(float p)
+        {
+            if (p <= FbwApp[0]) return FbwTla[0];
+            for (int i = 0; i < FbwApp.Length - 1; i++)
+                if (p <= FbwApp[i + 1]) return FbwTla[i] + (p - FbwApp[i]) / (FbwApp[i + 1] - FbwApp[i]) * (FbwTla[i + 1] - FbwTla[i]);
+            return FbwTla[^1];
+        }
+
+        /// <summary>
+        /// Angle de la palanca del FlyByWire (TLA, graus: -20 REV FULL, 0 ralentí, 25 CL, 35 FLX MCT, 45 TO GA)
+        /// ↔ posició del quadrant de l'app (-1, 0, 0,58, 0,8, 1), lineal entre detents.
+        /// </summary>
+        static readonly double[] FbwTla = { -20, 0, 25, 35, 45 };
+        static readonly double[] FbwApp = { -1, 0, 0.58, 0.8, 1 };
+        private static float FbwLeverPos(double tla)
+        {
+            if (tla <= FbwTla[0]) return -1f;
+            for (int i = 0; i < FbwTla.Length - 1; i++)
+                if (tla <= FbwTla[i + 1]) return (float)(FbwApp[i] + (tla - FbwTla[i]) / (FbwTla[i + 1] - FbwTla[i]) * (FbwApp[i + 1] - FbwApp[i]));
+            return 1f;
+        }
+        private (float l, float r)? _msThr;
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct A320GlareStruct
         {
@@ -110,6 +172,9 @@ namespace SimConnect3
             if (simconnect == null) return;
             for (int i = 0; i < MsfsA320Events.Length; i++)
                 simconnect.MapClientEventToSimEvent((A320MsfsEvent)(7000 + i), MsfsA320Events[i].ev);
+            // eix de gas de cada motor (palanques arrossegades a l'app)
+            simconnect.MapClientEventToSimEvent(FbwThr1, "THROTTLE1_AXIS_SET_EX1");
+            simconnect.MapClientEventToSimEvent(FbwThr2, "THROTTLE2_AXIS_SET_EX1");
 
             // una definició d'escriptura per a cada LVAR que es pot escriure
             var writeLvars = new List<string>();
@@ -161,6 +226,20 @@ namespace SimConnect3
                             return true;
                         }
                 if (id == "MIP_CHRONO" && cmd == "PUSH") { SendGenericRpn("(>H:A32NX_EFIS_L_CHRONO_PUSHED)"); return true; }
+                if (id == "MIP_THROTTLE")
+                {
+                    // palanques arrossegades a l'app ("BOTH:v", "LEFT:v", "RIGHT:v"): com si es mogués l'eix de gas
+                    int c = cmd.IndexOf(':');
+                    if (c < 0 || !float.TryParse(cmd.AsSpan(c + 1), System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out float p)) return true;
+                    uint raw = unchecked((uint)(int)Math.Round(Math.Clamp(FbwAxisFor(p), -1, 1) * 16384));
+                    string which = cmd[..c];
+                    if (which != "RIGHT")
+                        simconnect.TransmitClientEvent(SimConnect.SIMCONNECT_OBJECT_ID_USER, FbwThr1, raw, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    if (which != "LEFT")
+                        simconnect.TransmitClientEvent(SimConnect.SIMCONNECT_OBJECT_ID_USER, FbwThr2, raw, SIMCONNECT_GROUPS.GROUP0, SIMCONNECT_EVENT_FLAG.GROUPID_IS_PRIORITY);
+                    return true;
+                }
             }
             catch { }
             return false;
@@ -187,6 +266,13 @@ namespace SimConnect3
                 FbwStyle: true);
             _msFcu = s;
             _msAltStep = v[13] > 0.5;
+            _msThr = (FbwLeverPos(v[14]), FbwLeverPos(v[15]));
+            // configuració de l'eix (si l'avió encara no l'ha carregada, tot val 0: es manté la per defecte)
+            if (v[28] > v[17])
+            {
+                _fbwRevOnAxis = v[16] > 0.5;
+                for (int i = 0; i < _fbwRange.Length; i++) _fbwRange[i] = (v[17 + 2 * i], v[18 + 2 * i]);
+            }
             int k = MsfsA320Display.Length;
             foreach (var (id, _) in MsfsA320Lights) _msLights[id] = v[k++] > 0.5;
             foreach (var (id, _, toSim) in MsfsA320Pos)
@@ -208,6 +294,8 @@ namespace SimConnect3
             if (_msAltStep is bool st) ov.SetKnobRing("MIP_FCU_ALT", st);
             foreach (var kv in _msLights) ov.SetLight(kv.Key, kv.Value);
             foreach (var kv in _msPos) ov.SetPosition(kv.Key, kv.Value);
+            // palanques de gas: només amb el FlyByWire (amb el Fenix aquestes LVARs no existeixen i valdrien 0)
+            if (_msThr is var (tl, tr) && IsA320FBW()) ov.SetThrottle(tl, tr);
         }
     }
 }

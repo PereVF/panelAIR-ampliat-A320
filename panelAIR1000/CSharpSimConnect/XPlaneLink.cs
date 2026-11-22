@@ -143,8 +143,24 @@ namespace SimConnect3
             ("MIP_EFIS_ADFVOR1", "sim/cockpit2/EFIS/EFIS_1_selection_pilot"), // 0 ADF, 1 OFF, 2 VOR
             ("MIP_EFIS_ADFVOR2", "sim/cockpit2/EFIS/EFIS_2_selection_pilot"),
         };
+        /// <summary>Palanques de gas del ToLiss, una per motor (mesurat: -1 REV FULL, 0 ralentí, 0,7 CL, ≈0,875 FLX MCT, 1 TO GA).</summary>
+        const string ThrDr = "AirbusFBW/throttle_input";
+        static readonly double[] ThrSim = { -1, 0, 0.7, 0.875, 1 };
+        static readonly double[] ThrApp = { -1, 0, 0.58, 0.8, 1 };
+        static double MapLin(double v, double[] from, double[] to)
+        {
+            if (v <= from[0]) return to[0];
+            for (int i = 0; i < from.Length - 1; i++)
+                if (v <= from[i + 1]) return to[i] + (v - from[i]) / (from[i + 1] - from[i]) * (to[i + 1] - to[i]);
+            return to[^1];
+        }
+        /// <summary>Palanques de gas (posició de l'app: -1 REV FULL … 0 ralentí … 1 TO GA, esquerra i dreta) (al fil de la interfície).</summary>
+        public event Action<float, float>? ThrottleChanged;
+        (float, float)? _lastThr;
+
         static IEnumerable<string> AllReads()
         {
+            yield return ThrDr;
             foreach (var n in ReadDatarefs) yield return n;
             foreach (var l in LightMap) yield return l.dataref;
             foreach (var p in PosMap) yield return p.dataref;
@@ -217,7 +233,7 @@ namespace SimConnect3
         /// <summary>Una sessió amb el ToLiss carregat: resol IDs, se subscriu i escolta fins que es tanca o canvia l'avió.</summary>
         async Task SessionAsync(CancellationToken ct)
         {
-            _cmdIds.Clear(); _drIds.Clear(); _drNames.Clear(); _values.Clear(); _lastBaro = null; _lastFcu = null; _lastAltStep = null; _lastLights.Clear(); _lastPos.Clear();
+            _cmdIds.Clear(); _drIds.Clear(); _drNames.Clear(); _values.Clear(); _lastBaro = null; _lastFcu = null; _lastAltStep = null; _lastLights.Clear(); _lastPos.Clear(); _lastThr = null;
             foreach (var name in AllReads())
                 if (!_drIds.ContainsKey(name) && await LookupId("datarefs", name, ct) is long id) { _drIds[name] = id; _drNames[id] = name; }
             foreach (var w in WriteMap.Values)
@@ -281,6 +297,16 @@ namespace SimConnect3
             {
                 if (!long.TryParse(p.Name.Trim(), out var id) || !_drNames.TryGetValue(id, out var name)) continue;
                 var v = p.Value;
+                if (name == ThrDr)
+                {
+                    // un valor per motor: es publiquen els dos primers
+                    if (v.ValueKind == JsonValueKind.Array && v.GetArrayLength() >= 2 && v[0].ValueKind == JsonValueKind.Number && v[1].ValueKind == JsonValueKind.Number)
+                    {
+                        var thr = ((float)MapLin(v[0].GetDouble(), ThrSim, ThrApp), (float)MapLin(v[1].GetDouble(), ThrSim, ThrApp));
+                        if (_lastThr != thr) { _lastThr = thr; Post(() => ThrottleChanged?.Invoke(thr.Item1, thr.Item2)); }
+                    }
+                    continue;
+                }
                 if (v.ValueKind == JsonValueKind.Array) { if (v.GetArrayLength() == 0) continue; v = v[0]; }
                 if (v.ValueKind == JsonValueKind.Number) lock (_values) _values[name] = v.GetDouble();
             }
@@ -359,6 +385,21 @@ namespace SimConnect3
         {
             if (!A320Loaded || _ws == null) return;
             if (id == "MIP_BARO" && (cmd == "INC" || cmd == "DEC") && TryBaroHpaStep(cmd == "INC" ? 1 : -1)) return;
+            if (id == "MIP_THROTTLE")
+            {
+                // palanques arrossegades a l'app ("BOTH:v", "LEFT:v", "RIGHT:v"): s'escriu throttle_input de cada motor
+                // (el ToLiss només hi torna a posar la palanca física quan aquesta es mou)
+                int colon = cmd.IndexOf(':');
+                if (colon < 0 || !_drIds.TryGetValue(ThrDr, out var tid) || !double.TryParse(cmd.AsSpan(colon + 1),
+                        System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out double p)) return;
+                double sim = Math.Round(MapLin(p, ThrApp, ThrSim), 4);
+                string which = cmd[..colon];
+                var drs = new List<object>();
+                if (which != "RIGHT") drs.Add(new { id = tid, value = sim, index = 0 });
+                if (which != "LEFT") drs.Add(new { id = tid, value = sim, index = 1 });
+                _ = SendAsync(new { req_id = NextReq(), type = "dataref_set_values", @params = new { datarefs = drs } });
+                return;
+            }
             // selectors: "POS:n" → escriure n al dataref del selector
             if (cmd.StartsWith("POS:") && int.TryParse(cmd.AsSpan(4), out var pos))
             {
@@ -456,6 +497,11 @@ namespace SimConnect3
         [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
         [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr h, uint cmd);
         struct RECT { public int L, T, R, B; }
+        struct POINT { public int X, Y; }
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool GetClientRect(IntPtr h, out RECT r);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr h, ref POINT p);
+        static readonly HashSet<IntPtr> s_stripped = new();
+        static readonly Dictionary<IntPtr, int> s_reframed = new();
         const int GWL_STYLE = -16;
         const long WS_POPUP = 0x80000000L, WS_FRAME = 0x00CF0000L;   // WS_OVERLAPPEDWINDOW: títol, vores, botons
         const uint SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020, SWP_SHOWWINDOW = 0x0040;
@@ -532,7 +578,24 @@ namespace SimConnect3
         {
             long style = GetWindowLongPtr(h, GWL_STYLE).ToInt64();
             bool framed = (style & WS_FRAME) != 0;
-            if (framed) SetWindowLongPtr(h, GWL_STYLE, new IntPtr((style & ~WS_FRAME) | WS_POPUP));
+            // Hi ha finestres a les quals algú (el simulador o una altra eina) torna a posar el marc just després de
+            // treure-l'hi: treure'l cada segon fa pampallugues amb el títol. Si passa dues vegades, es deixa el marc
+            // i es col·loca la finestra de manera que la seva zona interior quedi al forat (el marc queda amagat
+            // darrere del panell de l'app).
+            if (framed && s_stripped.Contains(h)) s_reframed[h] = s_reframed.GetValueOrDefault(h) + 1;
+            if (framed && s_reframed.GetValueOrDefault(h) >= 2)
+            {
+                if (!GetWindowRect(h, out var wr) || !GetClientRect(h, out var cr)) return;
+                var org = new POINT();
+                ClientToScreen(h, ref org);
+                int dl = org.X - wr.L, dt = org.Y - wr.T, dr = wr.R - (org.X + cr.R), db = wr.B - (org.Y + cr.B);
+                var want = System.Drawing.Rectangle.FromLTRB(screen.Left - dl, screen.Top - dt, screen.Right + dr, screen.Bottom + db);
+                bool ok = wr.L == want.Left && wr.T == want.Top && wr.R == want.Right && wr.B == want.Bottom;
+                if (!ok || GetWindow(h, GW_HWNDPREV) != behind)
+                    SetWindowPos(h, behind, want.X, want.Y, want.Width, want.Height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                return;
+            }
+            if (framed) { SetWindowLongPtr(h, GWL_STYLE, new IntPtr((style & ~WS_FRAME) | WS_POPUP)); s_stripped.Add(h); }
             GetWindowRect(h, out var r);
             bool placed = r.L == screen.Left && r.T == screen.Top && r.R == screen.Right && r.B == screen.Bottom;
             bool zOk = GetWindow(h, GW_HWNDPREV) == behind;   // la finestra de just a sobre és la de l'app

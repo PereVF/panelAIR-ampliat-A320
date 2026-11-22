@@ -135,6 +135,17 @@ namespace SimConnect3
             return 1f;
         }
 
+        /// <summary>Inversa de FenixLeverPos: posició de l'app (-1 … 1) → valor de la palanca del Fenix (1 … 5).</summary>
+        private static double FenixLeverSim(float p)
+        {
+            double[] sim = { 1, 2, 3, 4, 5 };
+            double[] app = { -1, 0, 0.58, 0.8, 1 };
+            if (p <= app[0]) return 1;
+            for (int i = 0; i < app.Length - 1; i++)
+                if (p <= app[i + 1]) return sim[i] + (p - app[i]) / (app[i + 1] - app[i]) * (sim[i + 1] - sim[i]);
+            return 5;
+        }
+
         private void RegisterFenixGlareshield()
         {
             if (simconnect == null) return;
@@ -164,6 +175,20 @@ namespace SimConnect3
                     }
                     return true;
                 }
+            if (id == "MIP_THROTTLE")
+            {
+                // palanques arrossegades a l'app: "BOTH:v", "LEFT:v" o "RIGHT:v" (v = posició de l'app, -1 … 1)
+                int c = cmd.IndexOf(':');
+                if (c < 0 || !float.TryParse(cmd.AsSpan(c + 1), System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture, out float v)) return true;
+                string sim = FenixLeverSim(v).ToString("0.####", System.Globalization.CultureInfo.InvariantCulture);
+                string which = cmd[..c];
+                var rpn = new System.Text.StringBuilder();
+                if (which != "RIGHT") rpn.Append($"{sim} (>L:A_FC_THROTTLE_LEFT_INPUT) ");
+                if (which != "LEFT") rpn.Append($"{sim} (>L:A_FC_THROTTLE_RIGHT_INPUT)");
+                SendGenericRpn(rpn.ToString().Trim());
+                return true;
+            }
             if (cmd.StartsWith("POS:") && int.TryParse(cmd.AsSpan(4), out int pos))
                 foreach (var p in FenixPos)
                     if (p.id == id) { _fxPos[id] = pos; SendGenericRpn(Set(p.lvar, pos)); return true; }
@@ -232,19 +257,28 @@ namespace SimConnect3
             var wins = XPlaneWindows.FindAll("WASMINSTRUMENT", MsfsProcesses);
             foreach (var h in new List<IntPtr>(_fxSlots.Keys)) if (!wins.Contains(h)) _fxSlots.Remove(h);
             foreach (var h in new List<IntPtr>(_fxSeen.Keys)) if (!wins.Contains(h)) _fxSeen.Remove(h);
+            _fxTentative.RemoveWhere(h => !wins.Contains(h));
             var now = DateTime.UtcNow;
             // ordre d'aparició: les noves de la de sota a la de dalt de l'ordre de Windows (la més antiga, primer)
             for (int i = wins.Count - 1; i >= 0; i--) if (!_fxSeen.ContainsKey(wins[i])) _fxSeen[wins[i]] = (now, _fxSeq++);
-            if (wins.Exists(h => !_fxSlots.ContainsKey(h)) && (now - _fxLastClassify).TotalSeconds >= 2)
+            if (wins.Exists(h => !_fxSlots.ContainsKey(h) || _fxTentative.Contains(h)) && (now - _fxLastClassify).TotalSeconds >= 2)
             {
                 _fxLastClassify = now;
-                // 1) reconeixement per la imatge
+                // 1) reconeixement per la imatge (també de les col·locades provisionalment per ordre, que poden estar
+                //    al forat d'una altra: p.ex. un ND gairebé buit que no s'ha reconegut a temps i ha ocupat el del PFD)
                 foreach (var h in wins)
                 {
-                    if (_fxSlots.ContainsKey(h)) continue;
+                    bool tentative = _fxTentative.Contains(h);
+                    if (_fxSlots.ContainsKey(h) && !tentative) continue;
                     int kind;
                     using (var bmp = XPlaneWindows.Capture(h)) kind = bmp == null ? -1 : ClassifyFenix(bmp);
-                    if (kind >= 0 && !_fxSlots.ContainsValue(kind)) _fxSlots[h] = kind;
+                    if (kind < 0) continue;
+                    if (_fxSlots.TryGetValue(h, out int cur) && cur == kind) { _fxTentative.Remove(h); continue; }
+                    IntPtr holder = IntPtr.Zero;
+                    foreach (var kv in _fxSlots) if (kv.Value == kind) holder = kv.Key;
+                    if (holder != IntPtr.Zero && !_fxTentative.Contains(holder)) continue;   // ja hi ha una pantalla reconeguda
+                    if (holder != IntPtr.Zero) { _fxSlots.Remove(holder); _fxTentative.Remove(holder); }   // la provisional cedeix el forat
+                    _fxSlots[h] = kind; _fxTentative.Remove(h);
                 }
                 // 2) si al cap de 6 s alguna no s'ha pogut reconèixer (p.ex. un PC on la captura surt negra), es col·loca
                 //    per ordre d'aparició al primer forat lliure, seguint l'ordre que demana l'avís (PFD, ND, ECAM sup., ECAM inf.)
@@ -256,7 +290,7 @@ namespace SimConnect3
                     int slot = 0;
                     while (slot < 4 && _fxSlots.ContainsValue(slot)) slot++;
                     if (slot >= 4) break;
-                    _fxSlots[h] = slot;
+                    _fxSlots[h] = slot; _fxTentative.Add(h);
                 }
             }
             foreach (var kv in _fxSlots)
@@ -267,8 +301,10 @@ namespace SimConnect3
         private DateTime _fxLastClassify = DateTime.MinValue;
         private bool _fxPopoutMsgShown;
         private readonly Dictionary<IntPtr, (DateTime t, long seq)> _fxSeen = new();
+        /// <summary>Finestres col·locades per ordre (sense reconèixer): es continuen mirant i poden cedir el forat.</summary>
+        private readonly HashSet<IntPtr> _fxTentative = new();
         private long _fxSeq;
-        private const string FenixPopoutText = "In Microsoft Flight Simulator, hold Right Alt and click the A320 displays one at a time, in this order: PFD, ND, upper ECAM, lower ECAM. panelAIR will place them in the panel.";
+        private const string FenixPopoutText = "In Microsoft Flight Simulator, hold down the right **ALT** key on your keyboard and click the A320 displays one at a time, in this order: PFD, ND, upper ECAM, lower ECAM. panelAIR will place them in the panel.";
 
         /// <summary>
         /// Quina pantalla del Fenix és (0 PFD, 1 ND, 2 ECAM superior, 3 ECAM inferior; -1 si no se sap, p.ex. negra):
@@ -335,7 +371,7 @@ namespace SimConnect3
             _fxGuideShownStep = step;
             string stepText = $"Step {step + 1} of 4: pop out the {FenixScreenNames[step]}";
             string body = (retry ? "Several displays appeared at once, so panelAIR couldn't tell which is which and closed them. " : "") +
-                          $"In Microsoft Flight Simulator, hold Right Alt and click the {FenixScreenNames[step]}. " +
+                          $"In Microsoft Flight Simulator, hold down the right ALT key on your keyboard and click the {FenixScreenNames[step]}. " +
                           "Pop out the displays one at a time, in this order: PFD, ND, upper ECAM, lower ECAM.";
             if (_fxGuide == null || _fxGuide.IsDisposed)
             {

@@ -926,6 +926,7 @@ namespace SimConnect3
         private System.Windows.Forms.Timer? _xpPfdTimer;
 
         private readonly Dictionary<string, bool> _xpLights = new();
+        private (float l, float r)? _xpThr;                             // palanques de gas des d'X-Plane (posició de l'app)
         private readonly Dictionary<string, int> _xpPos = new();       // posicions de selectors des d'X-Plane   // llums de tecles/polsadors des d'X-Plane                                     // selector ALT 100/1000 des d'X-Plane (true = 1000)                       // última lectura de la pantalla del FCU des d'X-Plane   // última lectura del QNH de l'A320 (veure RequestA320Baro)
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct ElecGenStruct { public double value; }
@@ -5258,6 +5259,7 @@ namespace SimConnect3
             _xp.AltStepChanged += k => { _xpAltStep = k; _a320Overhead?.SetKnobRing("MIP_FCU_ALT", k); };
             _xp.LightChanged += (id, on) => { _xpLights[id] = on; _a320Overhead?.SetLight(id, on); };
             _xp.PositionChanged += (id, i) => { _xpPos[id] = i; _a320Overhead?.SetPosition(id, i); };
+            _xp.ThrottleChanged += (l, r) => { _xpThr = (l, r); _a320Overhead?.SetThrottle(l, r); };
             _xp.A320Changed += on => { if (!on) { _xpLights.Clear(); _xpPos.Clear(); } if (_a320Overhead != null) _a320Overhead.SimDriven = on; };
             _xp.A320Changed += on => { if (!on) { _xpFcu = null; _a320Overhead?.SetFcu(new panelAIR1000.FcuState(false, 0, false, false, false, 0, false, false, false, 0, false, 0, 0, false)); } };
             _xp.Start();
@@ -5954,7 +5956,7 @@ namespace SimConnect3
         private DateTime _msfsSince = DateTime.MinValue;   // des de quan hi ha el FlyByWire en mode A320 (per a l'avís)
         private bool _msfsPopoutMsgShown;
         private const string XpPopoutText = "In X-Plane, click this icon on each ToLiss display, one at a time, to pop it out. panelAIR will place it in the panel.";
-        private const string MsfsPopoutText = "In Microsoft Flight Simulator, hold Right Alt and click each A320 display (PFD, ND and both ECAMs) to pop it out. panelAIR will place it in the panel.";
+        private const string MsfsPopoutText = "In Microsoft Flight Simulator, hold down the right **ALT** key on your keyboard and click each A320 display (PFD, ND and both ECAMs) to pop it out. panelAIR will place it in the panel.";
 
         private void PlaceMsfsScreens()
         {
@@ -6002,6 +6004,48 @@ namespace SimConnect3
         private int _xpPlacedAtMsg;
 
         // lletres en píxels (GraphicsUnit.Pixel) i mida fixa, com la Setup Wizard: l'escala de Windows (DPI) no hi afecta
+        /// <summary>
+        /// Dibuixa un text centrat (horitzontalment i verticalment) amb salts de línia automàtics; els trossos entre
+        /// ** ** van en negreta i una mica més foscos. Mides en píxels (no depèn dels DPI).
+        /// </summary>
+        private static void DrawRichCentered(Graphics g, Rectangle r, string text, float px, Color color)
+        {
+            using var reg = new Font("Segoe UI", px, GraphicsUnit.Pixel);
+            using var bold = new Font("Segoe UI", px, FontStyle.Bold, GraphicsUnit.Pixel);
+            var boldColor = Color.FromArgb(22, 32, 42);
+            const TextFormatFlags F = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
+            // paraules amb el seu estil (un tros en negreta pot tenir diverses paraules)
+            var words = new List<(string w, bool b)>();
+            var parts = text.Split("**");
+            for (int i = 0; i < parts.Length; i++)
+                foreach (var w in parts[i].Split(' ', StringSplitOptions.RemoveEmptyEntries)) words.Add((w, i % 2 == 1));
+            int space = TextRenderer.MeasureText(g, " ", reg, Size.Empty, F).Width;
+            if (space <= 0) space = (int)(px * 0.28f);
+            var lines = new List<List<(string w, bool b, int width)>>();
+            var cur = new List<(string w, bool b, int width)>(); int curW = 0;
+            foreach (var (w, b) in words)
+            {
+                int ww = TextRenderer.MeasureText(g, w, b ? bold : reg, Size.Empty, F).Width;
+                int add = cur.Count == 0 ? ww : space + ww;
+                if (cur.Count > 0 && curW + add > r.Width) { lines.Add(cur); cur = new(); curW = 0; add = ww; }
+                cur.Add((w, b, ww)); curW += add;
+            }
+            if (cur.Count > 0) lines.Add(cur);
+            int lh = (int)Math.Ceiling(px * 1.36f);
+            int y = r.Top + (r.Height - lines.Count * lh) / 2;
+            foreach (var line in lines)
+            {
+                int lw = line.Sum(t => t.width) + space * (line.Count - 1);
+                int x = r.Left + (r.Width - lw) / 2;
+                foreach (var (w, b, width) in line)
+                {
+                    TextRenderer.DrawText(g, w, b ? bold : reg, new Point(x, y), b ? boldColor : color, F);
+                    x += width + space;
+                }
+                y += lh;
+            }
+        }
+
         private void ShowPopoutMessage(string text)
         {
             bool xplane = text == XpPopoutText;   // la icona de pop-out només té sentit a X-Plane
@@ -6025,15 +6069,10 @@ namespace SimConnect3
                 Location = new Point(40, 30),
                 Size = new Size(form.ClientSize.Width - 80, 70)
             });
-            form.Controls.Add(new Label
-            {
-                Text = text,
-                Font = new Font("Segoe UI", 30f, GraphicsUnit.Pixel),
-                ForeColor = Color.FromArgb(102, 114, 127),
-                TextAlign = ContentAlignment.MiddleCenter,
-                Location = new Point(40, 108),
-                Size = new Size(form.ClientSize.Width - 80, 90)
-            });
+            // text centrat amb paraules en negreta (marcades amb **…**, p.ex. la tecla **ALT**)
+            var body = new Panel { Location = new Point(40, 108), Size = new Size(form.ClientSize.Width - 80, xplane ? 90 : 130), BackColor = Color.White };
+            body.Paint += (s, e) => DrawRichCentered(e.Graphics, body.ClientRectangle, text, 30f, Color.FromArgb(102, 114, 127));
+            form.Controls.Add(body);
             // icona de pop-out d'X-Plane: dos quadrats encavalcats (dibuixada en codi, sense imatge)
             var icon = new Panel { Size = new Size(96, 96), BackColor = Color.FromArgb(28, 30, 34) };
             icon.Location = new Point((form.ClientSize.Width - icon.Width) / 2, 205);
@@ -6189,6 +6228,7 @@ namespace SimConnect3
                         _a320Overhead.SimDriven = true;
                         foreach (var kv in _xpLights) _a320Overhead.SetLight(kv.Key, kv.Value);
                         foreach (var kv in _xpPos) _a320Overhead.SetPosition(kv.Key, kv.Value);
+                        if (_xpThr is var (tl, tr)) _a320Overhead.SetThrottle(tl, tr);
                     }
                     else if (_a320Baro is A320BaroStruct ab)
                         _a320Overhead.SetBaro(ab.powered > 0.5, (int)Math.Round(ab.mode), ab.value, ab.isInhg > 0.5);
