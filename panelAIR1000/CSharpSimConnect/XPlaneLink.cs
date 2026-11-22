@@ -484,6 +484,42 @@ namespace SimConnect3
             return found;
         }
 
+        /// <summary>Totes les finestres visibles d'aquests processos amb aquest títol, de la de dalt a la de sota.</summary>
+        public static List<IntPtr> FindAll(string title, params string[] processNames)
+        {
+            var pids = new HashSet<int>();
+            foreach (var n in processNames)
+                foreach (var p in System.Diagnostics.Process.GetProcessesByName(n)) { pids.Add(p.Id); p.Dispose(); }
+            var list = new List<IntPtr>();
+            if (pids.Count == 0) return list;
+            EnumWindows((h, l) =>
+            {
+                GetWindowThreadProcessId(h, out int pid);
+                if (!pids.Contains(pid) || !IsWindowVisible(h)) return true;
+                var sb = new StringBuilder(256);
+                GetWindowText(h, sb, 256);
+                if (sb.ToString() == title) list.Add(h);
+                return true;
+            }, IntPtr.Zero);
+            return list;
+        }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool PrintWindow(IntPtr h, IntPtr hdc, uint flags);
+        /// <summary>Imatge del contingut d'una finestra (també de les pop-out de l'MSFS); null si no es pot.</summary>
+        public static System.Drawing.Bitmap? Capture(IntPtr h)
+        {
+            if (!GetWindowRect(h, out var r)) return null;
+            int w = r.R - r.L, hh = r.B - r.T;
+            if (w < 50 || hh < 50) return null;
+            var b = new System.Drawing.Bitmap(w, hh, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            using (var g = System.Drawing.Graphics.FromImage(b))
+            {
+                var dc = g.GetHdc();
+                try { PrintWindow(h, dc, 2); } finally { g.ReleaseHdc(dc); }
+            }
+            return b;
+        }
+
         [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
         /// <summary>Demana a la finestra que es tanqui (WM_CLOSE), com si es premés la seva creu.</summary>
         public static void Close(IntPtr h) => PostMessage(h, 0x0010, IntPtr.Zero, IntPtr.Zero);

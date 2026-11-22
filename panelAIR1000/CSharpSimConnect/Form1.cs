@@ -1817,7 +1817,7 @@ namespace SimConnect3
         private bool  _a320Active = false;
         private panelAIR1000.A320OverheadControl? _a320Overhead;
         // Posició (calibració F12) dels botons de zoom + / − de l'overhead; null = per defecte a baix a la dreta.
-        private Point? _a320ZoomPlusPos, _a320ZoomMinusPos, _a320PageBtnPos, _a320AreasBtnPos;
+        private Point? _a320ZoomPlusPos, _a320ZoomMinusPos, _a320PageBtnPos, _a320AreasBtnPos, _a320ThBtnPos;
 
         private bool  _tb21Dragging;
         private Point _tb21DragOffset;
@@ -5247,7 +5247,7 @@ namespace SimConnect3
             _xp.A320Changed += on =>
             {
                 if (on) SetA320Active(true);
-                else if (!IsA320FBW()) SetA320Active(false);
+                else if (!IsA320Msfs()) SetA320Active(false);
             };
             _xp.BaroChanged += (p, m, v, hg) =>
             {
@@ -5958,10 +5958,11 @@ namespace SimConnect3
 
         private void PlaceMsfsScreens()
         {
-            bool active = simconnect != null && IsA320FBW() && _a320Active && (_xp == null || !_xp.A320Loaded)
+            bool active = simconnect != null && IsA320Msfs() && _a320Active && (_xp == null || !_xp.A320Loaded)
                           && _a320Overhead != null && _a320Overhead.Visible;
             if (!active) { _msfsSince = DateTime.MinValue; return; }
             if (_msfsSince == DateTime.MinValue) _msfsSince = DateTime.UtcNow;
+            if (IsA320Fenix()) { PlaceFenixScreens(); return; }   // Fenix: finestres sense títol propi (Form1.A320Fenix.cs)
             int missing = 0;
             foreach (var (glass, title) in MsfsScreens)
             {
@@ -6080,6 +6081,7 @@ namespace SimConnect3
         private void CloseXPlaneScreens()
         {
             // MSFS (FlyByWire): es tanquen les finestres pop-out (les pantalles tornen al cockpit virtual)
+            if (simconnect != null && IsA320Fenix()) CloseFenixScreens();
             if (simconnect != null && IsA320FBW())
                 foreach (var (_, title) in MsfsScreens)
                 {
@@ -6121,6 +6123,8 @@ namespace SimConnect3
             // amb un ToLiss carregat a X-Plane, les ordres van cap a X-Plane
             if (_xp != null && _xp.A320Loaded) { _xp.SendCommand(id, cmd); return; }
             if (simconnect == null) return;
+            // Fenix: tot el glareshield (QNH inclòs) va per Form1.A320Fenix.cs
+            if (IsA320Fenix()) { TrySendFenix(id, cmd); return; }
             // FlyByWire: FCU, EFIS i warnings (el QNH, a sota)
             if (id != "MIP_BARO" && TrySendMsfsA320(id, cmd)) return;
             if (id == "MIP_BARO")
@@ -6165,7 +6169,14 @@ namespace SimConnect3
                         PlusLocation = _a320ZoomPlusPos,
                         MinusLocation = _a320ZoomMinusPos,
                         PageLocation = _a320PageBtnPos,
-                        AreasLocation = _a320AreasBtnPos
+                        AreasLocation = _a320AreasBtnPos,
+                        ThLocation = _a320ThBtnPos,
+                        ThrottleVisible = AppSettings.Instance.A320ThrottleVisible   // opció de l'usuari (per defecte no)
+                    };
+                    _a320Overhead.ThrottleVisibleChanged += on =>
+                    {
+                        AppSettings.Instance.A320ThrottleVisible = on;
+                        try { AppSettings.Instance.Save(); } catch { }
                     };
                     _a320Overhead.Command += OnA320Command;
                     _a320Overhead.HolesChanged += () => { if (_a320Active) ApplyA320Region(); };
@@ -6182,12 +6193,14 @@ namespace SimConnect3
                     else if (_a320Baro is A320BaroStruct ab)
                         _a320Overhead.SetBaro(ab.powered > 0.5, (int)Math.Round(ab.mode), ab.value, ab.isInhg > 0.5);
                     ApplyMsfsA320State();   // FlyByWire: FCU, llums i selectors (si n'ha arribat cap lectura)
+                    ApplyFenixState();      // Fenix: el mateix (si és el Fenix)
                     _a320Overhead.ZoomButtonsMoved += () =>
                     {
                         _a320ZoomPlusPos = _a320Overhead.PlusLocation;
                         _a320ZoomMinusPos = _a320Overhead.MinusLocation;
                         _a320PageBtnPos = _a320Overhead.PageLocation;
                         _a320AreasBtnPos = _a320Overhead.AreasLocation;
+                        _a320ThBtnPos = _a320Overhead.ThLocation;
                         try { ExportCalibrationPositions(silent: true); } catch { }
                     };
                     this.Controls.Add(_a320Overhead);
@@ -6363,7 +6376,7 @@ namespace SimConnect3
             if (string.IsNullOrEmpty(_currentAircraftTitle)) return; // encara no s'ha rebut cap títol real
 
             bool compatible = IsC172() || IsDA40() || IsDA62() || IsCirrusSR22() || IsBonanzaG36()
-                || IsBaronG58() || IsCaravan() || IsC400() || IsC408() || IsTBM930() || IsA320FBW();
+                || IsBaronG58() || IsCaravan() || IsC400() || IsC408() || IsTBM930() || IsA320Msfs();
 
             if (compatible)
             {
@@ -7494,6 +7507,8 @@ namespace SimConnect3
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.A32NX_BARO_L_PULL, "A32NX.FCU_EFIS_L_BARO_PULL");
                 // A320 FBW — resta del glareshield (FCU, EFIS, warnings): veure Form1.A320Msfs.cs
                 RegisterMsfsA320Glareshield();
+                // A320 del Fenix: veure Form1.A320Fenix.cs
+                RegisterFenixGlareshield();
 
                 // Flaps — definicions pròpies i separades (veure comentari a FlapsNumPosStruct).
                 simconnect.AddToDataDefinition(DEFINITIONS.FlapsNumPosRead, "FLAPS NUM HANDLE POSITIONS", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -8889,14 +8904,19 @@ namespace SimConnect3
         {
             if (data.dwRequestID == MsfsA320ReadReq)
             {
-                OnMsfsA320Data(((A320GlareStruct)data.dwData[0]).v);
+                if (IsA320FBW()) OnMsfsA320Data(((A320GlareStruct)data.dwData[0]).v);
+                return;
+            }
+            if (data.dwRequestID == FenixReadReq)
+            {
+                OnFenixData(((FenixGlareStruct)data.dwData[0]).v);
                 return;
             }
             if (data.dwRequestID == (uint)REQUESTS.RequestA320Baro)
             {
                 var b = (A320BaroStruct)data.dwData[0];
                 _a320Baro = b;   // només arriba quan canvia: es guarda per aplicar-lo si el panell A320 es crea després
-                if (_xp == null || !_xp.A320Loaded) _a320Overhead?.SetBaro(b.powered > 0.5, (int)Math.Round(b.mode), b.value, b.isInhg > 0.5);
+                if ((_xp == null || !_xp.A320Loaded) && !IsA320Fenix()) _a320Overhead?.SetBaro(b.powered > 0.5, (int)Math.Round(b.mode), b.value, b.isInhg > 0.5);
                 return;
             }
             //Debug.WriteLine(">>> OnRecvSimobjectData CALLED");
@@ -8911,7 +8931,7 @@ namespace SimConnect3
                 bool wasDA62 = IsDA62();
                 bool wasC408 = IsC408();
                 bool wasTBM930 = IsTBM930();
-                bool wasA320 = IsA320FBW();
+                bool wasA320 = IsA320Msfs();
                 _currentAircraftTitle = newTitle;
                 if (_aircraftTitleLbl != null && _aircraftTitleLbl.Text != newTitle)
                     _aircraftTitleLbl.Text = newTitle;
@@ -8934,7 +8954,7 @@ namespace SimConnect3
                 // A320 de FlyByWire: en carregar-lo s'activa sol l'overhead A320; en canviar a un altre avió
                 // es deixa (i la lògica TBM/G1000 de sota tria el cockpit que toca). Va primer perquè la
                 // condició TBM depèn de _a320Active.
-                bool isA320Now = IsA320FBW();
+                bool isA320Now = IsA320Msfs();   // FlyByWire o Fenix
                 if (isA320Now != wasA320 && _a320Active != isA320Now && !calibrationMode)
                     SetA320Active(isA320Now);
                 bool isTBM930Now = IsTBM930();
@@ -13012,6 +13032,7 @@ namespace SimConnect3
             if (_a320ZoomMinusPos is Point zm) sb.AppendLine($"A320ZOOMMINUS:a320zoom:{zm.X}:{zm.Y}");
             if (_a320PageBtnPos is Point pgp) sb.AppendLine($"A320PAGEBTN:a320page:{pgp.X}:{pgp.Y}");
             if (_a320AreasBtnPos is Point arp) sb.AppendLine($"A320AREASBTN:a320areas:{arp.X}:{arp.Y}");
+            if (_a320ThBtnPos is Point thp) sb.AppendLine($"A320THBTN:a320th:{thp.X}:{thp.Y}");
             sb.AppendLine($"THRQBTN:tq:{_thrQuadrantBtn.Location.X}:{_thrQuadrantBtn.Location.Y}:0:0");
             if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
             if (_appVersionPanel != null) sb.AppendLine($"APPVER:apv:{_appVersionPanel.Location.X}:{_appVersionPanel.Location.Y}");
@@ -13222,6 +13243,11 @@ namespace SimConnect3
                 {
                     _a320PageBtnPos = new Point(x, y);
                     if (_a320Overhead != null) _a320Overhead.PageLocation = _a320PageBtnPos;
+                }
+                else if (type == "A320THBTN")
+                {
+                    _a320ThBtnPos = new Point(x, y);
+                    if (_a320Overhead != null) _a320Overhead.ThLocation = _a320ThBtnPos;
                 }
                 else if (type == "A320AREASBTN")
                 {

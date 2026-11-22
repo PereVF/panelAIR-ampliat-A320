@@ -547,7 +547,8 @@ namespace panelAIR1000
         double Spd, bool SpdMach, bool SpdDashed, bool SpdManaged,
         double Hdg, bool HdgDashed, bool HdgManaged, bool TrkFpa,
         double Alt, bool AltManaged,
-        double Vs, double Fpa, bool VsDashed);
+        double Vs, double Fpa, bool VsDashed,
+        bool FbwStyle = false);   // true = dades del FlyByWire (MSFS): alguns formats propis (p.ex. FPA amb guions "--.-")
 
     /// <summary>
     /// Pantalla del FCU: dígits de 7 segments clars (amb els segments apagats lleugerament visibles) i rètols.
@@ -604,7 +605,13 @@ namespace panelAIR1000
             Cells(g, X(0.638f), dy, cw, dh, 5, Math.Max(0, Math.Round(s.Alt)).ToString("00000", ic));
             if (s.AltManaged) Dot(g, X(0.809f), dy + dh * 0.5f, dh);
             float vx = X(0.840f);
-            if (s.VsDashed) Cells(g, vx, dy, cw, dh, 5, "-----");
+            if (s.VsDashed && s.TrkFpa && s.FbwStyle)
+            {
+                // FlyByWire en mode FPA: "--.-" (guió al lloc del signe i "-.-" al format de l'FPA)
+                Sign(g, vx, dy, cw * 0.75f, dh, true);
+                Cells(g, vx + cw * 0.8f, dy, cw, dh, 2, "-.-");
+            }
+            else if (s.VsDashed) Cells(g, vx, dy, cw, dh, 5, "-----");
             else
             {
                 double v = s.TrkFpa ? s.Fpa : s.Vs;
@@ -643,6 +650,205 @@ namespace panelAIR1000
             using var b = new SolidBrush(Lit);
             g.FillRectangle(b, cx - a, cy - t / 2, a * 2, t);
             if (!minus) g.FillRectangle(b, cx - t / 2, cy - a, t, a * 2);
+        }
+    }
+
+    /// <summary>
+    /// Quadrant de gas (mòdul opcional del pedestal, es mostra al panell principal amb el botó TH).
+    /// Dibuix vectorial de la maqueta "Marques del quadrant A320": canals, escala 0-45, TO GA, FLX MCT, CL, A/THR, 0,
+    /// REV / FULL i les dues palanques (pom cilíndric + base plana amb la mosca). Coordenades internes: 451 x 830
+    /// unitats (de y = -110 a 720), escalades al rectangle de l'element.
+    /// </summary>
+    internal sealed class OhThrottle : OhElement
+    {
+        public bool Shown;
+        /// <summary>Posició de cada palanca: -1 REV FULL … 0 ralentí … 1 TO GA.</summary>
+        public float PosL, PosR;
+        public OhThrottle(string id, RectangleF r) { Id = id; Bounds = r; }
+        public override bool HitTest(PointF p) => false;
+
+        /// <summary>Rectangle (coordenades del panell) que ocupa una palanca a la posició p: pom, base, llum i ombres.</summary>
+        public RectangleF LeverRect(float p, int side)
+        {
+            float sc = Bounds.Height / 830f, ox = Bounds.X + (Bounds.Width - 451 * sc) / 2f, oy = Bounds.Y + 110 * sc;
+            float y = YOf(p);
+            float u0 = side < 0 ? 36 : 225, u1 = side < 0 ? 226 : 418;
+            float v0 = y - 26 - 150 - 8, v1 = y + 50 + 12;
+            return RectangleF.FromLTRB(ox + u0 * sc - 2, oy + v0 * sc - 2, ox + u1 * sc + 2, oy + v1 * sc + 2);
+        }
+        public override IEnumerable<RectangleF> HitAreas { get { yield break; } }
+
+        static readonly Color Yel = Color.FromArgb(242, 210, 27), Red = Color.FromArgb(232, 67, 47);
+        static readonly (float y, float p)[] Det = { (72, 1f), (150, 0.8f), (236, 0.58f), (433, 0f), (628, -1f) };
+        static float YOf(float p)
+        {
+            for (int i = 0; i < Det.Length - 1; i++)
+                if (p <= Det[i].p && p >= Det[i + 1].p)
+                {
+                    float t = (Det[i].p - p) / (Det[i].p - Det[i + 1].p);
+                    return Det[i].y + t * (Det[i + 1].y - Det[i].y);
+                }
+            return p > 0 ? Det[0].y : Det[^1].y;
+        }
+
+        static LinearGradientBrush Grad(float x0, float y0, float x1, float y1, params (float o, Color c)[] st)
+        {
+            var b = new LinearGradientBrush(new PointF(x0, y0), new PointF(x1, y1), st[0].c, st[^1].c);
+            var cb = new ColorBlend(st.Length) { Positions = st.Select(s => s.o).ToArray(), Colors = st.Select(s => s.c).ToArray() };
+            b.InterpolationColors = cb;
+            b.WrapMode = WrapMode.TileFlipXY;
+            return b;
+        }
+        static LinearGradientBrush VG(float y0, float y1, params (float, Color)[] st) => Grad(0, y0, 0, y1, st);
+        static LinearGradientBrush HG(float x0, float x1, params (float, Color)[] st) => Grad(x0, 0, x1, 0, st);
+        static Color A(int a, Color c) => Color.FromArgb(a, c);
+        static void Line(Graphics g, float x1, float y1, float x2, float y2, float w, Color c) { using var p = new Pen(c, w); g.DrawLine(p, x1, y1, x2, y2); }
+        static void Tri(Graphics g, Color c, params PointF[] pts) { using var b = new SolidBrush(c); g.FillPolygon(b, pts); }
+
+        public override void Draw(Graphics g)
+        {
+            if (!Shown) return;
+            var st = g.Save();
+            float sc = Bounds.Height / 830f;
+            g.TranslateTransform(Bounds.X + (Bounds.Width - 451 * sc) / 2f, Bounds.Y + 110 * sc);
+            g.ScaleTransform(sc, sc);
+            Housing(g);
+            Channel(g, 90, 190); Channel(g, 258, 358);
+            Scale(g);
+            Marks(g, -1); Marks(g, 1);
+            FootBar(g);
+            Lever(g, 140, PosL, -1); Lever(g, 308, PosR, 1);
+            g.Restore(st);
+        }
+
+        void Housing(Graphics g)
+        {
+            using (var fp = Oh.RoundRect(new RectangleF(5, 10, 441, 708), 24)) using (var b = new SolidBrush(Oh.Frame)) g.FillPath(b, fp);
+            using var pl = Oh.RoundRect(new RectangleF(12, 14, 427, 700), 18);
+            using (var b = VG(14, 714, (0, Oh.PlateA), (1, Oh.PlateB))) g.FillPath(b, pl);
+            using (var b = VG(14, 714, (0, A(0, Oh.PlateHi)), (0.22f, A(0, Oh.PlateHi)), (0.36f, A(90, Oh.PlateHi)), (0.5f, A(0, Oh.PlateHi)), (1, A(0, Oh.PlateHi)))) g.FillPath(b, pl);
+            using (var b = HG(12, 439, (0, Color.FromArgb(72, 0, 0, 0)), (0.05f, Color.FromArgb(0, 0, 0, 0)), (0.95f, Color.FromArgb(0, 0, 0, 0)), (1, Color.FromArgb(100, 0, 0, 0)))) g.FillPath(b, pl);
+            using (var p = new Pen(Oh.PlateLo, 2f)) g.DrawPath(p, pl);
+            Line(g, 30, 15.5f, 421, 15.5f, 1.2f, A(140, Oh.PlateHi));
+        }
+
+        static void Channel(Graphics g, float x0, float x1)
+        {
+            using var outer = Oh.RoundRect(new RectangleF(x0, 12, x1 - x0, 668), 10);
+            using (var b = VG(12, 680, (0, Oh.PlateB), (1, Oh.PlateA))) g.FillPath(b, outer);
+            using (var b = HG(x0, x1, (0, Color.FromArgb(90, 0, 0, 0)), (0.15f, Color.FromArgb(0, 0, 0, 0)), (0.85f, A(0, Oh.PlateHi)), (1, A(64, Oh.PlateHi)))) g.FillPath(b, outer);
+            using (var p = new Pen(Oh.PlateLo, 2.4f)) g.DrawPath(p, outer);
+            using var inner = Oh.RoundRect(new RectangleF(x0 + 10, 26, x1 - x0 - 20, 640), 7);
+            using (var b = VG(26, 666, (0, Color.FromArgb(52, 65, 78)), (1, Color.FromArgb(70, 84, 98)))) g.FillPath(b, inner);
+            using (var p = new Pen(Oh.PlateLo, 1.6f)) g.DrawPath(p, inner);
+            Line(g, x1 - 11.5f, 34, x1 - 11.5f, 660, 1, A(115, Oh.PlateHi));
+            Line(g, x0 + 14, 665.5f, x1 - 14, 665.5f, 1, A(115, Oh.PlateHi));
+        }
+
+        static void Scale(Graphics g)
+        {
+            const float y0 = 604, y45 = 228;
+            for (int v = 0; v <= 45; v++)
+            {
+                float y = y0 + (y45 - y0) * v / 45f; bool major = v % 5 == 0; float w = major ? 13 : 9;
+                Line(g, 197, y, 197 + w, y, major ? 2.4f : 2f, Oh.Silk);
+                Line(g, 250 - w, y, 250, y, major ? 2.4f : 2f, Oh.Silk);
+                if (major) Oh.Text(g, v.ToString(), 223, y, 16, Oh.Silk);
+            }
+        }
+
+        static void Marks(Graphics g, int side)
+        {
+            float X(float x) => side < 0 ? x : 451 - x;
+            int dir = side < 0 ? 1 : -1;
+            float lx = X(70);
+            Line(g, lx, 142, lx, 433, 2.2f, Oh.Silk);
+            Line(g, lx, 433, X(84), 433, 2.2f, Oh.Silk);
+            foreach (float yy in new float[] { 72, 150, 236 })
+                Tri(g, Oh.Silk, new PointF(lx, yy - 8), new PointF(lx, yy + 8), new PointF(X(86), yy));
+            Oh.Text(g, "TO", X(42), 66, 12, Oh.Silk); Oh.Text(g, "GA", X(42), 79, 12, Oh.Silk);
+            Oh.Text(g, "FLX", X(40), 143, 13, Oh.Silk); Oh.Text(g, "MCT", X(40), 158, 13, Oh.Silk);
+            Oh.Text(g, "CL", X(44), 236, 15, Oh.Silk);
+            string[] athr = { "A", "/", "T", "H", "R" };
+            for (int i = 0; i < athr.Length; i++) Oh.Text(g, athr[i], X(46), 284 + i * 30, 26, Oh.Silk);
+            Oh.Text(g, "0", X(48), 438, 13, Oh.Silk);
+            Tri(g, Oh.Silk, new PointF(X(6), 432), new PointF(X(24), 421), new PointF(X(24), 443));
+
+            // REV: ratlles només al costat exterior i per sobre de les lletres
+            var st = g.Save();
+            using (var clip = new Region(new RectangleF(Math.Min(X(20), X(52)), 462, 32, 150)))
+            {
+                clip.Union(new RectangleF(Math.Min(X(20), X(86)), 462, 66, 22));
+                g.SetClip(clip, CombineMode.Intersect);
+                using var hp = new Pen(Yel, 2.4f);
+                for (int k = -6; k < 16; k++) { float yy = 448 + k * 14; g.DrawLine(hp, X(16), yy, X(90), yy + 70); }
+            }
+            g.Restore(st);
+            string[] rev = { "R", "E", "V" };
+            for (int i = 0; i < 3; i++) Oh.Text(g, rev[i], X(60), 506 + i * 34, 26, Yel);
+            float bx = X(80), yFull = YOf(-1);
+            using (var yb = new SolidBrush(Yel)) g.FillRectangle(yb, bx - 2.5f, 488, 5, yFull - 488);
+            Line(g, bx + 2.5f * dir, 489, X(90), 489, 3, Yel);
+            Tri(g, Yel, new PointF(bx - 2.5f * dir, yFull - 9), new PointF(X(92), yFull), new PointF(bx - 2.5f * dir, yFull + 9));
+            Oh.Text(g, "FULL", X(56), 648, 13, Yel);
+        }
+
+        static void FootBar(Graphics g)
+        {
+            using (var b = VG(680, 700, (0, Oh.PlateHi), (1, Oh.PlateB))) g.FillRectangle(b, 76, 680, 300, 20);
+            Line(g, 76, 680.5f, 376, 680.5f, 1, Color.FromArgb(90, 255, 255, 255));
+            Line(g, 76, 699.5f, 376, 699.5f, 1, Oh.PlateLo);
+        }
+
+        static void Lever(Graphics g, float xc, float p, int side)
+        {
+            float y = YOf(p);
+            // base plana amb la mosca (osca en V a la vora exterior, a mitja fletxa lateral)
+            const float OUT = 78, n = 16, h = 11, rad = 10;
+            float pl = side < 0 ? OUT : xc - 42, pr = side < 0 ? xc + 42 : 451 - OUT, pt = y - 50, pb = y + 50;
+            using var plate = new GraphicsPath();
+            plate.AddLine(pl + rad, pt, pr - rad, pt);
+            plate.AddArc(pr - 2 * rad, pt, 2 * rad, 2 * rad, 270, 90);
+            if (side > 0) plate.AddLines(new[] { new PointF(pr, y - h), new PointF(pr - n, y), new PointF(pr, y + h) });
+            plate.AddArc(pr - 2 * rad, pb - 2 * rad, 2 * rad, 2 * rad, 0, 90);
+            plate.AddArc(pl, pb - 2 * rad, 2 * rad, 2 * rad, 90, 90);
+            if (side < 0) plate.AddLines(new[] { new PointF(pl, y + h), new PointF(pl + n, y), new PointF(pl, y - h) });
+            plate.AddArc(pl, pt, 2 * rad, 2 * rad, 180, 90);
+            plate.CloseFigure();
+            var s0 = g.Save();
+            g.TranslateTransform(3, 5);
+            using (var sb = new SolidBrush(Color.FromArgb(90, 0, 0, 0))) g.FillPath(sb, plate);
+            g.Restore(s0);
+            using (var b = new SolidBrush(Color.FromArgb(22, 25, 29))) g.FillPath(b, plate);
+            using (var b = VG(pt, pb, (0, Color.FromArgb(26, 255, 255, 255)), (0.25f, Color.FromArgb(0, 255, 255, 255)), (0.8f, Color.FromArgb(0, 0, 0, 0)), (1, Color.FromArgb(90, 0, 0, 0)))) g.FillPath(b, plate);
+            using (var pe = new Pen(Color.FromArgb(77, 160, 175, 190), 1.2f)) g.DrawPath(pe, plate);
+            float ox = side < 0 ? pl : pr, d = side < 0 ? 1 : -1;
+            using (var pe = new Pen(Color.FromArgb(190, 230, 236, 242), 1.3f))
+                g.DrawLines(pe, new[] { new PointF(ox, y - h), new PointF(ox + d * n, y), new PointF(ox, y + h) });
+
+            // pom: cilindre negre brillant amb caps als extrems i llum vermella al costat exterior
+            float hx = side < 0 ? xc - 90 : xc - 77, hw = 172, hh = 150, hy = y - 26 - hh;
+            (float, Color)[] cyl = { (0, Color.FromArgb(20, 21, 24)), (0.18f, Color.FromArgb(42, 44, 48)), (0.3f, Color.FromArgb(141, 145, 150)),
+                                    (0.36f, Color.FromArgb(201, 205, 209)), (0.42f, Color.FromArgb(85, 89, 95)), (0.6f, Color.FromArgb(35, 37, 40)),
+                                    (0.85f, Color.FromArgb(18, 19, 21)), (1, Color.FromArgb(6, 6, 7)) };
+            using (var body = Oh.RoundRect(new RectangleF(hx + 22, hy + 4, hw - 44, hh - 8), 6))
+            {
+                var s1 = g.Save(); g.TranslateTransform(5, 10);
+                using (var sb = new SolidBrush(Color.FromArgb(110, 0, 0, 0))) g.FillPath(sb, body);
+                g.Restore(s1);
+                using var b = VG(hy, hy + hh, cyl); g.FillPath(b, body);
+            }
+            foreach (float cx in new[] { hx + 15, hx + hw - 15 })
+            {
+                using var cap = Oh.RoundRect(new RectangleF(cx - 15, hy - 2, 30, hh + 4), 10);
+                using (var b = VG(hy, hy + hh, cyl)) g.FillPath(b, cap);
+                using (var b = HG(cx - 15, cx + 15, (0, Color.FromArgb(140, 0, 0, 0)), (0.3f, Color.FromArgb(0, 0, 0, 0)), (0.7f, Color.FromArgb(0, 0, 0, 0)), (1, Color.FromArgb(153, 0, 0, 0)))) g.FillPath(b, cap);
+            }
+            Line(g, hx + 30, hy + 2, hx + 30, hy + hh - 2, 1.5f, Color.FromArgb(153, 0, 0, 0));
+            Line(g, hx + hw - 30, hy + 2, hx + hw - 30, hy + hh - 2, 1.5f, Color.FromArgb(153, 0, 0, 0));
+            float rx = side < 0 ? hx - 9 : hx + hw - 1;
+            using (var rl = Oh.RoundRect(new RectangleF(rx, hy + 50, 10, 46), 2))
+            using (var b = VG(hy + 50, hy + 96, (0, Color.FromArgb(255, 138, 106)), (0.4f, Red), (1, Color.FromArgb(158, 36, 20)))) g.FillPath(b, rl);
         }
     }
 
@@ -3503,8 +3709,61 @@ namespace panelAIR1000
         int ZoomBtnSize => Math.Max(40, (int)(80 * Width / 3840f));
         // columna de botons sota l'indicador de pressió de frens (panell principal 4K)
         Point BtnPos(float x, float y) => new((int)(x * Width / 3840f), (int)(y * Width / 3840f));
-        Point DefaultMinusPos => BtnPos(3646, 1988);
-        Point DefaultPlusPos => BtnPos(3646, 1894);
+        Point DefaultMinusPos => BtnPos(3646, 2070);
+        Point DefaultPlusPos => BtnPos(3646, 1980);
+        // botó TH (quadrant de gas), just a sota d'OVHD
+        Point DefaultThPos => BtnPos(3646, 1890);
+        Rectangle ThRect => new(ThLocation ?? DefaultThPos, new Size(ZoomBtnSize, ZoomBtnSize));
+        /// <summary>Posició del botó TH (null = sota d'OVHD).</summary>
+        public Point? ThLocation { get; set; }
+        OhThrottle? _throttle;
+        bool _throttleShown;
+        /// <summary>Si es mostra el quadrant de gas al panell principal (opció de l'usuari, per defecte no).</summary>
+        public bool ThrottleVisible
+        {
+            get => _throttleShown;
+            set
+            {
+                if (_throttleShown == value) return;
+                _throttleShown = value;
+                if (_throttle != null) { _throttle.Shown = value; Redraw(_throttle.DirtyBounds); }
+                InvalidateButtons();
+            }
+        }
+        /// <summary>Posició de les palanques de gas llegida del simulador (-1 REV FULL … 0 ralentí … 1 TO GA).</summary>
+        public void SetThrottle(float left, float right)
+        {
+            if (_throttle == null) return;
+            // el simulador pot enviar posicions desenes de cops per segon: es guarda només l'última i es dibuixa
+            // com a molt cada 30 ms, i només la franja de cada palanca que es mou (no tot el quadrant)
+            _thrPending = (left, right);
+            if (_thrTimer == null)
+            {
+                _thrTimer = new System.Windows.Forms.Timer { Interval = 30 };
+                _thrTimer.Tick += (s, e) => ApplyThrottle();
+            }
+            if (!_thrTimer.Enabled) { ApplyThrottle(); _thrTimer.Start(); }
+        }
+        (float l, float r)? _thrPending;
+        System.Windows.Forms.Timer? _thrTimer;
+
+        void ApplyThrottle()
+        {
+            if (_throttle == null || _thrPending is not var (left, right)) { _thrTimer?.Stop(); return; }
+            _thrPending = null;
+            var t = _throttle;
+            bool chL = Math.Abs(t.PosL - left) >= 0.002f, chR = Math.Abs(t.PosR - right) >= 0.002f;
+            if (!chL && !chR) return;
+            var dirty = new List<RectangleF>();
+            if (chL) { dirty.Add(t.LeverRect(t.PosL, -1)); t.PosL = left; dirty.Add(t.LeverRect(left, -1)); }
+            if (chR) { dirty.Add(t.LeverRect(t.PosR, 1)); t.PosR = right; dirty.Add(t.LeverRect(right, 1)); }
+            if (!t.Shown) return;
+            // la posició vella i la nova sovint s'encavalquen: es redibuixa la unió de cada palanca d'un sol cop
+            for (int i = 0; i + 1 < dirty.Count; i += 2) Redraw(RectangleF.Union(dirty[i], dirty[i + 1]));
+        }
+
+        /// <summary>L'usuari ha premut TH (per desar l'opció).</summary>
+        public event Action<bool>? ThrottleVisibleChanged;
         Rectangle PlusRect => new(PlusLocation ?? DefaultPlusPos, new Size(ZoomBtnSize, ZoomBtnSize));
         Rectangle MinusRect => new(MinusLocation ?? DefaultMinusPos, new Size(ZoomBtnSize, ZoomBtnSize));
         Point DefaultPagePos => BtnPos(3646, 1800);
@@ -3518,8 +3777,8 @@ namespace panelAIR1000
         static bool s_showAreas;
         /// <summary>Color del botó "mostrar àrees": taronja, dibuixat molt subtil (poca opacitat) (a joc amb el panell A320).</summary>
         static readonly Color AreasColor = Color.Orange;
-        Rectangle BtnRect(int b) => b == 1 ? PlusRect : b == 2 ? MinusRect : b == 4 ? AreasRect : PageRect;
-        Rectangle AllBtnsRect => Rectangle.Union(Rectangle.Union(PlusRect, MinusRect), PageRect);
+        Rectangle BtnRect(int b) => b == 1 ? PlusRect : b == 2 ? MinusRect : b == 4 ? AreasRect : b == 5 ? ThRect : PageRect;
+        Rectangle AllBtnsRect => Rectangle.Union(Rectangle.Union(Rectangle.Union(PlusRect, MinusRect), PageRect), ThRect);
 
         /// <summary>Posició dels botons de zoom (null = posició per defecte a baix a la dreta).</summary>
         public Point? PlusLocation { get; set; }
@@ -3723,10 +3982,29 @@ namespace panelAIR1000
                 g.DrawString("OVHD", f, tb, pr.X + pr.Width / 2f, pr.Y + pr.Height / 2f, Oh.Center);
                 g.TextRenderingHint = oldHint;
             }
+            // botó TH: igual que OVHD; quan el quadrant es mostra, el fons és més clar
+            var th = ThRect;
+            if (th.IntersectsWith(clip))
+            {
+                bool pressed = _btnPressed == 5;
+                using (var path = Oh.RoundRect(th, th.Width * 0.18f))
+                {
+                    var fill = _throttleShown ? Color.FromArgb(pressed ? 200 : 160, 95, 108, 122) : Color.FromArgb(pressed ? 170 : 110, 0, 0, 0);
+                    using (var b = new SolidBrush(fill)) g.FillPath(b, path);
+                    using var p = new Pen(CalibrationMode ? Color.FromArgb(220, 255, 140, 0) : Color.FromArgb(150, 255, 255, 255), Math.Max(2f, th.Width / 30f));
+                    g.DrawPath(p, path);
+                }
+                using var f2 = new Font("Segoe UI", Math.Max(9f, th.Width * 0.3f), FontStyle.Bold, GraphicsUnit.Pixel);
+                using var tb2 = new SolidBrush(Color.FromArgb(230, 255, 255, 255));
+                var oldHint2 = g.TextRenderingHint;
+                g.TextRenderingHint = TextRenderingHint.AntiAlias;
+                g.DrawString("TH", f2, tb2, th.X + th.Width / 2f, th.Y + th.Height / 2f, Oh.Center);
+                g.TextRenderingHint = oldHint2;
+            }
             g.SmoothingMode = oldMode;
         }
 
-        int ZoomButtonAt(Point p) => _isOverlay ? 0 : Rectangle.Inflate(AreasRect, 8, 8).Contains(p) ? 4 : PageRect.Contains(p) ? 3 : !OverlayOpen ? 0 : PlusRect.Contains(p) ? 1 : MinusRect.Contains(p) ? 2 : 0;
+        int ZoomButtonAt(Point p) => _isOverlay ? 0 : Rectangle.Inflate(AreasRect, 8, 8).Contains(p) ? 4 : PageRect.Contains(p) ? 3 : ThRect.Contains(p) ? 5 : !OverlayOpen ? 0 : PlusRect.Contains(p) ? 1 : MinusRect.Contains(p) ? 2 : 0;
 
         void ToggleShowAreas()
         {
@@ -3992,7 +4270,7 @@ namespace panelAIR1000
             {
                 var old = BtnRect(_btnDrag);
                 var np = new Point(Math.Clamp(e.X - _btnDragOff.X, 0, Width - old.Width), Math.Clamp(e.Y - _btnDragOff.Y, 0, Height - old.Height));
-                if (_btnDrag == 1) PlusLocation = np; else if (_btnDrag == 2) MinusLocation = np; else if (_btnDrag == 4) AreasLocation = np; else PageLocation = np;
+                if (_btnDrag == 1) PlusLocation = np; else if (_btnDrag == 2) MinusLocation = np; else if (_btnDrag == 4) AreasLocation = np; else if (_btnDrag == 5) ThLocation = np; else PageLocation = np;
                 Invalidate(Rectangle.Inflate(old, 6, 6)); Invalidate(Rectangle.Inflate(BtnRect(_btnDrag), 6, 6));
                 if (_ov != null && _ov.Visible) _ov.UpdateOverlayRegion();
                 return;
@@ -4028,6 +4306,7 @@ namespace panelAIR1000
                 if (ZoomButtonAt(e.Location) == b)
                 {
                     if (b == 4) ToggleShowAreas();
+                    else if (b == 5) { ThrottleVisible = !ThrottleVisible; ThrottleVisibleChanged?.Invoke(ThrottleVisible); }
                     else if (b == 3) ToggleOverlay();
                     else if (_ov != null) { _ov.SetZoom(_ov._zoom + (b == 1 ? 10 : -10)); InvalidateButtons(); }
                 }
@@ -4723,6 +5002,10 @@ namespace panelAIR1000
             _silk.Add(new OhBlock(R(22, 926, 482, 1044), Color.FromArgb(58, 60, 64), Color.FromArgb(26, 26, 28), 2f));
             _silk.Add(new OhBlock(R(550, 926, 788, 1036), Color.FromArgb(70, 72, 76), Color.FromArgb(30, 30, 32), 2f, 7));
             Oh_BigScrews(new[] { Pt(676, 818), Pt(860, 948) });
+            // quadrant de gas (mòdul opcional, botó TH): a sota del rectangle que hi ha sota l'ND, centrat amb ell
+            // (més gran: la carcassa comença just sota la llengüeta i tapa el cargol; l'espai de dalt de l'element
+            //  només el fa servir el pom quan la palanca és a TO GA)
+            _throttle = Add(new OhThrottle("MIP_THROTTLE", R(556, 742, 776, 1146)) { Shown = _throttleShown });
 
             // TERR ON ND (capità)
             // DCDU, tapa cega, TERR ON ND i ISIS pujats en bloc: la vora de baix del DCDU alineada amb la de l'ECAM inferior

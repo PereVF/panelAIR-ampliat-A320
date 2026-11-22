@@ -183,7 +183,8 @@ namespace SimConnect3
                 v[0], v[1] > 0.5, v[2] > 0.5, v[3] > 0.5,
                 v[4], v[5] > 0.5, v[6] > 0.5, trk,
                 v[8], v[9] > 0.5,
-                v[10], v[10], v[11] > 0.5);   // V/S i FPA comparteixen la LVAR (segons el mode)
+                v[10], v[10], v[11] > 0.5,    // V/S i FPA comparteixen la LVAR (segons el mode)
+                FbwStyle: true);
             _msFcu = s;
             _msAltStep = v[13] > 0.5;
             int k = MsfsA320Display.Length;

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Text.Json;
 
@@ -15,6 +15,8 @@ namespace SimConnect3
         public bool TouchScreenConfigured { get; set; } = false;
         public string SfsMonitorPath { get; set; } = @"C:\Program Files\SFSmonitor\SFSmonitor.exe";
         public bool SfsMonitorAutoLaunch { get; set; } = true;
+        /// <summary>A320: es mostra el quadrant de gas (botó TH) al panell principal. Per defecte no.</summary>
+        public bool A320ThrottleVisible { get; set; } = false;
 
         private static readonly string SettingsDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "panelAIR");
