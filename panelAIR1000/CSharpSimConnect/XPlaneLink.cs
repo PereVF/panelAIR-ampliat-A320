@@ -462,10 +462,14 @@ namespace SimConnect3
         const uint GW_HWNDPREV = 3;
 
         /// <summary>Finestra visible d'X-Plane amb aquest títol (o IntPtr.Zero).</summary>
-        public static IntPtr Find(string title)
+        public static IntPtr Find(string title) => Find(title, "X-Plane");
+
+        /// <summary>Finestra visible d'algun d'aquests processos (p.ex. "FlightSimulator") amb aquest títol (o IntPtr.Zero).</summary>
+        public static IntPtr Find(string title, params string[] processNames)
         {
             var pids = new HashSet<int>();
-            foreach (var p in System.Diagnostics.Process.GetProcessesByName("X-Plane")) { pids.Add(p.Id); p.Dispose(); }
+            foreach (var n in processNames)
+                foreach (var p in System.Diagnostics.Process.GetProcessesByName(n)) { pids.Add(p.Id); p.Dispose(); }
             if (pids.Count == 0) return IntPtr.Zero;
             IntPtr found = IntPtr.Zero;
             EnumWindows((h, l) =>
@@ -479,6 +483,10 @@ namespace SimConnect3
             }, IntPtr.Zero);
             return found;
         }
+
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+        /// <summary>Demana a la finestra que es tanqui (WM_CLOSE), com si es premés la seva creu.</summary>
+        public static void Close(IntPtr h) => PostMessage(h, 0x0010, IntPtr.Zero, IntPtr.Zero);
 
         /// <summary>
         /// Treu el marc a la finestra i la posa exactament a <paramref name="screen"/>, just darrere de <paramref name="behind"/>.

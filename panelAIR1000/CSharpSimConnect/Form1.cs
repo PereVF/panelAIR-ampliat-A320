@@ -5896,6 +5896,7 @@ namespace SimConnect3
         {
             // els forats de les pantalles de l'A320 es revisen cada segon (només es tornen a aplicar si han canviat)
             if (_a320Active) ApplyA320Region();
+            PlaceMsfsScreens();   // MSFS + FlyByWire (no fa res si no és el cas)
             if (_xp == null || !_xp.A320Loaded || !_a320Active || _a320Overhead == null || !_a320Overhead.Visible) return;
             int missing = 0;
             foreach (var (glass, title, cmd) in XpScreens)
@@ -5916,21 +5917,63 @@ namespace SimConnect3
                         continue;
                     }
                     _xpScreenAsked[glass] = true;
-                    // la finestra del ToLiss té el seu propi bisell gris (i la icona de pop-out a la cantonada): es fa una mica
-                    // més gran que el forat perquè tot això quedi amagat darrere del bisell de l'app
-                    // alçada: la del vidre + 1,5% per dalt i per baix; amplada en proporció, centrada al vidre
-                    if (_a320Overhead.GlassScreenRect(glass) is Rectangle rc)
-                    {
-                        int dy = (int)Math.Round(rc.Height * XpBezelY);
-                        // l'alçada mana (Pere, 2026-11-22): l'amplada surt de l'alçada amb la mateixa proporció que el vidre
-                        int wh = rc.Height + 2 * dy;
-                        int ww = (int)Math.Round(wh * (double)rc.Width / rc.Height);
-                        XPlaneWindows.Place(h, new Rectangle(rc.X + (rc.Width - ww) / 2, rc.Y - dy, ww, wh), this.Handle);
-                    }
+                    if (SimWindowRect(glass) is Rectangle wr) XPlaneWindows.Place(h, wr, this.Handle);
                 }
                 catch { }
             }
-            UpdatePopoutMessage(missing);
+            UpdatePopoutMessage(missing, XpScreens.Length, _xpAskedAt, ref _xpPopoutMsgShown, XpPopoutText);
+        }
+
+        /// <summary>
+        /// Rectangle de pantalla on va la finestra pop-out d'una pantalla del simulador (ToLiss o FlyByWire): una mica més
+        /// gran que el vidre perquè el marc propi de la finestra quedi amagat darrere del bisell de l'app.
+        /// Alçada: la del vidre + 1,5% per dalt i per baix (l'alçada mana); amplada en proporció, centrada al vidre.
+        /// </summary>
+        private Rectangle? SimWindowRect(int glass, int extraHeight = 0)
+        {
+            if (_a320Overhead?.GlassScreenRect(glass) is not Rectangle rc) return null;
+            int dy = (int)Math.Round(rc.Height * XpBezelY);
+            int wh = rc.Height + 2 * dy + extraHeight;
+            int ww = (int)Math.Round(wh * (double)rc.Width / rc.Height);
+            // centrada al vidre en tots dos sentits
+            return new Rectangle(rc.X + (rc.Width - ww) / 2, rc.Y + (rc.Height - wh) / 2, ww, wh);
+        }
+        // les finestres de l'MSFS van 15 px més baixes que les del ToLiss (Pere, 2026-11-22)
+        private const int MsfsExtraHeight = -15;
+
+        // ── MSFS (FlyByWire A32NX): mateixa idea, però les pantalles les ha de treure l'usuari (Alt dreta + clic) ──
+        private static readonly string[] MsfsProcesses = { "FlightSimulator", "FlightSimulator2024" };
+        /// <summary>Pantalles del FlyByWire (pop-out de l'MSFS) → forat de l'app: índex del vidre i títol de la finestra (comprovats).</summary>
+        private static readonly (int glass, string title)[] MsfsScreens =
+        {
+            (0, "A32NX_PFD_1"),
+            (1, "WASMINSTRUMENT"),   // l'ND del FlyByWire surt amb aquest títol
+            (2, "A32NX_EWD_1"),
+            (3, "SD"),
+        };
+        private DateTime _msfsSince = DateTime.MinValue;   // des de quan hi ha el FlyByWire en mode A320 (per a l'avís)
+        private bool _msfsPopoutMsgShown;
+        private const string XpPopoutText = "In X-Plane, click this icon on each ToLiss display, one at a time, to pop it out. panelAIR will place it in the panel.";
+        private const string MsfsPopoutText = "In Microsoft Flight Simulator, hold Right Alt and click each A320 display (PFD, ND and both ECAMs) to pop it out. panelAIR will place it in the panel.";
+
+        private void PlaceMsfsScreens()
+        {
+            bool active = simconnect != null && IsA320FBW() && _a320Active && (_xp == null || !_xp.A320Loaded)
+                          && _a320Overhead != null && _a320Overhead.Visible;
+            if (!active) { _msfsSince = DateTime.MinValue; return; }
+            if (_msfsSince == DateTime.MinValue) _msfsSince = DateTime.UtcNow;
+            int missing = 0;
+            foreach (var (glass, title) in MsfsScreens)
+            {
+                try
+                {
+                    var h = XPlaneWindows.Find(title, MsfsProcesses);
+                    if (h == IntPtr.Zero) { missing++; continue; }
+                    if (SimWindowRect(glass, MsfsExtraHeight) is Rectangle wr) XPlaneWindows.Place(h, wr, this.Handle);
+                }
+                catch { }
+            }
+            UpdatePopoutMessage(missing, MsfsScreens.Length, _msfsSince, ref _msfsPopoutMsgShown, MsfsPopoutText);
         }
 
         private DateTime _xpAskedAt = DateTime.MinValue;   // quan s'han demanat les pantalles (per a l'avís de pop-out)
@@ -5941,25 +5984,26 @@ namespace SimConnect3
         /// Avís (un cop per sessió del ToLiss): si 3 s després de demanar les pantalles alguna encara no és una finestra
         /// de Windows, cal que l'usuari en faci el pop-out amb el ratolí. Es tanca sol quan ja hi són totes.
         /// </summary>
-        private void UpdatePopoutMessage(int missing)
+        private void UpdatePopoutMessage(int missing, int total, DateTime since, ref bool shown, string text)
         {
-            int placed = XpScreens.Length - missing;
+            int placed = total - missing;
             // es tanca sol en quan l'app ha pogut col·locar almenys una finestra més que quan va sortir
             if (_xpPopoutMsg != null && !_xpPopoutMsg.IsDisposed)
             {
                 if (placed > _xpPlacedAtMsg) _xpPopoutMsg.Close();
                 return;
             }
-            if (missing == 0 || _xpPopoutMsgShown || _xpAskedAt == DateTime.MinValue || (DateTime.UtcNow - _xpAskedAt).TotalSeconds < 3) return;
-            _xpPopoutMsgShown = true;
+            if (missing == 0 || shown || since == DateTime.MinValue || (DateTime.UtcNow - since).TotalSeconds < 3) return;
+            shown = true;
             _xpPlacedAtMsg = placed;
-            ShowPopoutMessage();
+            ShowPopoutMessage(text);
         }
         private int _xpPlacedAtMsg;
 
         // lletres en píxels (GraphicsUnit.Pixel) i mida fixa, com la Setup Wizard: l'escala de Windows (DPI) no hi afecta
-        private void ShowPopoutMessage()
+        private void ShowPopoutMessage(string text)
         {
+            bool xplane = text == XpPopoutText;   // la icona de pop-out només té sentit a X-Plane
             var form = new Form
             {
                 AutoScaleMode = AutoScaleMode.None,
@@ -5982,7 +6026,7 @@ namespace SimConnect3
             });
             form.Controls.Add(new Label
             {
-                Text = "In X-Plane, click this icon on each ToLiss display, one at a time, to pop it out. panelAIR will place it in the panel.",
+                Text = text,
                 Font = new Font("Segoe UI", 30f, GraphicsUnit.Pixel),
                 ForeColor = Color.FromArgb(102, 114, 127),
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -6000,7 +6044,7 @@ namespace SimConnect3
                 using (var bg = new SolidBrush(icon.BackColor)) g.FillRectangle(bg, 20, 34, 42, 42);
                 g.DrawRectangle(pen, 20, 34, 42, 42);                                       // quadrat del davant
             };
-            form.Controls.Add(icon);
+            if (xplane) form.Controls.Add(icon);
             var ok = new Button
             {
                 Text = "Got it",
@@ -6035,6 +6079,13 @@ namespace SimConnect3
         /// <summary>En tancar l'app: tanca a X-Plane les pantalles del ToLiss que l'app tenia encaixades.</summary>
         private void CloseXPlaneScreens()
         {
+            // MSFS (FlyByWire): es tanquen les finestres pop-out (les pantalles tornen al cockpit virtual)
+            if (simconnect != null && IsA320FBW())
+                foreach (var (_, title) in MsfsScreens)
+                {
+                    var h = XPlaneWindows.Find(title, MsfsProcesses);
+                    if (h != IntPtr.Zero) XPlaneWindows.Close(h);
+                }
             if (_xp == null || !_xp.A320Loaded) return;
             foreach (var (_, title, cmd) in XpScreens)
                 if (title != null && XPlaneWindows.Find(title) != IntPtr.Zero) _xp.SendCommandAndWait(cmd, "PUSH");
@@ -6070,6 +6121,8 @@ namespace SimConnect3
             // amb un ToLiss carregat a X-Plane, les ordres van cap a X-Plane
             if (_xp != null && _xp.A320Loaded) { _xp.SendCommand(id, cmd); return; }
             if (simconnect == null) return;
+            // FlyByWire: FCU, EFIS i warnings (el QNH, a sota)
+            if (id != "MIP_BARO" && TrySendMsfsA320(id, cmd)) return;
             if (id == "MIP_BARO")
             {
                 SIMCONNECT_EVENTS? ev = cmd switch
@@ -6128,6 +6181,7 @@ namespace SimConnect3
                     }
                     else if (_a320Baro is A320BaroStruct ab)
                         _a320Overhead.SetBaro(ab.powered > 0.5, (int)Math.Round(ab.mode), ab.value, ab.isInhg > 0.5);
+                    ApplyMsfsA320State();   // FlyByWire: FCU, llums i selectors (si n'ha arribat cap lectura)
                     _a320Overhead.ZoomButtonsMoved += () =>
                     {
                         _a320ZoomPlusPos = _a320Overhead.PlusLocation;
@@ -7438,6 +7492,8 @@ namespace SimConnect3
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.A32NX_BARO_L_DEC, "A32NX.FCU_EFIS_L_BARO_DEC");
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.A32NX_BARO_L_PUSH, "A32NX.FCU_EFIS_L_BARO_PUSH");
                 simconnect.MapClientEventToSimEvent(SIMCONNECT_EVENTS.A32NX_BARO_L_PULL, "A32NX.FCU_EFIS_L_BARO_PULL");
+                // A320 FBW — resta del glareshield (FCU, EFIS, warnings): veure Form1.A320Msfs.cs
+                RegisterMsfsA320Glareshield();
 
                 // Flaps — definicions pròpies i separades (veure comentari a FlapsNumPosStruct).
                 simconnect.AddToDataDefinition(DEFINITIONS.FlapsNumPosRead, "FLAPS NUM HANDLE POSITIONS", "Number", SIMCONNECT_DATATYPE.INT32, 0, SimConnect.SIMCONNECT_UNUSED);
@@ -8831,6 +8887,11 @@ namespace SimConnect3
 
         private void Simconnect_OnRecvSimobjectData(SimConnect sender, SIMCONNECT_RECV_SIMOBJECT_DATA data)
         {
+            if (data.dwRequestID == MsfsA320ReadReq)
+            {
+                OnMsfsA320Data(((A320GlareStruct)data.dwData[0]).v);
+                return;
+            }
             if (data.dwRequestID == (uint)REQUESTS.RequestA320Baro)
             {
                 var b = (A320BaroStruct)data.dwData[0];
