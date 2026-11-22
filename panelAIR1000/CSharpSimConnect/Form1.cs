@@ -5266,7 +5266,12 @@ namespace SimConnect3
             _xpPfdTimer = new System.Windows.Forms.Timer { Interval = 1000 };
             _xpPfdTimer.Tick += (s, ev) => PlaceXPlanePfd();
             _xpPfdTimer.Start();
-            _xp.A320Changed += on => { if (!on) Array.Clear(_xpScreenAsked); };
+            _xp.A320Changed += on =>
+            {
+                if (on) return;
+                Array.Clear(_xpScreenAsked); _xpAskedAt = DateTime.MinValue; _xpPopoutMsgShown = false;
+                if (_xpPopoutMsg != null && !_xpPopoutMsg.IsDisposed) _xpPopoutMsg.Close();
+            };
 
             // Timer per refrescar estat de connexió rotAIR
             var statusTimer = new System.Windows.Forms.Timer();
@@ -5885,12 +5890,14 @@ namespace SimConnect3
             (3, "ToLiss Lower ECAM", "XP_POPUP_SD"),
         };
         private readonly bool[] _xpScreenAsked = new bool[4];
-
+        // marge que sobresurt la finestra del ToLiss per cada costat (fracció de l'amplada / alçada del forat)
+        private const double XpBezelX = 0.04, XpBezelY = 0.015;
         private void PlaceXPlanePfd()
         {
             // els forats de les pantalles de l'A320 es revisen cada segon (només es tornen a aplicar si han canviat)
             if (_a320Active) ApplyA320Region();
             if (_xp == null || !_xp.A320Loaded || !_a320Active || _a320Overhead == null || !_a320Overhead.Visible) return;
+            int missing = 0;
             foreach (var (glass, title, cmd) in XpScreens)
             {
                 if (title == null) continue;
@@ -5899,15 +5906,130 @@ namespace SimConnect3
                     var h = XPlaneWindows.Find(title);
                     if (h == IntPtr.Zero)
                     {
+                        missing++;
                         // la demana un sol cop per sessió del ToLiss (l'ordre obre / tanca: no es repeteix)
-                        if (!_xpScreenAsked[glass]) { _xpScreenAsked[glass] = true; _xp.SendCommand(cmd, "PUSH"); }
+                        if (!_xpScreenAsked[glass])
+                        {
+                            _xpScreenAsked[glass] = true; _xp.SendCommand(cmd, "PUSH");
+                            if (_xpAskedAt == DateTime.MinValue) _xpAskedAt = DateTime.UtcNow;
+                        }
                         continue;
                     }
                     _xpScreenAsked[glass] = true;
-                    if (_a320Overhead.GlassScreenRect(glass) is Rectangle rc) XPlaneWindows.Place(h, rc, this.Handle);
+                    // la finestra del ToLiss té el seu propi bisell gris (i la icona de pop-out a la cantonada): es fa una mica
+                    // més gran que el forat perquè tot això quedi amagat darrere del bisell de l'app
+                    // alçada: la del vidre + 1,5% per dalt i per baix; amplada en proporció, centrada al vidre
+                    if (_a320Overhead.GlassScreenRect(glass) is Rectangle rc)
+                    {
+                        int dy = (int)Math.Round(rc.Height * XpBezelY);
+                        // l'alçada mana (Pere, 2026-11-22): l'amplada surt de l'alçada amb la mateixa proporció que el vidre
+                        int wh = rc.Height + 2 * dy;
+                        int ww = (int)Math.Round(wh * (double)rc.Width / rc.Height);
+                        XPlaneWindows.Place(h, new Rectangle(rc.X + (rc.Width - ww) / 2, rc.Y - dy, ww, wh), this.Handle);
+                    }
                 }
                 catch { }
             }
+            UpdatePopoutMessage(missing);
+        }
+
+        private DateTime _xpAskedAt = DateTime.MinValue;   // quan s'han demanat les pantalles (per a l'avís de pop-out)
+        private bool _xpPopoutMsgShown;                      // l'avís ja s'ha mostrat en aquesta sessió del ToLiss
+        private Form? _xpPopoutMsg;
+
+        /// <summary>
+        /// Avís (un cop per sessió del ToLiss): si 3 s després de demanar les pantalles alguna encara no és una finestra
+        /// de Windows, cal que l'usuari en faci el pop-out amb el ratolí. Es tanca sol quan ja hi són totes.
+        /// </summary>
+        private void UpdatePopoutMessage(int missing)
+        {
+            int placed = XpScreens.Length - missing;
+            // es tanca sol en quan l'app ha pogut col·locar almenys una finestra més que quan va sortir
+            if (_xpPopoutMsg != null && !_xpPopoutMsg.IsDisposed)
+            {
+                if (placed > _xpPlacedAtMsg) _xpPopoutMsg.Close();
+                return;
+            }
+            if (missing == 0 || _xpPopoutMsgShown || _xpAskedAt == DateTime.MinValue || (DateTime.UtcNow - _xpAskedAt).TotalSeconds < 3) return;
+            _xpPopoutMsgShown = true;
+            _xpPlacedAtMsg = placed;
+            ShowPopoutMessage();
+        }
+        private int _xpPlacedAtMsg;
+
+        // lletres en píxels (GraphicsUnit.Pixel) i mida fixa, com la Setup Wizard: l'escala de Windows (DPI) no hi afecta
+        private void ShowPopoutMessage()
+        {
+            var form = new Form
+            {
+                AutoScaleMode = AutoScaleMode.None,
+                FormBorderStyle = FormBorderStyle.FixedDialog,
+                MaximizeBox = false, MinimizeBox = false, ControlBox = false,
+                Text = "panelAIR",
+                ClientSize = new Size(1500, 420),   // mida de la zona útil (no inclou la barra de títol): el botó sempre hi cap
+                BackColor = Color.White,
+                StartPosition = FormStartPosition.Manual
+            };
+            form.Location = this.PointToScreen(new Point((this.ClientSize.Width - form.Width) / 2, 400));
+            form.Controls.Add(new Label
+            {
+                Text = "Pop out the A320 displays",
+                Font = new Font("Segoe UI", 51f, FontStyle.Bold, GraphicsUnit.Pixel),
+                ForeColor = Color.FromArgb(22, 32, 42),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Location = new Point(40, 30),
+                Size = new Size(form.ClientSize.Width - 80, 70)
+            });
+            form.Controls.Add(new Label
+            {
+                Text = "In X-Plane, click this icon on each ToLiss display, one at a time, to pop it out. panelAIR will place it in the panel.",
+                Font = new Font("Segoe UI", 30f, GraphicsUnit.Pixel),
+                ForeColor = Color.FromArgb(102, 114, 127),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Location = new Point(40, 108),
+                Size = new Size(form.ClientSize.Width - 80, 90)
+            });
+            // icona de pop-out d'X-Plane: dos quadrats encavalcats (dibuixada en codi, sense imatge)
+            var icon = new Panel { Size = new Size(96, 96), BackColor = Color.FromArgb(28, 30, 34) };
+            icon.Location = new Point((form.ClientSize.Width - icon.Width) / 2, 205);
+            icon.Paint += (s, e) =>
+            {
+                var g = e.Graphics;
+                using var pen = new Pen(Color.FromArgb(225, 228, 232), 5f);
+                g.DrawRectangle(pen, 34, 20, 42, 42);                                       // quadrat del darrere
+                using (var bg = new SolidBrush(icon.BackColor)) g.FillRectangle(bg, 20, 34, 42, 42);
+                g.DrawRectangle(pen, 20, 34, 42, 42);                                       // quadrat del davant
+            };
+            form.Controls.Add(icon);
+            var ok = new Button
+            {
+                Text = "Got it",
+                Size = new Size(320, 64),
+                Font = new Font("Segoe UI", 30f, FontStyle.Bold, GraphicsUnit.Pixel),
+                BackColor = Color.FromArgb(22, 32, 42),
+                ForeColor = Color.White,
+                FlatStyle = FlatStyle.Flat
+            };
+            ok.FlatAppearance.BorderSize = 0;
+            ok.Location = new Point((form.ClientSize.Width - ok.Width) / 2, form.ClientSize.Height - ok.Height - 24);
+            ok.Click += (s, e) => form.Close();
+            form.Controls.Add(ok);
+            // a més, una creu de tancar a la cantonada de dalt a la dreta
+            var close = new Label
+            {
+                Text = "✕",
+                Font = new Font("Segoe UI", 36f, FontStyle.Bold, GraphicsUnit.Pixel),
+                ForeColor = Color.FromArgb(102, 114, 127),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Size = new Size(56, 56),
+                Location = new Point(form.ClientSize.Width - 66, 10),
+                Cursor = Cursors.Hand
+            };
+            close.Click += (s, e) => form.Close();
+            form.Controls.Add(close);
+            close.BringToFront();
+            _xpPopoutMsg = form;
+            form.Show(this);
         }
 
         /// <summary>En tancar l'app: tanca a X-Plane les pantalles del ToLiss que l'app tenia encaixades.</summary>

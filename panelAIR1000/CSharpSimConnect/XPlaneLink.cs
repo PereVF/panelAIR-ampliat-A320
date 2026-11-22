@@ -312,7 +312,9 @@ namespace SimConnect3
                 B("AirbusFBW/SPDdashed"), B("AirbusFBW/SPDmanaged"),
                 V("sim/cockpit/autopilot/heading_mag"), B("AirbusFBW/HDGdashed"), B("AirbusFBW/HDGmanaged"), B("AirbusFBW/HDGTRKmode"),
                 V("sim/cockpit/autopilot/altitude"), B("AirbusFBW/ALTmanaged"),
-                V("sim/cockpit/autopilot/vertical_velocity"), V("sim/cockpit2/autopilot/fpa"), B("AirbusFBW/VSdashed"));
+                // en mode TRK-FPA el ToLiss guarda l'FPA a vertical_velocity multiplicat per 1000 (200 = 0.2°);
+                // el dataref estàndard sim/cockpit2/autopilot/fpa queda sempre a 0
+                V("sim/cockpit/autopilot/vertical_velocity"), V("sim/cockpit/autopilot/vertical_velocity") / 1000.0, B("AirbusFBW/VSdashed"));
             if (s != _lastFcu) { _lastFcu = s; Post(() => FcuChanged?.Invoke(s)); }
             if (_values.ContainsKey("AirbusFBW/ALT100_1000"))
             {

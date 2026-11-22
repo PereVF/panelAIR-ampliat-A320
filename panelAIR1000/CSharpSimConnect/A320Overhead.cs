@@ -578,8 +578,8 @@ namespace panelAIR1000
 
             // ── rètols ──
             Oh.Text(g, s.SpdMach ? "MACH" : "SPD", X(0.040f), ly, lh, Lit);
-            Oh.Text(g, s.TrkFpa ? "TRK" : "HDG", X(s.TrkFpa ? 0.288f : 0.235f), ly, lh, Lit);
-            Oh.Text(g, "LAT", X(0.338f), ly, lh, Lit);
+            Oh.Text(g, s.TrkFpa ? "TRK" : "HDG", X(s.TrkFpa ? 0.268f : 0.235f), ly, lh, Lit);
+            Oh.Text(g, "LAT", X(0.322f), ly, lh, Lit);   // (mesurat sobre la pantalla del ToLiss)
             // a sobre dels rètols HDG/TRK (x 1586) i V/S/FPA (x 1668) del botó que els commuta
             Oh.Text(g, s.TrkFpa ? "TRK" : "HDG", X((1586f - 1345f) / 605f), Y(0.80f), lh, Lit);
             Oh.Text(g, s.TrkFpa ? "FPA" : "V/S", X((1668f - 1345f) / 605f), Y(0.80f), lh, Lit);
@@ -592,7 +592,7 @@ namespace panelAIR1000
                 g.DrawLines(lp, new[] { new PointF(cx + tw / 2, by), new PointF(bx1, by), new PointF(bx1, by + lh * 0.45f) });
             }
             Oh.Text(g, "LVL/CH", X(0.8315f), ly, lh, Lit);
-            Oh.Text(g, s.TrkFpa ? "FPA" : "V/S", X(s.TrkFpa ? 0.975f : 0.962f), ly, lh, Lit);
+            Oh.Text(g, s.TrkFpa ? "FPA" : "V/S", X(s.TrkFpa ? 0.962f : 0.950f), ly, lh, Lit);
 
             // ── valors ──
             string spd = s.SpdDashed ? "---" : s.SpdMach ? s.Spd.ToString("0.00", ic) : Math.Round(s.Spd).ToString("0", ic);
@@ -997,6 +997,23 @@ namespace panelAIR1000
         readonly float _cx, _cy, _r; readonly float[] _angles;
         public int Index; public bool Wrap; public KnobStyle Style;
         float _ang;
+        /// <summary>
+        /// Zones de toc grans (en radis; 0 = només el rotatiu): mig ample, alçada per sobre i per sota del centre.
+        /// Meitat esquerra = un pas enrere, meitat dreta = un pas endavant.
+        /// </summary>
+        public float ZoneHalfWidth, ZoneUp, ZoneDown;
+        RectangleF Zone => RectangleF.FromLTRB(_cx - _r * ZoneHalfWidth, _cy - _r * ZoneUp, _cx + _r * ZoneHalfWidth, _cy + _r * ZoneDown);
+        public override bool HitTest(PointF p) => ZoneHalfWidth > 0 ? Zone.Contains(p) : base.HitTest(p);
+        public override IEnumerable<RectangleF> HitAreas
+        {
+            get
+            {
+                if (ZoneHalfWidth <= 0) { yield return RectangleF.Inflate(Bounds, 3, 3); yield break; }
+                var z = Zone;
+                yield return RectangleF.FromLTRB(z.Left, z.Top, _cx, z.Bottom);    // −
+                yield return RectangleF.FromLTRB(_cx, z.Top, z.Right, z.Bottom);   // +
+            }
+        }
         public OhKnob(string id, float cx, float cy, float r, int index, float[] angles, KnobStyle style)
         {
             Id = id; _cx = cx; _cy = cy; _r = r; _angles = angles; Index = index; Style = style;
@@ -1348,6 +1365,24 @@ namespace panelAIR1000
             _pos = TargetPos;
             float hw = style == ToggleStyle.Land ? size * 1.25f : size * 1.1f;
             Bounds = new RectangleF(cx - hw, cy - size * 1.7f, hw * 2, size * 3.4f);
+        }
+        /// <summary>
+        /// Zona de toc gran (unitats del panell; 0 = la de sempre): amplada total i alçada, centrades a la palanca.
+        /// En una palanca horitzontal, meitat esquerra = un pas a l'esquerra i meitat dreta = un pas a la dreta.
+        /// </summary>
+        public float ZoneWidth, ZoneHeight;
+        RectangleF Zone => new(_cx - ZoneWidth / 2, _cy - ZoneHeight / 2, ZoneWidth, ZoneHeight);
+        public override bool HitTest(PointF p) => ZoneWidth > 0 ? Zone.Contains(p) : base.HitTest(p);
+        public override IEnumerable<RectangleF> HitAreas
+        {
+            get
+            {
+                if (ZoneWidth <= 0) { yield return RectangleF.Inflate(Bounds, 3, 3); yield break; }
+                var z = Zone;
+                if (!Horizontal) { yield return z; yield break; }
+                yield return RectangleF.FromLTRB(z.Left, z.Top, _cx, z.Bottom);
+                yield return RectangleF.FromLTRB(_cx, z.Top, z.Right, z.Bottom);
+            }
         }
         /// <summary>Palanca horitzontal: posició 0 a l'esquerra, última a la dreta (p.ex. ADF / OFF / VOR).</summary>
         public bool Horizontal { get; private set; }
@@ -2853,8 +2888,8 @@ namespace panelAIR1000
             var rg = new Region(Rectangle.Empty);
             foreach (var gl in _screenGlass)
                 rg.Union(Rectangle.FromLTRB(
-                    (int)Math.Ceiling(_offX + gl.Left * s), (int)Math.Ceiling(_offY - _scrollY + (gl.Top - sh) * s),
-                    (int)Math.Floor(_offX + gl.Right * s), (int)Math.Floor(_offY - _scrollY + (gl.Bottom - sh) * s)));
+                    (int)Math.Round(_offX + gl.Left * s), (int)Math.Round(_offY - _scrollY + (gl.Top - sh) * s),
+                    (int)Math.Round(_offX + gl.Right * s), (int)Math.Round(_offY - _scrollY + (gl.Bottom - sh) * s)));
             if (_ov != null && _ov.Visible && _ov.Region != null) rg.Exclude(_ov.Region);
             return rg;
         }
@@ -2866,8 +2901,8 @@ namespace panelAIR1000
             float s = _s > 0 ? _s : Width / LW;
             var gl = _screenGlass[index];
             var rc = Rectangle.FromLTRB(
-                (int)Math.Ceiling(_offX + gl.Left * s), (int)Math.Ceiling(_offY - _scrollY + (gl.Top - CurShift) * s),
-                (int)Math.Floor(_offX + gl.Right * s), (int)Math.Floor(_offY - _scrollY + (gl.Bottom - CurShift) * s));
+                (int)Math.Round(_offX + gl.Left * s), (int)Math.Round(_offY - _scrollY + (gl.Top - CurShift) * s),
+                (int)Math.Round(_offX + gl.Right * s), (int)Math.Round(_offY - _scrollY + (gl.Bottom - CurShift) * s));
             return RectangleToScreen(rc);
         }
 
@@ -4591,19 +4626,24 @@ namespace panelAIR1000
             // quart de cercle ROSE: de LS a NAV per fora de l'escala, interromput per la paraula ROSE
             _silk.Add(new OhArcDial(1095 * k, 178 * k, 64f * k, -86, -74, Array.Empty<float>(), false));   // tram LS → ROSE
             _silk.Add(new OhArcDial(1095 * k, 178 * k, 64f * k, -56, -16, Array.Empty<float>(), false));   // tram ROSE → NAV
-            Knob("MIP_ND_MODE", 1095 * k, 178 * k, 17.1f, 2, modeAng);   // 10% més petit
+            var ndMode = Knob("MIP_ND_MODE", 1095 * k, 178 * k, 17.1f, 2, modeAng);   // 10% més petit
+            ndMode.ZoneHalfWidth = 2f; ndMode.ZoneUp = 2f; ndMode.ZoneDown = 1.5f;     // zones grans: esquerra −, dreta +
             // etiquetes acostades a l'arc (menys del que s'ha reduït l'arc, perquè quedin més espaiades)
             Lb("ROSE", 1037, 151); Lb("LS", 1045, 178); Lb("VOR", 1062.9f, 139.7f); Lb("NAV", 1095, 129); Lb("ARC", 1127.1f, 139.7f); Lb("PLAN", 1155, 178);
             // selector d'abast del ND
             // 10 a 270º, 40 a 360º, 160 a 90º; posicions repartides cada 45º
             float[] rngAng = { -90, -45, 0, 45, 90, 135 };
             _silk.Add(new OhArcDial(1236 * k, 178 * k, 21f, -90, 135, rngAng, false));   // arc ajustat al rotatiu
-            Knob("MIP_ND_RANGE", 1236 * k, 178 * k, 17.1f, 2, rngAng);   // 10% més petit
+            var ndRange = Knob("MIP_ND_RANGE", 1236 * k, 178 * k, 17.1f, 2, rngAng);   // 10% més petit
+            ndRange.ZoneHalfWidth = 2f; ndRange.ZoneUp = 2f; ndRange.ZoneDown = 1.5f;
             Lb("10", 1184, 178); Lb("20", 1202.8f, 144.8f); Lb("40", 1236, 129); Lb("80", 1269.2f, 144.8f); Lb("160", 1286, 178); Lb("320", 1270.6f, 212.6f);
             // ADF / OFF / VOR: palanques metàl·liques horitzontals (OFF al centre)
-            TogS("MIP_EFIS_ADFVOR1", 1096 * k, 250 * k, 3, 1, ToggleStyle.Metal, 9.5f).MakeHorizontal();
+            // zones de toc: mateixa amplada que les del QNH (4 x 20,8) i un 25% més altes que la de la palanca
+            var adf1 = TogS("MIP_EFIS_ADFVOR1", 1096 * k, 250 * k, 3, 1, ToggleStyle.Metal, 9.5f).MakeHorizontal();
+            adf1.ZoneWidth = 4f * 20.8f; adf1.ZoneHeight = (adf1.Bounds.Height + 6f) * 1.25f;
             Lb("1", 1097, 222); Lb("ADF", 1055, 252); Lb("VOR", 1137, 252); Lb("OFF", 1097, 280);
-            TogS("MIP_EFIS_ADFVOR2", 1236 * k, 250 * k, 3, 1, ToggleStyle.Metal, 9.5f).MakeHorizontal();
+            var adf2 = TogS("MIP_EFIS_ADFVOR2", 1236 * k, 250 * k, 3, 1, ToggleStyle.Metal, 9.5f).MakeHorizontal();
+            adf2.ZoneWidth = 4f * 20.8f; adf2.ZoneHeight = (adf2.Bounds.Height + 6f) * 1.25f;
             Lb("2", 1237, 222); Lb("ADF", 1195, 252); Lb("VOR", 1277, 252); Lb("OFF", 1237, 280);
 
             // FCU
@@ -4668,12 +4708,15 @@ namespace panelAIR1000
 
             // pantalles (en negre)
             // pantalles: el vidre de cadascuna és un forat a la finestra de l'app (s'hi veuen les pantalles d'X-Plane de sota)
-            _silk.Add(new OhBezel(R(24, 372, 428, 772), R(38, 388, 414, 756)));      // PFD
-            _silk.Add(new OhBezel(R(454, 372, 868, 772), R(470, 388, 852, 756)));    // ND
-            _screenGlass.AddRange(new[] { R(38, 388, 414, 756), R(470, 388, 852, 756), R(1280, 362, 1660, 728), R(1282, 758, 1660, 1128) });
+            // vidres (forats) de 725 x 705 px a 4K (1 unitat de referència = 1,92 px), centrats on eren
+            RectangleF Glass(float cx, float cy) => R(cx - 725f / 1.92f / 2f, cy - 705f / 1.92f / 2f, cx + 725f / 1.92f / 2f, cy + 705f / 1.92f / 2f);
+            var gPfd = Glass(226, 572); var gNd = Glass(661, 572); var gEwd = Glass(1470, 545); var gSd = Glass(1471, 943);
+            _silk.Add(new OhBezel(R(24, 372, 428, 772), gPfd));      // PFD
+            _silk.Add(new OhBezel(R(454, 372, 868, 772), gNd));      // ND
+            _screenGlass.AddRange(new[] { gPfd, gNd, gEwd, gSd });
             _silk.Add(new OhBlock(R(520, 776, 812, 796), Oh.T(120, 132, 144, 116, 142, 164), Oh.T(70, 80, 90, 66, 88, 106), 3f));
-            _silk.Add(new OhBezel(R(1254, 344, 1686, 736), R(1280, 362, 1660, 728)));  // ECAM superior
-            _silk.Add(new OhBezel(R(1254, 744, 1686, 1136), R(1282, 758, 1660, 1128))); // ECAM inferior
+            _silk.Add(new OhBezel(R(1254, 344, 1686, 736), gEwd));  // ECAM superior
+            _silk.Add(new OhBezel(R(1254, 744, 1686, 1136), gSd));   // ECAM inferior
 
             // zona dels genolls (fosca)
             _silk.Add(new OhBlock(R(15, 846, 660, 914), Color.FromArgb(70, 72, 76), Color.FromArgb(14, 14, 16), 12f));
