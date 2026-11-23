@@ -69,17 +69,49 @@ namespace SimConnect3
             ("MIP_MASTER_WARN", "PUSH", Set("S_MIP_MASTER_WARNING_CAPT", 1), Set("S_MIP_MASTER_WARNING_CAPT", 0)),
             ("MIP_MASTER_CAUT", "PUSH", Set("S_MIP_MASTER_CAUTION_CAPT", 1), Set("S_MIP_MASTER_CAUTION_CAPT", 0)),
             ("MIP_CHRONO", "PUSH", Set("S_MIP_CHRONO_CAPT", 1), Set("S_MIP_CHRONO_CAPT", 0)),
-            ("MIP_TERR_ON_ND_1", "PUSH", Set("S_MIP_GPWS_TERRAIN_ON_ND_CAPT", 1), Set("S_MIP_GPWS_TERRAIN_ON_ND_CAPT", 0)),
+            // TERR ON ND: comptador (comprovat al Fenix; amb 1/0 no feia res)
+            ("MIP_TERR_ON_ND_1", "PUSH", Inc("S_MIP_GPWS_TERRAIN_ON_ND_CAPT"), Even("S_MIP_GPWS_TERRAIN_ON_ND_CAPT")),
+            ("MIP_TERR_ON_ND_2", "PUSH", Inc("S_MIP_GPWS_TERRAIN_ON_ND_FO"), Even("S_MIP_GPWS_TERRAIN_ON_ND_FO")),
+            // rellotge, autofre i BRK FAN (comprovat al Fenix: CHR, RST, DATE i autofre són comptadors, senar = premut;
+            // BRK FAN és un interruptor que es canvia)
+            ("MIP_CLK_CHR", "PUSH", Inc("S_MIP_CLOCK_CHR"), Even("S_MIP_CLOCK_CHR")),
+            ("MIP_CLK_RST", "PUSH", Inc("S_MIP_CLOCK_RST"), Even("S_MIP_CLOCK_RST")),
+            ("MIP_CLK_DATE", "DOWN", Inc("S_MIP_CLOCK_SET"), null),     // la data es veu mentre es manté premut
+            ("MIP_CLK_DATE", "UP", Even("S_MIP_CLOCK_SET"), null),
+            ("MIP_AUTOBRK_LO", "PUSH", Inc("S_MIP_AUTOBRAKE_LO"), Even("S_MIP_AUTOBRAKE_LO")),
+            ("MIP_AUTOBRK_MED", "PUSH", Inc("S_MIP_AUTOBRAKE_MED"), Even("S_MIP_AUTOBRAKE_MED")),
+            ("MIP_AUTOBRK_MAX", "PUSH", Inc("S_MIP_AUTOBRAKE_MAX"), Even("S_MIP_AUTOBRAKE_MAX")),
+            ("MIP_BRK_FAN", "PUSH", "(L:S_MIP_BRAKE_FAN) ! (>L:S_MIP_BRAKE_FAN)", null),
         };
 
-        /// <summary>Selectors: element → L-var (la numeració del Fenix és la mateixa que la de l'app).</summary>
-        static readonly (string id, string lvar)[] FenixPos =
+        /// <summary>
+        /// Selectors: element → L-var. toSim: valor de la L-var per a cada posició de l'app (null = mateixa numeració).
+        /// </summary>
+        static readonly (string id, string lvar, int[]? toSim)[] FenixPos =
         {
-            ("MIP_ND_MODE", "S_FCU_EFIS1_ND_MODE"),        // 0 LS, 1 VOR, 2 NAV, 3 ARC, 4 PLAN
-            ("MIP_ND_RANGE", "S_FCU_EFIS1_ND_ZOOM"),       // 0 = 10 … 5 = 320 NM
-            ("MIP_EFIS_ADFVOR1", "S_FCU_EFIS1_NAV1"),      // 0 ADF, 1 OFF, 2 VOR
-            ("MIP_EFIS_ADFVOR2", "S_FCU_EFIS1_NAV2"),
+            ("MIP_ND_MODE", "S_FCU_EFIS1_ND_MODE", null),        // 0 LS, 1 VOR, 2 NAV, 3 ARC, 4 PLAN
+            ("MIP_ND_RANGE", "S_FCU_EFIS1_ND_ZOOM", null),       // 0 = 10 … 5 = 320 NM
+            ("MIP_EFIS_ADFVOR1", "S_FCU_EFIS1_NAV1", null),      // 0 ADF, 1 OFF, 2 VOR
+            ("MIP_EFIS_ADFVOR2", "S_FCU_EFIS1_NAV2", null),
+            ("MIP_CLK_GPS", "S_MIP_CLOCK_UTC", null),            // 0 GPS, 1 INT, 2 SET
+            ("MIP_CLK_RUN", "S_MIP_CLOCK_ET", null),             // 0 RUN, 1 STP, 2 RST (molla, torna a STP)
+            ("MIP_ASKID_NWSTRG", "S_FC_MIP_ANTI_SKID", new[] { 1, 0 }),   // app 0 = ON (amunt); Fenix 1 = ON
         };
+
+        /// <summary>Llegendes de dalt / de baix: indicadors del tren (UNLK / triangle), autofre (DECEL / ON), BRK FAN (HOT / ON).</summary>
+        static readonly (string id, string lvar, bool upper)[] FenixLegends =
+        {
+            ("MIP_GEAR_IND_0", "I_MIP_GEAR_1_U", true), ("MIP_GEAR_IND_0", "I_MIP_GEAR_1_L", false),
+            ("MIP_GEAR_IND_1", "I_MIP_GEAR_2_U", true), ("MIP_GEAR_IND_1", "I_MIP_GEAR_2_L", false),
+            ("MIP_GEAR_IND_2", "I_MIP_GEAR_3_U", true), ("MIP_GEAR_IND_2", "I_MIP_GEAR_3_L", false),
+            ("MIP_AUTOBRK_LO", "I_MIP_AUTOBRAKE_LO_U", true), ("MIP_AUTOBRK_LO", "I_MIP_AUTOBRAKE_LO_L", false),
+            ("MIP_AUTOBRK_MED", "I_MIP_AUTOBRAKE_MED_U", true), ("MIP_AUTOBRK_MED", "I_MIP_AUTOBRAKE_MED_L", false),
+            ("MIP_AUTOBRK_MAX", "I_MIP_AUTOBRAKE_MAX_U", true), ("MIP_AUTOBRK_MAX", "I_MIP_AUTOBRAKE_MAX_L", false),
+            ("MIP_BRK_FAN", "I_MIP_BRAKE_FAN_U", true), ("MIP_BRK_FAN", "I_MIP_BRAKE_FAN_L", false),
+        };
+
+        /// <summary>Rellotge: les tres pantalles (en el format de la pantalla) i el mode de la UTC.</summary>
+        static readonly string[] FenixClock = { "N_MIP_CLOCK_CHRONO", "N_MIP_CLOCK_ELAPSED", "N_MIP_CLOCK_UTC", "N_MIP_CLOCK_MODE" };
 
         /// <summary>Llums: element → L-var.</summary>
         static readonly (string id, string lvar)[] FenixLights =
@@ -90,7 +122,7 @@ namespace SimConnect3
             ("MIP_EFIS_WPT", "I_FCU_EFIS1_WPT"), ("MIP_EFIS_VORD", "I_FCU_EFIS1_VORD"), ("MIP_EFIS_NDB", "I_FCU_EFIS1_NDB"),
             ("MIP_EFIS_ARPT", "I_FCU_EFIS1_ARPT"),
             ("MIP_MASTER_WARN", "I_MIP_MASTER_WARNING_CAPT"), ("MIP_MASTER_CAUT", "I_MIP_MASTER_CAUTION_CAPT"),
-            ("MIP_TERR_ON_ND_1", "I_MIP_GPWS_TERRAIN_ON_ND_CAPT_L"),
+            ("MIP_TERR_ON_ND_1", "I_MIP_GPWS_TERRAIN_ON_ND_CAPT_L"), ("MIP_TERR_ON_ND_2", "I_MIP_GPWS_TERRAIN_ON_ND_FO_L"),
         };
 
         /// <summary>Pantalla del FCU i QNH (en aquest ordre a la lectura).</summary>
@@ -104,7 +136,8 @@ namespace SimConnect3
             "A_FC_THROTTLE_LEFT_INPUT", "A_FC_THROTTLE_RIGHT_INPUT",                                    // 18-19 palanques de gas
         };
 
-        const int FenixReadCount = 20 + 16 + 4;
+        // pantalla+QNH+palanques, llums, selectors, llegendes, rellotge i data
+        const int FenixReadCount = 20 + 17 + 7 + 14 + 4;
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct FenixGlareStruct
         {
@@ -120,6 +153,9 @@ namespace SimConnect3
         private readonly Dictionary<string, int> _fxPos = new();
         private bool _fxData;
         private (float l, float r)? _fxThr;
+        private readonly Dictionary<(string id, bool upper), bool> _fxLegends = new();
+        private (string chr, string utc, string et)? _fxClock;
+        private int _fxUtcBlink = -1;
 
         /// <summary>
         /// Palanca del Fenix (A_FC_THROTTLE_*_INPUT, mesurat al simulador: 1 REV FULL, 2 ralentí, 3 CL, 4 FLX MCT, 5 TO GA)
@@ -154,6 +190,8 @@ namespace SimConnect3
             foreach (var name in FenixDisplay) { simconnect.AddToDataDefinition(def, "L:" + name, "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED); n++; }
             foreach (var l in FenixLights) { simconnect.AddToDataDefinition(def, "L:" + l.lvar, "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED); n++; }
             foreach (var p in FenixPos) { simconnect.AddToDataDefinition(def, "L:" + p.lvar, "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED); n++; }
+            foreach (var l in FenixLegends) { simconnect.AddToDataDefinition(def, "L:" + l.lvar, "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED); n++; }
+            foreach (var c in FenixClock) { simconnect.AddToDataDefinition(def, "L:" + c, "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED); n++; }
             if (n != FenixReadCount) throw new InvalidOperationException("Fenix: el nombre de L-vars llegides no quadra amb FenixReadCount");
             simconnect.RegisterDataDefineStruct<FenixGlareStruct>(def);
             simconnect.RequestDataOnSimObject((REQUESTS)FenixReadReq, def, SimConnect.SIMCONNECT_OBJECT_ID_USER,
@@ -191,7 +229,13 @@ namespace SimConnect3
             }
             if (cmd.StartsWith("POS:") && int.TryParse(cmd.AsSpan(4), out int pos))
                 foreach (var p in FenixPos)
-                    if (p.id == id) { _fxPos[id] = pos; SendGenericRpn(Set(p.lvar, pos)); return true; }
+                    if (p.id == id)
+                    {
+                        if (p.toSim != null && (pos < 0 || pos >= p.toSim.Length)) return true;
+                        _fxPos[id] = pos;
+                        SendGenericRpn(Set(p.lvar, p.toSim == null ? pos : p.toSim[pos]));
+                        return true;
+                    }
             return false;
         }
 
@@ -219,7 +263,27 @@ namespace SimConnect3
             _fxThr = (FenixLeverPos(v[18]), FenixLeverPos(v[19]));
             int k = FenixDisplay.Length;
             foreach (var (id, _) in FenixLights) _fxLights[id] = v[k++] > 0.5;
-            foreach (var (id, _) in FenixPos) _fxPos[id] = (int)Math.Round(v[k++]);
+            foreach (var (id, _, toSim) in FenixPos)
+            {
+                int raw = (int)Math.Round(v[k++]);
+                int idx = toSim == null ? raw : Array.IndexOf(toSim, raw);
+                if (idx >= 0) _fxPos[id] = idx;
+            }
+            foreach (var (id, _, upper) in FenixLegends) _fxLegends[(id, upper)] = v[k++] > 0.5;
+            // rellotge (mesurat al Fenix): els valors són el que surt a la pantalla, en decimal: cronòmetre MMSS, ET HHMM,
+            // UTC HHMMSS (o la data MMDDAA); -1 = pantalla apagada
+            double chr = v[k++], et = v[k++], utc = v[k++];
+            int mode = (int)Math.Round(v[k++]);
+            static string Pairs(double val, int n) { var s = ((long)Math.Round(Math.Max(0, val))).ToString(new string('0', n * 2)); s = s[^(n * 2)..]; return n == 2 ? $"{s[..2]}:{s[2..]}" : $"{s[..2]}:{s[2..4]}:{s[4..]}"; }
+            string chrTxt = chr < 0 ? "" : Pairs(chr, 2);
+            string etTxt = et < 0 ? "" : Pairs(et, 2);
+            string utcTxt = utc < 0 ? "" : Pairs(utc, 3);
+            // mode: -1 hora, -2 data (DATE premut), 0..4 posada en hora (SET), cada DATE passa al següent i fa pampallugues:
+            // 0 minuts, 1 hores (HH:MM, sense segons), 2 any, 3 mes, 4 dia (data MM:DD:AA); després torna a 0
+            int blink = mode switch { 0 => 1, 1 => 0, 2 => 2, 3 => 0, 4 => 1, _ => -1 };
+            if ((mode == 0 || mode == 1) && utcTxt.Length == 8) utcTxt = utcTxt[..6] + "  ";
+            _fxClock = (chrTxt, utcTxt, etTxt);
+            _fxUtcBlink = blink;
             ApplyFenixState();
         }
 
@@ -234,6 +298,9 @@ namespace SimConnect3
             if (_fxThr is var (tl, tr)) ov.SetThrottle(tl, tr);
             foreach (var kv in _fxLights) ov.SetLight(kv.Key, kv.Value);
             foreach (var kv in _fxPos) ov.SetPosition(kv.Key, kv.Value);
+            foreach (var kv in _fxLegends)
+                ov.SetLegend(kv.Key.id, kv.Key.upper ? (kv.Value ? 1f : 0f) : null, kv.Key.upper ? null : (kv.Value ? 1f : 0f));
+            if (_fxClock is var (fc, fu, fe)) ov.SetClock(fc, fu, fe, _fxUtcBlink);
         }
 
         // ── Pantalles pop-out del Fenix: totes es diuen "WASMINSTRUMENT" → s'assignen per ordre de sortida ──
@@ -322,7 +389,7 @@ namespace SimConnect3
             int stride = data.Stride;
             b.UnlockBits(data);
             int x0 = (int)(w * 0.06), x1 = (int)(w * 0.94), y0 = (int)(h * 0.04), y1 = (int)(h * 0.96);
-            long horizon = 0, tot = 0, lit = 0;
+            long sky = 0, ground = 0, tot = 0, lit = 0;
             double ewd = 0, sd = 0;
             for (int y = y0; y < y1; y++)
             {
@@ -334,7 +401,10 @@ namespace SimConnect3
                     if ((y & 1) == 0 && (x & 1) == 0)
                     {
                         tot++;
-                        if ((bl > rd + 50 && bl > 100) || (rd > bl + 40 && rd > 60 && gr > 30 && gr < rd)) horizon++;
+                        // cel: blau amb poc verd (el cian dels símbols del ND no hi compta);
+                        // terra: marró fosc (l'ambre dels textos no hi compta)
+                        if (bl > rd + 50 && bl > 100 && gr < bl - 40) sky++;
+                        else if (rd > bl + 40 && rd > 60 && rd < 190 && gr > 30 && gr < rd * 0.75) ground++;
                         if (rd + gr + bl > 150) lit++;
                     }
                     if ((rd + gr + bl) / 3 > 110) { if (++run > maxRun) maxRun = run; } else run = 0;
@@ -344,7 +414,8 @@ namespace SimConnect3
                 if (f >= 0.78 && f < 0.95 && frac > sd) sd = frac;
             }
             if (tot == 0 || (double)lit / tot < 0.005) return -1;   // encara negra (sense corrent o carregant)
-            if ((double)horizon / tot > 0.03) return 0;
+            // PFD: l'horitzó artificial té cel i terra alhora (mesurat: uns 8,8% de cada; el ND, 0%)
+            if ((double)(sky + ground) / tot > 0.03 && (double)sky / tot > 0.005 && (double)ground / tot > 0.005) return 0;
             if (sd >= 0.85) return 3;
             if (ewd >= 0.5) return 2;
             return 1;

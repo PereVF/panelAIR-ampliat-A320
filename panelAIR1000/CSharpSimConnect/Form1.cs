@@ -927,6 +927,10 @@ namespace SimConnect3
 
         private readonly Dictionary<string, bool> _xpLights = new();
         private (float l, float r)? _xpThr;                             // palanques de gas des d'X-Plane (posició de l'app)
+        private readonly Dictionary<(string id, bool upper), bool> _xpLegends = new();   // llegendes (tren, autofre, BRK FAN) des d'X-Plane
+        private (string chr, string utc, string et)? _xpClock;          // pantalles del rellotge des d'X-Plane
+        private void ApplyXpLegend(string id, bool upper, bool on) =>
+            _a320Overhead?.SetLegend(id, upper ? (on ? 1f : 0f) : null, upper ? null : (on ? 1f : 0f));
         private readonly Dictionary<string, int> _xpPos = new();       // posicions de selectors des d'X-Plane   // llums de tecles/polsadors des d'X-Plane                                     // selector ALT 100/1000 des d'X-Plane (true = 1000)                       // última lectura de la pantalla del FCU des d'X-Plane   // última lectura del QNH de l'A320 (veure RequestA320Baro)
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct ElecGenStruct { public double value; }
@@ -5260,6 +5264,10 @@ namespace SimConnect3
             _xp.LightChanged += (id, on) => { _xpLights[id] = on; _a320Overhead?.SetLight(id, on); };
             _xp.PositionChanged += (id, i) => { _xpPos[id] = i; _a320Overhead?.SetPosition(id, i); };
             _xp.ThrottleChanged += (l, r) => { _xpThr = (l, r); _a320Overhead?.SetThrottle(l, r); };
+            // indicadors del tren, autofre i BRK FAN (llegenda de dalt / de baix) i pantalles del rellotge
+            _xp.LegendChanged += (id, upper, on) => { _xpLegends[(id, upper)] = on; ApplyXpLegend(id, upper, on); };
+            _xp.ClockChanged += (c, u, e) => { _xpClock = (c, u, e); _a320Overhead?.SetClock(c, u, e); };
+            _xp.A320Changed += on => { if (!on) { _xpLegends.Clear(); _xpClock = null; _a320Overhead?.SetClock("", "", ""); } };
             _xp.A320Changed += on => { if (!on) { _xpLights.Clear(); _xpPos.Clear(); } if (_a320Overhead != null) _a320Overhead.SimDriven = on; };
             _xp.A320Changed += on => { if (!on) { _xpFcu = null; _a320Overhead?.SetFcu(new panelAIR1000.FcuState(false, 0, false, false, false, 0, false, false, false, 0, false, 0, 0, false)); } };
             _xp.Start();
@@ -6229,6 +6237,8 @@ namespace SimConnect3
                         foreach (var kv in _xpLights) _a320Overhead.SetLight(kv.Key, kv.Value);
                         foreach (var kv in _xpPos) _a320Overhead.SetPosition(kv.Key, kv.Value);
                         if (_xpThr is var (tl, tr)) _a320Overhead.SetThrottle(tl, tr);
+                        foreach (var kv in _xpLegends) ApplyXpLegend(kv.Key.id, kv.Key.upper, kv.Value);
+                        if (_xpClock is var (xc, xu, xe)) _a320Overhead.SetClock(xc, xu, xe);
                     }
                     else if (_a320Baro is A320BaroStruct ab)
                         _a320Overhead.SetBaro(ab.powered > 0.5, (int)Math.Round(ab.mode), ab.value, ab.isInhg > 0.5);

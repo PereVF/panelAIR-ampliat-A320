@@ -87,6 +87,10 @@ namespace SimConnect3
             [("MIP_AUTOBRK_MED", "PUSH")] = "AirbusFBW/AbrkMed",
             [("MIP_AUTOBRK_MAX", "PUSH")] = "AirbusFBW/AbrkMax",
             [("MIP_BRK_FAN", "PUSH")] = "toliss_airbus/gear/brake_fan",
+            // rellotge del panell principal
+            [("MIP_CLK_CHR", "PUSH")] = "toliss_airbus/chrono/ChronoStartStopPush",
+            [("MIP_CLK_RST", "PUSH")] = "toliss_airbus/chrono/ChronoResetPush",
+            [("MIP_CLK_DATE", "PUSH")] = "toliss_airbus/chrono/datePush",
         };
         static readonly Dictionary<(string id, string cmd), (string dataref, double value)> WriteMap = new()
         {
@@ -130,19 +134,71 @@ namespace SimConnect3
             ("MIP_MASTER_CAUT", "AirbusFBW/MasterCaut", 0.5),
             ("MIP_TERR_ON_ND_1", "AirbusFBW/TerrainSelectedND1", 0.5),
             ("MIP_TERR_ON_ND_2", "AirbusFBW/TerrainSelectedND2", 0.5),
-            ("MIP_AUTOBRK_LO", "AirbusFBW/ABrkLoButtonAnim", 0.5),
-            ("MIP_AUTOBRK_MED", "AirbusFBW/ABrkMedButtonAnim", 0.5),
-            ("MIP_AUTOBRK_MAX", "AirbusFBW/ABrkMaxButtonAnim", 0.5),
-            ("MIP_BRK_FAN", "AirbusFBW/BrakeFanSwitchAnim", 0.5),
+            // (autofre i BRK FAN: a LegendMap; els *ButtonAnim només es mouen mentre es prem el botó)
         };
-        /// <summary>Selectors amb posicions numerades: element del panell → dataref (mateixa numeració a tots dos costats).</summary>
-        static readonly (string id, string dataref)[] PosMap =
+        /// <summary>
+        /// Selectors amb posicions numerades: element del panell → dataref. toSim: valor del dataref per a cada posició
+        /// de l'app (null = mateixa numeració a tots dos costats).
+        /// </summary>
+        static readonly (string id, string dataref, int[]? toSim)[] PosMap =
         {
-            ("MIP_ND_MODE", "AirbusFBW/NDmodeCapt"),                         // 0 LS, 1 VOR, 2 NAV, 3 ARC, 4 PLAN
-            ("MIP_ND_RANGE", "AirbusFBW/NDrangeCapt"),                       // 0 = 10 NM … 5 = 320 NM
-            ("MIP_EFIS_ADFVOR1", "sim/cockpit2/EFIS/EFIS_1_selection_pilot"), // 0 ADF, 1 OFF, 2 VOR
-            ("MIP_EFIS_ADFVOR2", "sim/cockpit2/EFIS/EFIS_2_selection_pilot"),
+            ("MIP_ND_MODE", "AirbusFBW/NDmodeCapt", null),                         // 0 LS, 1 VOR, 2 NAV, 3 ARC, 4 PLAN
+            ("MIP_ND_RANGE", "AirbusFBW/NDrangeCapt", null),                       // 0 = 10 NM … 5 = 320 NM
+            ("MIP_EFIS_ADFVOR1", "sim/cockpit2/EFIS/EFIS_1_selection_pilot", null), // 0 ADF, 1 OFF, 2 VOR
+            ("MIP_EFIS_ADFVOR2", "sim/cockpit2/EFIS/EFIS_2_selection_pilot", null),
+            // rellotge (mesurat al ToLiss): GPS 0 GPS, 1 INT, 2 SET; RUN 0 RUN, 1 STP, 2 RST (molla, torna a STP)
+            ("MIP_CLK_GPS", "ckpt/clock/gpsKnob/anim", null),
+            ("MIP_CLK_RUN", "AirbusFBW/ClockETSwitch", null),
+            // A/SKID & N/W STRG: a l'app 0 = ON (amunt), 1 = OFF; al ToLiss 1 = ON
+            ("MIP_ASKID_NWSTRG", "AirbusFBW/NWSnAntiSkid", new[] { 1, 0 }),
         };
+        /// <summary>Datarefs que s'escriuen a més del del selector (l'animació del pom RUN no segueix l'interruptor).</summary>
+        static readonly Dictionary<string, string> PosMirror = new() { ["MIP_CLK_RUN"] = "ckpt/clock/runKnob/anim" };
+
+        /// <summary>
+        /// Polsadors de dues llegendes i indicadors del tren: (element, dataref, llegenda de dalt?, quan s'encén).
+        /// Comprovat al ToLiss: tren baixat i blocat = 2; AutoBrkLo/Med/Max = 1 en armar; BrakeFan = 1 encès.
+        /// (No comprovat: UNLK = bit 1 del tren, DECEL = 2 a l'autofre.)
+        /// </summary>
+        static readonly (string id, string dataref, bool upper, Func<double, bool> on)[] LegendMap =
+        {
+            ("MIP_GEAR_IND_0", "AirbusFBW/LeftGearInd", true, v => ((int)Math.Round(v) & 1) != 0),
+            ("MIP_GEAR_IND_0", "AirbusFBW/LeftGearInd", false, v => ((int)Math.Round(v) & 2) != 0),
+            ("MIP_GEAR_IND_1", "AirbusFBW/NoseGearInd", true, v => ((int)Math.Round(v) & 1) != 0),
+            ("MIP_GEAR_IND_1", "AirbusFBW/NoseGearInd", false, v => ((int)Math.Round(v) & 2) != 0),
+            ("MIP_GEAR_IND_2", "AirbusFBW/RightGearInd", true, v => ((int)Math.Round(v) & 1) != 0),
+            ("MIP_GEAR_IND_2", "AirbusFBW/RightGearInd", false, v => ((int)Math.Round(v) & 2) != 0),
+            ("MIP_AUTOBRK_LO", "AirbusFBW/AutoBrkLo", false, v => v >= 0.5),
+            ("MIP_AUTOBRK_LO", "AirbusFBW/AutoBrkLo", true, v => v >= 1.5),
+            ("MIP_AUTOBRK_MED", "AirbusFBW/AutoBrkMed", false, v => v >= 0.5),
+            ("MIP_AUTOBRK_MED", "AirbusFBW/AutoBrkMed", true, v => v >= 1.5),
+            ("MIP_AUTOBRK_MAX", "AirbusFBW/AutoBrkMax", false, v => v >= 0.5),
+            ("MIP_AUTOBRK_MAX", "AirbusFBW/AutoBrkMax", true, v => v >= 1.5),
+            ("MIP_BRK_FAN", "AirbusFBW/BrakeFan", false, v => v >= 0.5),
+            ("MIP_BRK_FAN", BrakeTempDr, true, v => v >= 300),     // HOT: algun fre per sobre de 300 °C
+        };
+        /// <summary>Temperatura dels frens (una per roda): es guarda la més alta.</summary>
+        const string BrakeTempDr = "AirbusFBW/BrakeTemperatureArray";
+        /// <summary>Llegenda d'un polsador o indicador: (element, llegenda de dalt?, encesa) (al fil de la interfície).</summary>
+        public event Action<string, bool, bool>? LegendChanged;
+        readonly Dictionary<(string, bool), bool> _lastLegends = new();
+
+        /// <summary>Rellotge del panell principal: cronòmetre (s), ET, si es veu l'ET, i hora UTC.</summary>
+        static readonly string[] ClockReads =
+        {
+            "AirbusFBW/ClockChronoValue", "AirbusFBW/ClockETHours", "AirbusFBW/ClockETMinutes", "AirbusFBW/ClockShowsET",
+            "sim/cockpit2/clock_timer/zulu_time_hours", "sim/cockpit2/clock_timer/zulu_time_minutes", "sim/cockpit2/clock_timer/zulu_time_seconds",
+            "sim/cockpit2/clock_timer/zulu_day", "sim/cockpit2/clock_timer/zulu_month",
+            ChronoBtnDr,
+        };
+        /// <summary>Animació dels botons del rellotge [CHR, RST, DATE, …]: mentre DATE és premut, la pantalla UTC mostra la data.</summary>
+        const string ChronoBtnDr = "AirbusFBW/ChronoButtonAnimations";
+        /// <summary>Ordres que s'han de mantenir premudes un temps fix (s); la resta, un toc (0).</summary>
+        static readonly Dictionary<string, double> CmdHold = new();
+        const string DateHeldKey = "#DATE_HELD";
+        /// <summary>Pantalles del rellotge (cronòmetre "MM:SS", UTC "HH:MM:SS", ET "HH:MM"; "" = apagada) (al fil de la interfície).</summary>
+        public event Action<string, string, string>? ClockChanged;
+        (string, string, string)? _lastClock;
         /// <summary>Palanques de gas del ToLiss, una per motor (mesurat: -1 REV FULL, 0 ralentí, 0,7 CL, ≈0,875 FLX MCT, 1 TO GA).</summary>
         const string ThrDr = "AirbusFBW/throttle_input";
         static readonly double[] ThrSim = { -1, 0, 0.7, 0.875, 1 };
@@ -164,6 +220,8 @@ namespace SimConnect3
             foreach (var n in ReadDatarefs) yield return n;
             foreach (var l in LightMap) yield return l.dataref;
             foreach (var p in PosMap) yield return p.dataref;
+            foreach (var l in LegendMap) yield return l.dataref;
+            foreach (var n in ClockReads) yield return n;
         }
 
         /// <summary>true = hi ha un ToLiss carregat a X-Plane i l'enllaç està connectat.</summary>
@@ -233,11 +291,13 @@ namespace SimConnect3
         /// <summary>Una sessió amb el ToLiss carregat: resol IDs, se subscriu i escolta fins que es tanca o canvia l'avió.</summary>
         async Task SessionAsync(CancellationToken ct)
         {
-            _cmdIds.Clear(); _drIds.Clear(); _drNames.Clear(); _values.Clear(); _lastBaro = null; _lastFcu = null; _lastAltStep = null; _lastLights.Clear(); _lastPos.Clear(); _lastThr = null;
+            _cmdIds.Clear(); _drIds.Clear(); _drNames.Clear(); _values.Clear(); _lastBaro = null; _lastFcu = null; _lastAltStep = null; _lastLights.Clear(); _lastPos.Clear(); _lastThr = null; _lastLegends.Clear(); _lastClock = null;
             foreach (var name in AllReads())
                 if (!_drIds.ContainsKey(name) && await LookupId("datarefs", name, ct) is long id) { _drIds[name] = id; _drNames[id] = name; }
             foreach (var w in WriteMap.Values)
                 if (!_drIds.ContainsKey(w.dataref) && await LookupId("datarefs", w.dataref, ct) is long id) _drIds[w.dataref] = id;
+            foreach (var mdr in PosMirror.Values)
+                if (!_drIds.ContainsKey(mdr) && await LookupId("datarefs", mdr, ct) is long id) _drIds[mdr] = id;
             foreach (var c in CommandMap.Values)
                 if (!_cmdIds.ContainsKey(c) && await LookupId("commands", c, ct) is long id) _cmdIds[c] = id;
 
@@ -307,10 +367,56 @@ namespace SimConnect3
                     }
                     continue;
                 }
+                if (name == ChronoBtnDr && v.ValueKind == JsonValueKind.Array)
+                {
+                    // tercer element: botó DATE (mesurat al ToLiss: 1 mentre es mostra la data)
+                    if (v.GetArrayLength() > 2 && v[2].ValueKind == JsonValueKind.Number) lock (_values) _values[DateHeldKey] = v[2].GetDouble();
+                    continue;
+                }
+                if (name == BrakeTempDr && v.ValueKind == JsonValueKind.Array)
+                {
+                    // temperatura dels frens: la més alta de totes les rodes
+                    double max = double.MinValue;
+                    foreach (var e in v.EnumerateArray()) if (e.ValueKind == JsonValueKind.Number) max = Math.Max(max, e.GetDouble());
+                    if (max > double.MinValue) lock (_values) _values[name] = max;
+                    continue;
+                }
                 if (v.ValueKind == JsonValueKind.Array) { if (v.GetArrayLength() == 0) continue; v = v[0]; }
                 if (v.ValueKind == JsonValueKind.Number) lock (_values) _values[name] = v.GetDouble();
             }
-            lock (_values) { PublishBaro(); PublishFcu(); PublishLights(); PublishPositions(); }
+            lock (_values) { PublishBaro(); PublishFcu(); PublishLights(); PublishPositions(); PublishLegends(); PublishClock(); }
+        }
+
+        void PublishLegends()
+        {
+            foreach (var (id, dr, upper, onFn) in LegendMap)
+            {
+                if (!_values.TryGetValue(dr, out var v)) continue;
+                bool on = onFn(v);
+                if (_lastLegends.TryGetValue((id, upper), out var was) && was == on) continue;
+                _lastLegends[(id, upper)] = on;
+                Post(() => LegendChanged?.Invoke(id, upper, on));
+            }
+        }
+
+        void PublishClock()
+        {
+            if (!_values.ContainsKey("sim/cockpit2/clock_timer/zulu_time_hours")) return;
+            int I(string n) => (int)Math.Round(V(n));
+            double chr = V("AirbusFBW/ClockChronoValue");
+            int cs = (int)Math.Floor(chr);
+            // cronòmetre MM:SS (fins a 99:59). Com al ToLiss: parat + RST (valor exactament 0) → pantalla apagada fins
+            // que es torna a prémer CHR; en marxa + RST torna a 0 però continua comptant, i es veu 00:00, 00:01…
+            string chrTxt = chr > 0 ? $"{Math.Min(99, cs / 60):00}:{cs % 60:00}" : "";
+            // UTC: l'hora; mentre DATE és premut, la data MM:DD:AA (X-Plane no té l'any: el del rellotge del PC)
+            string utc = V(DateHeldKey) > 0.5
+                ? $"{I("sim/cockpit2/clock_timer/zulu_month"):00}:{I("sim/cockpit2/clock_timer/zulu_day"):00}:{DateTime.UtcNow.Year % 100:00}"
+                : $"{I("sim/cockpit2/clock_timer/zulu_time_hours"):00}:{I("sim/cockpit2/clock_timer/zulu_time_minutes"):00}:{I("sim/cockpit2/clock_timer/zulu_time_seconds"):00}";
+            string et = B("AirbusFBW/ClockShowsET") ? $"{I("AirbusFBW/ClockETHours"):00}:{I("AirbusFBW/ClockETMinutes"):00}" : "";
+            var c = (chrTxt, utc, et);
+            if (_lastClock == c) return;
+            _lastClock = c;
+            Post(() => ClockChanged?.Invoke(c.chrTxt, c.utc, c.et));
         }
 
         void PublishBaro()
@@ -363,10 +469,11 @@ namespace SimConnect3
 
         void PublishPositions()
         {
-            foreach (var (id, dr) in PosMap)
+            foreach (var (id, dr, toSim) in PosMap)
             {
                 if (!_values.TryGetValue(dr, out var v)) continue;
-                int idx = (int)Math.Round(v);
+                int idx = toSim == null ? (int)Math.Round(v) : Array.IndexOf(toSim, (int)Math.Round(v));
+                if (idx < 0) continue;
                 if (_lastPos.TryGetValue(id, out var was) && was == idx) continue;
                 _lastPos[id] = idx;
                 Post(() => PositionChanged?.Invoke(id, idx));
@@ -403,17 +510,28 @@ namespace SimConnect3
             // selectors: "POS:n" → escriure n al dataref del selector
             if (cmd.StartsWith("POS:") && int.TryParse(cmd.AsSpan(4), out var pos))
             {
-                foreach (var (pid, dr) in PosMap)
+                foreach (var (pid, dr, toSim) in PosMap)
                     if (pid == id && _drIds.TryGetValue(dr, out var pdid))
                     {
+                        if (toSim != null && (pos < 0 || pos >= toSim.Length)) continue;
+                        double val = toSim == null ? pos : toSim[pos];
                         lock (_values) _lastPos[id] = pos;   // ja és on toca: no cal tornar-lo a moure quan arribi l'eco
-                        _ = SendAsync(new { req_id = NextReq(), type = "dataref_set_values", @params = new { datarefs = new[] { new { id = pdid, value = (double)pos } } } });
+                        var drs = new List<object> { new { id = pdid, value = val } };
+                        // (p.ex. el pom RUN del rellotge: l'animació s'ha d'escriure a part)
+                        if (PosMirror.TryGetValue(id, out var mdr) && _drIds.TryGetValue(mdr, out var mid)) drs.Add(new { id = mid, value = val });
+                        _ = SendAsync(new { req_id = NextReq(), type = "dataref_set_values", @params = new { datarefs = drs } });
                     }
+                return;
+            }
+            // botons que es mantenen (DATE del rellotge): l'ordre queda activa mentre el dit és a sobre
+            if ((cmd == "DOWN" || cmd == "UP") && CommandMap.TryGetValue((id, "PUSH"), out var hc) && _cmdIds.TryGetValue(hc, out var hid))
+            {
+                _ = SendAsync(new { req_id = NextReq(), type = "command_set_is_active", @params = new { commands = new[] { new { id = hid, is_active = cmd == "DOWN" } } } });
                 return;
             }
             object? req = null;
             if (CommandMap.TryGetValue((id, cmd), out var c) && _cmdIds.TryGetValue(c, out var cid))
-                req = new { req_id = NextReq(), type = "command_set_is_active", @params = new { commands = new[] { new { id = cid, is_active = true, duration = 0.0 } } } };
+                req = new { req_id = NextReq(), type = "command_set_is_active", @params = new { commands = new[] { new { id = cid, is_active = true, duration = CmdHold.GetValueOrDefault(c) } } } };
             else if (WriteMap.TryGetValue((id, cmd), out var w) && _drIds.TryGetValue(w.dataref, out var did))
                 req = new { req_id = NextReq(), type = "dataref_set_values", @params = new { datarefs = new[] { new { id = did, value = w.value } } } };
             if (req != null) _ = SendAsync(req);

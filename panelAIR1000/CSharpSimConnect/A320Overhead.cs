@@ -469,9 +469,11 @@ namespace panelAIR1000
     internal sealed class OhLabel : OhSilk
     {
         readonly string _t; readonly float _x, _y, _size; readonly Color _c; readonly bool _bold;
-        public OhLabel(string t, float x, float y, float size, Color c, bool bold)
+        /// <param name="allowBelowMin">true només per a serigrafia diminuta real (p.ex. la blava del dial del rellotge)</param>
+        public OhLabel(string t, float x, float y, float size, Color c, bool bold, bool allowBelowMin = false)
         {
-            size = Math.Max(size, Oh.MinSilk); _t = t; _x = x; _y = y; _size = size; _c = c; _bold = bold;
+            if (!allowBelowMin) size = Math.Max(size, Oh.MinSilk);
+            _t = t; _x = x; _y = y; _size = size; _c = c; _bold = bold;
             float w = Oh.TextW(t, size) + 6, h = size * 1.5f;
             Bounds = new RectangleF(x - w / 2, y - h / 2, w, h);
         }
@@ -1430,8 +1432,20 @@ namespace panelAIR1000
             Bounds = new RectangleF(cx - r, cy - r, r * 2, r * 2);
         }
         public override int State => Index;
-        public override bool Animating => Math.Abs(_ang - _angles[Index]) > 0.05f;
-        public override void Tick(float dt) => _ang = Approach(_ang, _angles[Index], dt * 600f);
+        /// <summary>Posició amb molla (p.ex. RST del rellotge): en arribar-hi, torna sola a MomentaryReturn al cap d'un moment.</summary>
+        public int MomentaryIndex = -1, MomentaryReturn = -1;
+        float _momT;
+        public override bool Animating => Math.Abs(_ang - _angles[Index]) > 0.05f || _momT > 0;
+        public override void Tick(float dt)
+        {
+            _ang = Approach(_ang, _angles[Index], dt * 600f);
+            if (_momT > 0 && (_momT -= dt) <= 0 && Index == MomentaryIndex && MomentaryReturn >= 0)
+            {
+                Index = MomentaryReturn;
+                Owner.RaiseCommand(Id, "POS:" + Index);
+                Changed();
+            }
+        }
         // la cua del rotatiu pot sobresortir de la base (fins a Outer radis): cal repintar aquesta zona en girar
         public override RectangleF DirtyBounds => RectangleF.Inflate(Bounds, _r * (Outer - 1f) + 5, _r * (Outer - 1f) + 5);
 
@@ -1444,6 +1458,7 @@ namespace panelAIR1000
             if (ni == Index) return;
             if (Wrap && Math.Abs(_angles[ni] - _ang) > 180) _ang += _angles[ni] > _ang ? 360 : -360;
             Index = ni;
+            if (ni == MomentaryIndex) _momT = 0.5f;   // posició amb molla: hi és mig segon i torna sola
             Owner.RaiseCommand(Id, "POS:" + ni);   // posició nova cap a l'avió
             Changed();
         }
@@ -2083,13 +2098,21 @@ namespace panelAIR1000
         {
             Id = id; _cx = cx; _cy = cy; _r = r; Bounds = new RectangleF(cx - r, cy - r, r * 2, r * 2);
         }
-        public override bool Animating => _hold > 0 || _depth > 0.001f;
+        /// <summary>
+        /// Botó que es manté (p.ex. DATE del rellotge): en posar el dit envia "DOWN" i en aixecar-lo "UP", i queda
+        /// enfonsat mentre el dit hi és. Sense Hold, un toc envia "PUSH".
+        /// </summary>
+        public bool Hold;
+        bool _down;
+        public override bool Animating => _hold > 0 || _down || _depth > 0.001f;
         public override void Tick(float dt)
         {
             if (_hold > 0) _hold = Math.Max(0, _hold - dt);
-            _depth = Approach(_depth, _hold > 0 ? 1 : 0, dt * 14f);
+            _depth = Approach(_depth, _hold > 0 || _down ? 1 : 0, dt * 14f);
         }
-        public override void Tap(PointF p) { _hold = 0.18f; Owner.RaiseCommand(Id, "PUSH"); Changed(); }
+        public override void Tap(PointF p) { if (Hold) return; _hold = 0.18f; Owner.RaiseCommand(Id, "PUSH"); Changed(); }
+        public override void PressStart(PointF p) { if (!Hold || _down) return; _down = true; Owner.RaiseCommand(Id, "DOWN"); }
+        public override void PressEnd() { if (!Hold || !_down) return; _down = false; Owner.RaiseCommand(Id, "UP"); Changed(); }
         public override void Draw(Graphics g)
         {
             var o = new RectangleF(_cx - _r, _cy - _r, _r * 2, _r * 2);
@@ -2103,6 +2126,59 @@ namespace panelAIR1000
     }
 
     /// <summary>Pantalla de 7 segments (voltatge bateria, freqüències RMP).</summary>
+    /// <summary>
+    /// Pantalla del rellotge del panell principal (CHR, UTC o ET): dígits de 7 segments color LCD crema amb ":",
+    /// sense segments apagats. SmallTail: els últims n dígits més petits (els segons de l'UTC). Text buit = apagada.
+    /// </summary>
+    internal sealed class OhClockDisplay : OhElement
+    {
+        public string Text = "";
+        /// <summary>Parell de xifres que fa pampallugues (0 = el primer, 1 = el segon, 2 = el tercer; -1 = cap). Un espai = xifra en blanc.</summary>
+        public int BlinkPair = -1;
+        float _blinkT;
+        readonly int _smallTail;
+        static readonly Color Lcd = Color.FromArgb(232, 214, 170);
+        public OhClockDisplay(string id, RectangleF r, int smallTail = 0) { Id = id; Bounds = r; _smallTail = smallTail; }
+        public override bool HitTest(PointF p) => false;
+        public override IEnumerable<RectangleF> HitAreas { get { yield break; } }
+        public override bool Animating => BlinkPair >= 0 && !string.IsNullOrEmpty(Text);
+        public override void Tick(float dt) => _blinkT = (_blinkT + dt) % 1f;
+
+        public override void Draw(Graphics g)
+        {
+            if (string.IsNullOrEmpty(Text)) return;
+            var area = RectangleF.Inflate(Bounds, -Bounds.Height * 0.12f, -Bounds.Height * 0.14f);
+            int nDig = Text.Count(c => c != ':');   // posicions de xifra (també les que van en blanc)
+            bool blinkOff = BlinkPair >= 0 && _blinkT >= 0.5f;
+            // amplades relatives: dígit 1 (o 0,72 si és dels petits), ":" 0,32
+            float units = 0; int seen = 0;
+            foreach (char c in Text)
+                if (c == ':') units += 0.32f;
+                else { seen++; units += seen > nDig - _smallTail ? 0.72f : 1f; }
+            float dw = Math.Min(area.Width / units, area.Height * 0.74f);   // dígits amples (l'alçada no canvia)
+            float x = area.X + (area.Width - dw * units) / 2f, h = area.Height;
+            seen = 0;
+            using var dot = new SolidBrush(Lcd);
+            foreach (char c in Text)
+            {
+                if (c == ':')
+                {
+                    float cw = dw * 0.32f, d = Math.Max(0.6f, dw * 0.13f);
+                    g.FillRectangle(dot, x + cw / 2 - d / 2, area.Y + h * 0.3f - d / 2, d, d);
+                    g.FillRectangle(dot, x + cw / 2 - d / 2, area.Y + h * 0.72f - d / 2, d, d);
+                    x += cw;
+                    continue;
+                }
+                seen++;
+                bool small = seen > nDig - _smallTail;
+                float w = small ? dw * 0.72f : dw, hh = small ? h * 0.72f : h;
+                bool hidden = blinkOff && (seen - 1) / 2 == BlinkPair;
+                if (!hidden) OhSeg7.Digit(g, x, area.Bottom - hh, w, hh, c, false, 0.17f, ghost: false, color: Lcd);
+                x += w;
+            }
+        }
+    }
+
     internal sealed class OhSeg7 : OhElement
     {
         public string Text;
@@ -3557,6 +3633,21 @@ namespace panelAIR1000
                 }
             }
             _ov?.SetLight(id, on);
+        }
+
+        /// <summary>Pantalles del rellotge del panell principal ("" = apagada).</summary>
+        /// <param name="utcBlink">parell de xifres de la pantalla UTC que fa pampallugues (mode SET del Fenix; -1 = cap)</param>
+        public void SetClock(string chr, string utc, string et, int utcBlink = -1)
+        {
+            foreach (var (id, t) in new[] { ("MIP_CLK_CHR_DISP", chr), ("MIP_CLK_UTC_DISP", utc), ("MIP_CLK_ET_DISP", et) })
+            {
+                if (!_byId.TryGetValue(id, out var e) || e is not OhClockDisplay d) continue;
+                int blink = id == "MIP_CLK_UTC_DISP" ? utcBlink : -1;
+                if (d.Text == t && d.BlinkPair == blink) continue;
+                d.Text = t; d.BlinkPair = blink;
+                Redraw(d.DirtyBounds);
+                if (d.Animating) { _animating.Add(d); StartAnim(); }
+            }
         }
 
         /// <summary>Pantalla del FCU llegida del simulador.</summary>
@@ -5526,20 +5617,53 @@ namespace panelAIR1000
                 _silk.Add(new OhInsetPanel(pts, new float[pts.Length], Array.Empty<PointF>()));
             }
             const float cdx = 16;
-            _silk.Add(new OhDarkWindow(R(1732 + cdx, 552, 1830 + cdx, 694)));
+            // dial: cara gris fosc amb tres subpantalles negres (CHR, UTC, ET) i la seva serigrafia blanca i blava
+            {
+                const float l = 1732 + cdx, r = 1830 + cdx, cx = (l + r) / 2;
+                _silk.Add(new OhBlock(R(l, 552, r, 694), Color.FromArgb(44, 48, 53), Color.FromArgb(27, 29, 33), 4f));
+                var blue = Color.FromArgb(70, 130, 215);
+                // blanc: un 15% més petit que la serigrafia normal; blau: diminut com al real (82% de la mida mínima de
+                // l'app; si no, HR/MO, MIN/DY i SEC/Y no hi caben en una fila)
+                // (CHR, UTC i ET: un 10% més petites encara, també per sota de la mida mínima, com al real)
+                const float wSz = 6.93f * 0.9f, bSz = Oh.MinSilk * 0.82f;
+                void Lw(string t, float x, float y) => _silk.Add(new OhLabel(t, x * k, y * k, wSz * _ls, Oh.Silk, true, allowBelowMin: true));
+                void Lbl(string t, float x, float y) => _silk.Add(new OhLabel(t, x * k, y * k, bSz, blue, false, allowBelowMin: true));   // fina, com al real
+                // HR / ET / MIN baixen fins a tocar la vora del dial (+7) i aquesta alçada es reparteix entre les
+                // tres subpantalles (+7/3 cadascuna)
+                const float dh = 7f / 3f;
+                Lw("CHR", cx, 559);
+                _silk.Add(new OhDarkWindow(R(l + 8, 565, r - 8, 589 + dh)));
+                // pantalles amb els dígits (les omple el simulador amb SetClock)
+                Add(new OhClockDisplay("MIP_CLK_CHR_DISP", R(l + 8, 565, r - 8, 589 + dh)));
+                Add(new OhClockDisplay("MIP_CLK_UTC_DISP", R(l + 5, 611 + dh, r - 5, 635 + 2 * dh), smallTail: 2));
+                Add(new OhClockDisplay("MIP_CLK_ET_DISP", R(l + 8, 649 + 2 * dh, r - 8, 673 + 3 * dh)));
+                Lbl("MIN", cx - 26, 595 + dh); Lbl("SEC", cx + 26, 595 + dh);
+                Lw("UTC", cx, 605 + dh);
+                _silk.Add(new OhDarkWindow(R(l + 5, 611 + dh, r - 5, 635 + 2 * dh)));
+                Lbl("HR/MO", cx - 33, 641 + 2 * dh); Lbl("MIN/DY", cx, 641 + 2 * dh); Lbl("SEC/Y", cx + 33, 641 + 2 * dh);
+                _silk.Add(new OhDarkWindow(R(l + 8, 649 + 2 * dh, r - 8, 673 + 3 * dh)));
+                Lbl("HR", cx - 26, 688); Lw("ET", cx, 688); Lbl("MIN", cx + 26, 688);
+            }
             Lb("RST", 1714 + cdx, 546); Lb("CHR", 1846 + cdx, 546);
             Round("MIP_CLK_RST", (1714 + cdx) * k, 580 * k, 6f);
             Round("MIP_CLK_CHR", (1846 + cdx) * k, 580 * k, 6f);
             Lb("DATE", 1712 + cdx, 636);
-            Knob("MIP_CLK_DATE", (1712 + cdx) * k, 614 * k, 6f, 0, new float[] { -40, 0, 40 }, KnobStyle.Round);
+            // polsador (com al real): la data es veu a la pantalla UTC només mentre es manté premut
+            Round("MIP_CLK_DATE", (1712 + cdx) * k, 614 * k, 6.5f).Hold = true;
             // selectors de 3 posicions amb pom de fletxa (com a la captura): GPS / INT / SET i RUN / STP / RST,
             // amb la primera posició a dalt a l'esquerra del pom i les altres dues a la dreta
             // fletxes sense base, a tocar de la finestra; les etiquetes (mida mínima) dins del panell del rellotge
-            const float kx = 1857, tx = 1881;
-            Lb("GPS", kx - 2, 603); Lb("INT", tx, 613); Lb("SET", tx, 633);
-            Knob("MIP_CLK_GPS", kx * k, 624 * k, 5.3f, 0, new float[] { -25, 35, 90 }, KnobStyle.Arrow);
-            Lb("RUN", kx - 2, 657); Lb("STP", tx, 667); Lb("RST", tx, 687);
-            Knob("MIP_CLK_RUN", kx * k, 678 * k, 5.3f, 0, new float[] { -25, 35, 90 }, KnobStyle.Arrow);
+            // GPS / RUN a la dreta (no toquen la pantalla); INT, SET, STP, RST un 15% més petites i una mica més avall.
+            // Dues zones de toc per selector: la meitat esquerra gira en sentit antihorari, la dreta en sentit horari.
+            const float kx = 1857, tx = 1881, small = 6.93f;
+            Lb("GPS", kx + 5, 603); Lb("INT", tx, 616, small); Lb("SET", tx, 636, small);
+            // cada clic gira 7,5° més que al principi (passos de 67,5° i 62,5°), amb la posició de partida a -25°
+            var gps = Knob("MIP_CLK_GPS", kx * k, 624 * k, 5.3f, 0, new float[] { -25, 42.5f, 105 }, KnobStyle.Arrow);
+            Lb("RUN", kx + 5, 657); Lb("STP", tx, 670, small); Lb("RST", tx, 690, small);
+            var run = Knob("MIP_CLK_RUN", kx * k, 678 * k, 5.3f, 0, new float[] { -25, 42.5f, 105 }, KnobStyle.Arrow);
+            run.MomentaryIndex = 2; run.MomentaryReturn = 1;   // RST té molla: torna sol a STP
+            // zones de toc grans: el doble d'altes i el triple d'amples que la primera versió (1,3 x 1,5 radis)
+            foreach (var kn in new[] { gps, run }) { kn.ZoneHalfWidth = 3.9f; kn.ZoneUp = 3f; kn.ZoneDown = 3f; }
 
             // palanca del tren
             Panel(1720 * k, 740 * k, (1836 - 1720) * k, (958 - 740) * k);
