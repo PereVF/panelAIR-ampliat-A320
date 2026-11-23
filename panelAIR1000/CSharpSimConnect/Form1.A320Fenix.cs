@@ -82,6 +82,18 @@ namespace SimConnect3
             ("MIP_AUTOBRK_MED", "PUSH", Inc("S_MIP_AUTOBRAKE_MED"), Even("S_MIP_AUTOBRAKE_MED")),
             ("MIP_AUTOBRK_MAX", "PUSH", Inc("S_MIP_AUTOBRAKE_MAX"), Even("S_MIP_AUTOBRAKE_MAX")),
             ("MIP_BRK_FAN", "PUSH", "(L:S_MIP_BRAKE_FAN) ! (>L:S_MIP_BRAKE_FAN)", null),
+            // ISIS (al Fenix, "ISFD"): botons comptadors (llegit: parells = deixats anar); pom: girar (E_) i prémer (comptador)
+            ("MIP_ISIS_BUGS", "PUSH", Inc("S_MIP_ISFD_BUGS"), Even("S_MIP_ISFD_BUGS")),
+            ("MIP_ISIS_LS", "PUSH", Inc("S_MIP_ISFD_LS"), Even("S_MIP_ISFD_LS")),
+            ("MIP_ISIS_PLUS", "PUSH", Inc("S_MIP_ISFD_PLUS"), Even("S_MIP_ISFD_PLUS")),
+            ("MIP_ISIS_MINUS", "PUSH", Inc("S_MIP_ISFD_MINUS"), Even("S_MIP_ISFD_MINUS")),
+            ("MIP_ISIS_RST", "PUSH", Inc("S_MIP_ISFD_RST"), Even("S_MIP_ISFD_RST")),
+            ("MIP_ISIS_BARO", "INC", Inc("E_MIP_ISFD_BARO"), null),
+            ("MIP_ISIS_BARO", "DEC", Dec("E_MIP_ISFD_BARO"), null),
+            ("MIP_ISIS_BARO", "PUSH", Inc("S_MIP_ISFD_BARO_BUTTON"), Even("S_MIP_ISFD_BARO_BUTTON")),
+            // palanca del tren (HubHop: 1 = avall, 0 = amunt; llegit al Fenix: 1 amb el tren baixat)
+            ("MIP_GEAR_LEVER", "DOWN", Set("S_MIP_GEAR", 1), null),
+            ("MIP_GEAR_LEVER", "UP", Set("S_MIP_GEAR", 0), null),
         };
 
         /// <summary>
@@ -112,6 +124,8 @@ namespace SimConnect3
 
         /// <summary>Rellotge: les tres pantalles (en el format de la pantalla) i el mode de la UTC.</summary>
         static readonly string[] FenixClock = { "N_MIP_CLOCK_CHRONO", "N_MIP_CLOCK_ELAPSED", "N_MIP_CLOCK_UTC", "N_MIP_CLOCK_MODE" };
+        /// <summary>Indicador triple (agulles, ja en milers de PSI: acumulador, fre esquerre, fre dret) i palanca del tren (1 = avall).</summary>
+        static readonly string[] FenixGear = { "N_HYD_PRESSURE_BRAKE_ACCU", "N_HYD_PRESSURE_BRAKE_LEFT", "N_HYD_PRESSURE_BRAKE_RIGHT", "S_MIP_GEAR" };
 
         /// <summary>Llums: element → L-var.</summary>
         static readonly (string id, string lvar)[] FenixLights =
@@ -137,7 +151,7 @@ namespace SimConnect3
         };
 
         // pantalla+QNH+palanques, llums, selectors, llegendes, rellotge i data
-        const int FenixReadCount = 20 + 17 + 7 + 14 + 4;
+        const int FenixReadCount = 20 + 17 + 7 + 14 + 4 + 4;
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct FenixGlareStruct
         {
@@ -156,6 +170,8 @@ namespace SimConnect3
         private readonly Dictionary<(string id, bool upper), bool> _fxLegends = new();
         private (string chr, string utc, string et)? _fxClock;
         private int _fxUtcBlink = -1;
+        private (float accu, float left, float right)? _fxBrakes;   // indicador triple (milers de PSI)
+        private bool? _fxGearDown;                                  // palanca del tren
 
         /// <summary>
         /// Palanca del Fenix (A_FC_THROTTLE_*_INPUT, mesurat al simulador: 1 REV FULL, 2 ralentí, 3 CL, 4 FLX MCT, 5 TO GA)
@@ -192,6 +208,8 @@ namespace SimConnect3
             foreach (var p in FenixPos) { simconnect.AddToDataDefinition(def, "L:" + p.lvar, "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED); n++; }
             foreach (var l in FenixLegends) { simconnect.AddToDataDefinition(def, "L:" + l.lvar, "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED); n++; }
             foreach (var c in FenixClock) { simconnect.AddToDataDefinition(def, "L:" + c, "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED); n++; }
+            // (agulles: només quan canvien 0,02 o més, és a dir, 20 PSI)
+            foreach (var c in FenixGear) { simconnect.AddToDataDefinition(def, "L:" + c, "Number", SIMCONNECT_DATATYPE.FLOAT64, c.StartsWith("N_") ? 0.02f : 0f, SimConnect.SIMCONNECT_UNUSED); n++; }
             if (n != FenixReadCount) throw new InvalidOperationException("Fenix: el nombre de L-vars llegides no quadra amb FenixReadCount");
             simconnect.RegisterDataDefineStruct<FenixGlareStruct>(def);
             simconnect.RequestDataOnSimObject((REQUESTS)FenixReadReq, def, SimConnect.SIMCONNECT_OBJECT_ID_USER,
@@ -284,6 +302,8 @@ namespace SimConnect3
             if ((mode == 0 || mode == 1) && utcTxt.Length == 8) utcTxt = utcTxt[..6] + "  ";
             _fxClock = (chrTxt, utcTxt, etTxt);
             _fxUtcBlink = blink;
+            _fxBrakes = ((float)v[k++], (float)v[k++], (float)v[k++]);
+            _fxGearDown = v[k++] > 0.5;
             ApplyFenixState();
         }
 
@@ -301,6 +321,8 @@ namespace SimConnect3
             foreach (var kv in _fxLegends)
                 ov.SetLegend(kv.Key.id, kv.Key.upper ? (kv.Value ? 1f : 0f) : null, kv.Key.upper ? null : (kv.Value ? 1f : 0f));
             if (_fxClock is var (fc, fu, fe)) ov.SetClock(fc, fu, fe, _fxUtcBlink);
+            if (_fxBrakes is var (ba, bl, br)) ov.SetBrakeGauge(ba, bl, br);
+            if (_fxGearDown is bool gd) ov.SetGearLever(gd);
         }
 
         // ── Pantalles pop-out del Fenix: totes es diuen "WASMINSTRUMENT" → s'assignen per ordre de sortida ──
@@ -319,33 +341,64 @@ namespace SimConnect3
         /// quina pantalla és (veure ClassifyFenix), de manera que l'usuari les pot treure en qualsevol ordre.
         /// Una finestra encara negra o dubtosa es torna a mirar cada 2 s.
         /// </summary>
+        /// <summary>
+        /// Finestres pop-out del Fenix: "WASMINSTRUMENT" i, a l'MSFS 2024, també "FENIXWASMINSTRUMENT" (comprovat: el ND
+        /// hi va sortir amb aquest títol i les altres tres amb el primer).
+        /// </summary>
+        private static List<IntPtr> FenixWindows()
+        {
+            var list = XPlaneWindows.FindAll("WASMINSTRUMENT", MsfsProcesses);
+            foreach (var h in XPlaneWindows.FindAll("FENIXWASMINSTRUMENT", MsfsProcesses)) if (!list.Contains(h)) list.Add(h);
+            return list;
+        }
+
         private void PlaceFenixScreens()
         {
-            var wins = XPlaneWindows.FindAll("WASMINSTRUMENT", MsfsProcesses);
+            var wins = FenixWindows();
             foreach (var h in new List<IntPtr>(_fxSlots.Keys)) if (!wins.Contains(h)) _fxSlots.Remove(h);
             foreach (var h in new List<IntPtr>(_fxSeen.Keys)) if (!wins.Contains(h)) _fxSeen.Remove(h);
             _fxTentative.RemoveWhere(h => !wins.Contains(h));
             var now = DateTime.UtcNow;
             // ordre d'aparició: les noves de la de sota a la de dalt de l'ordre de Windows (la més antiga, primer)
             for (int i = wins.Count - 1; i >= 0; i--) if (!_fxSeen.ContainsKey(wins[i])) _fxSeen[wins[i]] = (now, _fxSeq++);
-            if (wins.Exists(h => !_fxSlots.ContainsKey(h) || _fxTentative.Contains(h)) && (now - _fxLastClassify).TotalSeconds >= 2)
+            _fxLastKind.Keys.Where(h => !wins.Contains(h)).ToList().ForEach(h => { _fxLastKind.Remove(h); _fxMismatch.Remove(h); });
+            bool pending = wins.Exists(h => !_fxSlots.ContainsKey(h) || _fxTentative.Contains(h));
+            bool verify = (now - _fxLastVerify).TotalSeconds >= 6;   // revisió de les ja confirmades (cada 6 s)
+            if ((pending && (now - _fxLastClassify).TotalSeconds >= 2) || verify)
             {
                 _fxLastClassify = now;
-                // 1) reconeixement per la imatge (també de les col·locades provisionalment per ordre, que poden estar
-                //    al forat d'una altra: p.ex. un ND gairebé buit que no s'ha reconegut a temps i ha ocupat el del PFD)
+                if (verify) _fxLastVerify = now;
+                // 1) reconeixement per la imatge. "ND" és el cas per defecte (pantalla amb contingut sense res reconegut):
+                //    p.ex. un ECAM inferior encara carregant-se. Per això una finestra classificada com a ND queda
+                //    provisional, i les confirmades es tornen a revisar: si deixen de semblar el seu forat 2 vegades seguides
+                //    (3 si el que semblen ara és un ND), surten del forat i es tornen a col·locar.
                 foreach (var h in wins)
                 {
                     bool tentative = _fxTentative.Contains(h);
-                    if (_fxSlots.ContainsKey(h) && !tentative) continue;
+                    bool placed = _fxSlots.TryGetValue(h, out int cur);
+                    if (placed && !tentative && !verify) continue;
                     int kind;
                     using (var bmp = XPlaneWindows.Capture(h)) kind = bmp == null ? -1 : ClassifyFenix(bmp);
                     if (kind < 0) continue;
-                    if (_fxSlots.TryGetValue(h, out int cur) && cur == kind) { _fxTentative.Remove(h); continue; }
+                    _fxLastKind[h] = kind;
+                    if (placed && cur == kind) { if (kind != 1) _fxTentative.Remove(h); _fxMismatch.Remove(h); continue; }
+                    if (placed && !tentative)
+                    {
+                        int n = _fxMismatch.GetValueOrDefault(h) + 1;
+                        _fxMismatch[h] = n;
+                        if (n < (kind == 1 ? 3 : 2)) continue;
+                        _fxSlots.Remove(h); _fxMismatch.Remove(h);   // ja no sembla el seu forat: es torna a col·locar
+                    }
                     IntPtr holder = IntPtr.Zero;
-                    foreach (var kv in _fxSlots) if (kv.Value == kind) holder = kv.Key;
-                    if (holder != IntPtr.Zero && !_fxTentative.Contains(holder)) continue;   // ja hi ha una pantalla reconeguda
-                    if (holder != IntPtr.Zero) { _fxSlots.Remove(holder); _fxTentative.Remove(holder); }   // la provisional cedeix el forat
-                    _fxSlots[h] = kind; _fxTentative.Remove(h);
+                    foreach (var kv in _fxSlots) if (kv.Value == kind && kv.Key != h) holder = kv.Key;
+                    if (holder != IntPtr.Zero)
+                    {
+                        if (!_fxTentative.Contains(holder)) continue;                                   // ja hi ha una pantalla reconeguda
+                        if (kind == 1 && _fxLastKind.GetValueOrDefault(holder, -1) == 1) continue;      // dos "ND": no es prenen el lloc
+                        _fxSlots.Remove(holder); _fxTentative.Remove(holder);                           // la provisional cedeix el forat
+                    }
+                    _fxSlots[h] = kind;
+                    if (kind == 1) _fxTentative.Add(h); else _fxTentative.Remove(h);
                 }
                 // 2) si al cap de 6 s alguna no s'ha pogut reconèixer (p.ex. un PC on la captura surt negra), es col·loca
                 //    per ordre d'aparició al primer forat lliure, seguint l'ordre que demana l'avís (PFD, ND, ECAM sup., ECAM inf.)
@@ -361,11 +414,20 @@ namespace SimConnect3
                 }
             }
             foreach (var kv in _fxSlots)
-                try { if (SimWindowRect(kv.Value, MsfsExtraHeight) is System.Drawing.Rectangle wr) XPlaneWindows.Place(kv.Key, wr, this.Handle); }
+                try
+                {
+                    if (SimWindowRect(kv.Value, MsfsExtraHeight) is not System.Drawing.Rectangle wr) continue;
+                    // ISIS: la finestra un 12,9% més gran que el forat, centrada (el seu marc negre queda amagat darrere l'app)
+                    if (kv.Value == 4) wr.Inflate((int)Math.Round(wr.Width * 0.0645), (int)Math.Round(wr.Height * 0.0645));
+                    XPlaneWindows.Place(kv.Key, wr, this.Handle);
+                }
                 catch { }
-            UpdatePopoutMessage(4 - _fxSlots.Count, 4, _msfsSince, ref _fxPopoutMsgShown, FenixPopoutText);
+            // (l'avís només compta les 4 pantalles principals; l'ISIS és opcional)
+            UpdatePopoutMessage(4 - _fxSlots.Values.Count(s => s < 4), 4, _msfsSince, ref _fxPopoutMsgShown, FenixPopoutText);
         }
-        private DateTime _fxLastClassify = DateTime.MinValue;
+        private DateTime _fxLastClassify = DateTime.MinValue, _fxLastVerify = DateTime.MinValue;
+        private readonly Dictionary<IntPtr, int> _fxLastKind = new();    // última classificació de cada finestra
+        private readonly Dictionary<IntPtr, int> _fxMismatch = new();    // revisions seguides en què no sembla el seu forat
         private bool _fxPopoutMsgShown;
         private readonly Dictionary<IntPtr, (DateTime t, long seq)> _fxSeen = new();
         /// <summary>Finestres col·locades per ordre (sense reconèixer): es continuen mirant i poden cedir el forat.</summary>
@@ -374,7 +436,7 @@ namespace SimConnect3
         private const string FenixPopoutText = "In Microsoft Flight Simulator, hold down the right **ALT** key on your keyboard and click the A320 displays one at a time, in this order: PFD, ND, upper ECAM, lower ECAM. panelAIR will place them in the panel.";
 
         /// <summary>
-        /// Quina pantalla del Fenix és (0 PFD, 1 ND, 2 ECAM superior, 3 ECAM inferior; -1 si no se sap, p.ex. negra):
+        /// Quina pantalla del Fenix és (0 PFD, 1 ND, 2 ECAM superior, 3 ECAM inferior, 4 ISIS; -1 si no se sap, p.ex. negra):
         ///  - PFD: hi ha prou cel blau i terra marró (l'horitzó artificial);
         ///  - ECAM inferior (SD): línia horitzontal clara de gairebé tota l'amplada al 78-95% de l'alçada (franja TAT/SAT/GW);
         ///  - ECAM superior (EWD): línia horitzontal clara llarga al 55-78% (separació entre motors i missatges);
@@ -414,6 +476,10 @@ namespace SimConnect3
                 if (f >= 0.78 && f < 0.95 && frac > sd) sd = frac;
             }
             if (tot == 0 || (double)lit / tot < 0.005) return -1;   // encara negra (sense corrent o carregant)
+            // ISIS (pantalla d'emergència): també té cel i terra, però ocupen molt més que al PFD (el PFD, menys del 18%;
+            // l'ISIS, ~30% amb el marc i la barra de títol de la finestra, més sense): no s'ha de confondre amb el PFD;
+            // va al seu forat (4)
+            if ((double)(sky + ground) / tot > 0.25 && (double)sky / tot > 0.04 && (double)ground / tot > 0.04) return 4;
             // PFD: l'horitzó artificial té cel i terra alhora (mesurat: uns 8,8% de cada; el ND, 0%)
             if ((double)(sky + ground) / tot > 0.03 && (double)sky / tot > 0.005 && (double)ground / tot > 0.005) return 0;
             if (sd >= 0.85) return 3;
@@ -494,7 +560,7 @@ namespace SimConnect3
 
         private void CloseFenixScreens()
         {
-            foreach (var h in XPlaneWindows.FindAll("WASMINSTRUMENT", MsfsProcesses)) XPlaneWindows.Close(h);
+            foreach (var h in FenixWindows()) XPlaneWindows.Close(h);
         }
     }
 }

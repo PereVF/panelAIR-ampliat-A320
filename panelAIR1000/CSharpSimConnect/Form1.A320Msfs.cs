@@ -74,6 +74,8 @@ namespace SimConnect3
             ("MIP_EFIS_VORD", "A32NX_FCU_EFIS_L_VORD_LIGHT_ON"), ("MIP_EFIS_NDB", "A32NX_FCU_EFIS_L_NDB_LIGHT_ON"),
             ("MIP_EFIS_ARPT", "A32NX_FCU_EFIS_L_ARPT_LIGHT_ON"),
             ("MIP_MASTER_WARN", "A32NX_MASTER_WARNING"), ("MIP_MASTER_CAUT", "A32NX_MASTER_CAUTION"),
+            // TERR ON ND (capità / primer oficial): la mateixa LVAR és el llum i l'ordre (es canvia)
+            ("MIP_TERR_ON_ND_1", "A32NX_EFIS_TERR_L_ACTIVE"), ("MIP_TERR_ON_ND_2", "A32NX_EFIS_TERR_R_ACTIVE"),
         };
 
         /// <summary>Pantalla del FCU (en aquest ordre a la lectura).</summary>
@@ -96,10 +98,38 @@ namespace SimConnect3
             "A32NX_THROTTLE_MAPPING_CLIMB_LOW:1", "A32NX_THROTTLE_MAPPING_CLIMB_HIGH:1",
             "A32NX_THROTTLE_MAPPING_FLEXMCT_LOW:1", "A32NX_THROTTLE_MAPPING_FLEXMCT_HIGH:1",
             "A32NX_THROTTLE_MAPPING_TOGA_LOW:1", "A32NX_THROTTLE_MAPPING_TOGA_HIGH:1",
+            // 29-34 indicadors del tren (LGCIU 1): blocat avall (triangle verd) / desblocat (UNLK)
+            "A32NX_LGCIU_1_LEFT_GEAR_DOWNLOCKED", "A32NX_LGCIU_1_LEFT_GEAR_UNLOCKED",
+            "A32NX_LGCIU_1_NOSE_GEAR_DOWNLOCKED", "A32NX_LGCIU_1_NOSE_GEAR_UNLOCKED",
+            "A32NX_LGCIU_1_RIGHT_GEAR_DOWNLOCKED", "A32NX_LGCIU_1_RIGHT_GEAR_UNLOCKED",
+            // 35-38 autofre (0 res, 1 LO, 2 MED, 3 MAX; DECEL), polsador del ventilador (llum ON: el ventilador en si
+            // només gira amb corrent AC; comprovat) i frens calents
+            "A32NX_AUTOBRAKES_ARMED_MODE", "A32NX_AUTOBRAKES_DECEL_LIGHT", "A32NX_BRAKE_FAN_BTN_PRESSED", "A32NX_BRAKES_HOT",
+            // 39-41 rellotge (mesurat al FBW): cronòmetre i ET en segons (-1 = pantalla apagada), selector RUN/STP/RST
+            "A32NX_CHRONO_ELAPSED_TIME", "A32NX_CHRONO_ET_ELAPSED_TIME", "A32NX_CHRONO_ET_SWITCH_POS",
+            // 42-45 indicador triple (frens alternatius i acumulador, en PSI) i palanca del tren (1 = avall)
+            "A32NX_HYD_BRAKE_ALTN_ACC_PRESS", "A32NX_HYD_BRAKE_ALTN_LEFT_PRESS", "A32NX_HYD_BRAKE_ALTN_RIGHT_PRESS",
+            "A32NX_GEAR_HANDLE_POSITION",
+        };
+        /// <summary>Variables de simulació (amb unitat) que es llegeixen després dels selectors: A/SKID (1 = ON) i hora UTC (s).</summary>
+        static readonly (string name, string unit)[] MsfsA320SimVars =
+        {
+            ("ANTISKID BRAKES ACTIVE", "Bool"), ("ZULU TIME", "Seconds"),   // (amb el prefix "E:" SimConnect torna 0)
+            ("ZULU MONTH OF YEAR", "Number"), ("ZULU DAY OF MONTH", "Number"), ("ZULU YEAR", "Number"),   // data del DATE
         };
 
-        // lectura: pantalla + llums + selectors, tot en un sol bloc de nombres
-        const int MsfsA320ReadCount = 29 + 15 + 4;
+        // lectura: pantalla + llums + selectors + variables de simulació, tot en un sol bloc de nombres
+        const int MsfsA320ReadCount = 46 + 17 + 4 + 5;
+
+        /// <summary>
+        /// DATE del rellotge al FBW: el FBW canvia entre hora i data a cada ordre i no té cap LVAR que ho digui. L'app envia
+        /// l'ordre en prémer i en deixar anar (la data només es veu mentre es manté premut) i mostra ella mateixa la data.
+        /// </summary>
+        private bool _msDateHeld;
+        private (int secs, int month, int day, int year) _msZulu;
+        private string MsUtcText() => _msDateHeld
+            ? $"{_msZulu.month:00}:{_msZulu.day:00}:{_msZulu.year % 100:00}"
+            : $"{_msZulu.secs / 3600:00}:{_msZulu.secs / 60 % 60:00}:{_msZulu.secs % 60:00}";
 
         /// <summary>Configuració de l'eix del FBW: reversa a l'eix i rang (baix, alt) de cada detent (REV, REV IDLE, IDLE, CL, FLX, TOGA).</summary>
         private bool _fbwRevOnAxis = true;
@@ -152,6 +182,10 @@ namespace SimConnect3
             return 1f;
         }
         private (float l, float r)? _msThr;
+        private readonly Dictionary<(string id, bool upper), bool> _msLegends = new();   // tren, autofre, BRK FAN
+        private (string chr, string utc, string et)? _msClock;                           // pantalles del rellotge
+        private (float accu, float left, float right)? _msBrakes;                        // indicador triple (milers de PSI)
+        private bool? _msGearDown;                                                       // palanca del tren
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct A320GlareStruct
         {
@@ -192,9 +226,12 @@ namespace SimConnect3
             // lectura (només quan canvia)
             var readDef = (DEFINITIONS)MsfsA320ReadDef;
             int n = 0;
-            foreach (var name in MsfsA320Display) { simconnect.AddToDataDefinition(readDef, "L:" + name, "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED); n++; }
+            // (els comptadors del rellotge avancen a cada fotograma: només es reenvien quan canvien mig segon o més)
+            // (pressions: només quan canvien 20 PSI o més)
+            foreach (var name in MsfsA320Display) { simconnect.AddToDataDefinition(readDef, "L:" + name, "Number", SIMCONNECT_DATATYPE.FLOAT64, name.Contains("ELAPSED_TIME") ? 0.5f : name.Contains("_PRESS") ? 20f : 0f, SimConnect.SIMCONNECT_UNUSED); n++; }
             foreach (var l in MsfsA320Lights) { simconnect.AddToDataDefinition(readDef, "L:" + l.lvar, "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED); n++; }
             foreach (var p in MsfsA320Pos) { simconnect.AddToDataDefinition(readDef, "L:" + p.lvar, "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED); n++; }
+            foreach (var (name, unit) in MsfsA320SimVars) { simconnect.AddToDataDefinition(readDef, name, unit, SIMCONNECT_DATATYPE.FLOAT64, name.Contains("ZULU") ? 0.5f : 0f, SimConnect.SIMCONNECT_UNUSED); n++; }
             if (n != MsfsA320ReadCount) throw new InvalidOperationException("A320 MSFS: el nombre de LVARs llegides no quadra amb MsfsA320ReadCount");
             simconnect.RegisterDataDefineStruct<A320GlareStruct>(readDef);
             simconnect.RequestDataOnSimObject((REQUESTS)MsfsA320ReadReq, readDef, SimConnect.SIMCONNECT_OBJECT_ID_USER,
@@ -226,6 +263,58 @@ namespace SimConnect3
                             return true;
                         }
                 if (id == "MIP_CHRONO" && cmd == "PUSH") { SendGenericRpn("(>H:A32NX_EFIS_L_CHRONO_PUSHED)"); return true; }
+                // rellotge del panell principal (el selector GPS del FBW no fa res: no s'envia)
+                if (id == "MIP_CLK_CHR" && cmd == "PUSH") { SendGenericRpn("(>H:A32NX_CHRONO_TOGGLE)"); return true; }
+                if (id == "MIP_CLK_RST" && cmd == "PUSH") { SendGenericRpn("(>H:A32NX_CHRONO_RST)"); return true; }
+                if (id == "MIP_CLK_DATE")
+                {
+                    // el FBW canvia hora ↔ data a cada ordre: una en prémer i una en deixar anar
+                    bool down = cmd == "DOWN";
+                    if ((down || cmd == "UP") && down != _msDateHeld)
+                    {
+                        _msDateHeld = down;
+                        SendGenericRpn("(>H:A32NX_CHRONO_DATE)");
+                        if (_msClock is var (dc, _, de)) { _msClock = (dc, MsUtcText(), de); _a320Overhead?.SetClock(dc, _msClock.Value.utc, de); }
+                    }
+                    return true;
+                }
+                // TERR ON ND: es canvia la LVAR (llum i estat alhora)
+                if ((id == "MIP_TERR_ON_ND_1" || id == "MIP_TERR_ON_ND_2") && cmd == "PUSH")
+                {
+                    string tv = id.EndsWith("1") ? "A32NX_EFIS_TERR_L_ACTIVE" : "A32NX_EFIS_TERR_R_ACTIVE";
+                    SendGenericRpn($"(L:{tv}, bool) ! (>L:{tv})");
+                    return true;
+                }
+                if (id == "MIP_CLK_RUN" && cmd.StartsWith("POS:") && int.TryParse(cmd.AsSpan(4), out int etp) && etp >= 0 && etp <= 2)
+                {
+                    _msPos[id] = etp;
+                    SendGenericRpn($"{etp} (>L:A32NX_CHRONO_ET_SWITCH_POS) (>H:A32NX_CHRONO_ET_POS_CHANGED)");
+                    return true;
+                }
+                // A/SKID & N/W STRG: app 0 = ON; el FBW fa servir la variable de simulació i només té l'ordre de canviar
+                if (id == "MIP_ASKID_NWSTRG" && cmd.StartsWith("POS:") && int.TryParse(cmd.AsSpan(4), out int asp))
+                {
+                    _msPos[id] = asp;
+                    SendGenericRpn($"(A:ANTISKID BRAKES ACTIVE, Bool) {(asp == 0 ? 1 : 0)} != if{{ 0 (>K:ANTISKID_BRAKES_TOGGLE) }}");
+                    return true;
+                }
+                // autofre: prémer i deixar anar el botó (LVAR del FBW); BRK FAN: canvia l'estat del polsador
+                string? abLvar = id switch
+                {
+                    "MIP_AUTOBRK_LO" => "A32NX_OVHD_AUTOBRK_LOW_ON_IS_PRESSED",
+                    "MIP_AUTOBRK_MED" => "A32NX_OVHD_AUTOBRK_MED_ON_IS_PRESSED",
+                    "MIP_AUTOBRK_MAX" => "A32NX_OVHD_AUTOBRK_MAX_ON_IS_PRESSED",
+                    _ => null
+                };
+                if (abLvar != null && cmd == "PUSH")
+                {
+                    SendGenericRpn($"1 (>L:{abLvar})");
+                    System.Threading.Tasks.Task.Delay(150).ContinueWith(_ => { try { BeginInvoke(new Action(() => SendGenericRpn($"0 (>L:{abLvar})"))); } catch { } });
+                    return true;
+                }
+                // palanca del tren: ordres estàndard que el FBW intercepta (a terra, el bloqueig de la palanca la frena)
+                if (id == "MIP_GEAR_LEVER" && (cmd == "UP" || cmd == "DOWN")) { SendGenericRpn(cmd == "UP" ? "(>K:GEAR_UP)" : "(>K:GEAR_DOWN)"); return true; }
+                if (id == "MIP_BRK_FAN" && cmd == "PUSH") { SendGenericRpn("(L:A32NX_BRAKE_FAN_BTN_PRESSED) ! (>L:A32NX_BRAKE_FAN_BTN_PRESSED)"); return true; }
                 if (id == "MIP_THROTTLE")
                 {
                     // palanques arrossegades a l'app ("BOTH:v", "LEFT:v", "RIGHT:v"): com si es mogués l'eix de gas
@@ -273,6 +362,24 @@ namespace SimConnect3
                 _fbwRevOnAxis = v[16] > 0.5;
                 for (int i = 0; i < _fbwRange.Length; i++) _fbwRange[i] = (v[17 + 2 * i], v[18 + 2 * i]);
             }
+            // tren: triangle verd = blocat avall, UNLK = desblocat
+            string[] gears = { "MIP_GEAR_IND_0", "MIP_GEAR_IND_1", "MIP_GEAR_IND_2" };   // esquerre, morro, dret
+            for (int i = 0; i < 3; i++) { _msLegends[(gears[i], false)] = v[29 + i * 2] > 0.5; _msLegends[(gears[i], true)] = v[30 + i * 2] > 0.5; }
+            // autofre: ON = armat en aquell mode; DECEL = llum de desacceleració amb aquell mode
+            int abMode = (int)Math.Round(v[35]); bool decel = v[36] > 0.5;
+            string[] abIds = { "MIP_AUTOBRK_LO", "MIP_AUTOBRK_MED", "MIP_AUTOBRK_MAX" };
+            for (int i = 0; i < 3; i++) { _msLegends[(abIds[i], false)] = abMode == i + 1; _msLegends[(abIds[i], true)] = decel && abMode == i + 1; }
+            _msLegends[("MIP_BRK_FAN", false)] = v[37] > 0.5;
+            _msLegends[("MIP_BRK_FAN", true)] = v[38] > 0.5;
+            // rellotge: cronòmetre i ET en segons (≤ 0 = pantalla apagada, com després de RST); selector RUN/STP/RST
+            double chr = v[39], et = v[40];
+            int cs = (int)Math.Floor(Math.Max(0, chr)), es = (int)Math.Floor(Math.Max(0, et));
+            string chrTxt = chr > 0 ? $"{Math.Min(99, cs / 60):00}:{cs % 60:00}" : "";
+            string etTxt = et >= 0 ? $"{Math.Min(99, es / 3600):00}:{es / 60 % 60:00}" : "";
+            _msBrakes = ((float)(v[42] / 1000.0), (float)(v[43] / 1000.0), (float)(v[44] / 1000.0));
+            _msGearDown = v[45] > 0.5;
+            int etPos = (int)Math.Round(v[41]);
+            if (etPos >= 0 && etPos <= 2) _msPos["MIP_CLK_RUN"] = etPos;
             int k = MsfsA320Display.Length;
             foreach (var (id, _) in MsfsA320Lights) _msLights[id] = v[k++] > 0.5;
             foreach (var (id, _, toSim) in MsfsA320Pos)
@@ -281,6 +388,12 @@ namespace SimConnect3
                 int idx = Array.IndexOf(toSim, simVal);
                 if (idx >= 0) _msPos[id] = idx;
             }
+            // variables de simulació: A/SKID (app 0 = ON) i hora UTC
+            _msPos["MIP_ASKID_NWSTRG"] = v[k++] > 0.5 ? 0 : 1;
+            int us = (int)Math.Floor(Math.Max(0, v[k++])) % 86400;
+            int zm = (int)Math.Round(v[k++]), zd = (int)Math.Round(v[k++]), zy = (int)Math.Round(v[k++]);
+            _msZulu = (us, zm, zd, zy);
+            _msClock = (chrTxt, MsUtcText(), etTxt);
             ApplyMsfsA320State();
         }
 
@@ -296,6 +409,14 @@ namespace SimConnect3
             foreach (var kv in _msPos) ov.SetPosition(kv.Key, kv.Value);
             // palanques de gas: només amb el FlyByWire (amb el Fenix aquestes LVARs no existeixen i valdrien 0)
             if (_msThr is var (tl, tr) && IsA320FBW()) ov.SetThrottle(tl, tr);
+            if (IsA320FBW())
+            {
+                foreach (var kv in _msLegends)
+                    ov.SetLegend(kv.Key.id, kv.Key.upper ? (kv.Value ? 1f : 0f) : null, kv.Key.upper ? null : (kv.Value ? 1f : 0f));
+                if (_msClock is var (mc, mu, me)) ov.SetClock(mc, mu, me);
+                if (_msBrakes is var (ba, bl, br)) ov.SetBrakeGauge(ba, bl, br);
+                if (_msGearDown is bool gd) ov.SetGearLever(gd);
+            }
         }
     }
 }

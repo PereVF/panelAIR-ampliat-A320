@@ -408,6 +408,8 @@ namespace panelAIR1000
     internal sealed class OhInsetPanel : OhSilk
     {
         readonly PointF[] _pts; readonly float[] _r; readonly PointF[] _screws; readonly RectangleF _rect;
+        /// <summary>Colors de la cara (null = els de la planxa); p.ex. el cos fosc de l'ISIS.</summary>
+        public Color? FillTop, FillBottom;
         public OhInsetPanel(PointF[] pts, float[] radii, PointF[] screws)
         {
             _pts = pts; _r = radii; _screws = screws;
@@ -452,7 +454,7 @@ namespace panelAIR1000
         public override void Draw(Graphics g)
         {
             using var path = MakePath();
-            using (var fill = new LinearGradientBrush(new RectangleF(_rect.X, _rect.Y - 1, _rect.Width, _rect.Height + 2), Oh.PlateA, Oh.PlateB, 90f))
+            using (var fill = new LinearGradientBrush(new RectangleF(_rect.X, _rect.Y - 1, _rect.Width, _rect.Height + 2), FillTop ?? Oh.PlateA, FillBottom ?? Oh.PlateB, 90f))
                 g.FillPath(fill, path);
             Oh.Grain(g, path);
             // ranura: fil de llum a la paret de baix-dreta i la ranura fosca a sobre
@@ -463,6 +465,79 @@ namespace panelAIR1000
             using (var groove = new Pen(Color.FromArgb(230, 12, 16, 20), 1.3f) { LineJoin = LineJoin.Round }) g.DrawPath(groove, path);
             foreach (var s in _screws)
                 Oh.Dzus(g, s.X, s.Y, 5.6f, 20f + (s.X * 7.3f + s.Y * 3.1f) % 50f);
+        }
+    }
+
+    /// <summary>
+    /// Forat enfonsat a la planxa (polígon amb les cantonades aixamfranades): fons una mica més fosc, ombra interior a
+    /// les parets de dalt i de l'esquerra i fil de llum a la vora de baix i de la dreta (llum de dalt a l'esquerra).
+    /// </summary>
+    internal sealed class OhRecess : OhSilk
+    {
+        readonly PointF[] _pts; readonly RectangleF _rect; readonly float _depth;
+        public OhRecess(PointF[] pts, float depth)
+        {
+            _pts = pts; _depth = depth;
+            _rect = RectangleF.FromLTRB(pts.Min(p => p.X), pts.Min(p => p.Y), pts.Max(p => p.X), pts.Max(p => p.Y));
+            Bounds = RectangleF.Inflate(_rect, 3, 3);
+        }
+        public override void Draw(Graphics g)
+        {
+            using var path = new GraphicsPath(); path.AddPolygon(_pts);
+            using (var fill = new LinearGradientBrush(new RectangleF(_rect.X, _rect.Y - 1, _rect.Width, _rect.Height + 2), Oh.Shade(Oh.PlateA, 0.86f), Oh.Shade(Oh.PlateB, 0.92f), 90f))
+                g.FillPath(fill, path);
+            Oh.Grain(g, path);
+            var st = g.Save();
+            g.SetClip(path, CombineMode.Intersect);
+            // ombra interior: la paret de dalt-esquerra fa ombra cap a dins
+            for (int i = 5; i >= 1; i--)
+            {
+                var s2 = g.Save();
+                g.TranslateTransform(_depth * i / 5f, _depth * i / 5f);
+                using var p = new Pen(Color.FromArgb(28, 0, 0, 0), _depth * 2.2f) { LineJoin = LineJoin.Round };
+                g.DrawPath(p, path);
+                g.Restore(s2);
+            }
+            g.Restore(st);
+            // fil de llum a la paret de baix-dreta (vista des de dins) i vora fosca
+            var s3 = g.Save(); g.TranslateTransform(-0.6f, -0.6f);
+            using (var hi = new Pen(Color.FromArgb(140, Oh.PlateHi), 0.7f) { LineJoin = LineJoin.Round }) g.DrawPath(hi, path);
+            g.Restore(s3);
+            using (var ep = new Pen(Color.FromArgb(200, 14, 18, 22), 1.0f) { LineJoin = LineJoin.Round }) g.DrawPath(ep, path);
+        }
+    }
+
+    /// <summary>Placa metàl·lica clara (matrícula) amb dos cargolets: lleugerament en relleu sobre la planxa.</summary>
+    internal sealed class OhRegPlate : OhSilk
+    {
+        readonly RectangleF _r; readonly float _rad;
+        public string Text = "";
+        public OhRegPlate(RectangleF r, float radius) { _r = r; _rad = radius; Bounds = RectangleF.Inflate(r, 4, 4); }
+        public override void Draw(Graphics g)
+        {
+            using var p = Oh.RoundRect(_r, _rad);
+            Oh.SoftShadow(g, p, 0.5f, 0.9f, 1.2f, 90);
+            using (var b = new LinearGradientBrush(_r, Color.FromArgb(168, 174, 180), Color.FromArgb(128, 134, 140), 80f)) g.FillPath(b, p);
+            using (var hl = new LinearGradientBrush(_r, Color.FromArgb(50, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 90f)) g.FillPath(hl, p);
+            using (var pe = new Pen(Color.FromArgb(150, 60, 66, 72), 0.6f)) g.DrawPath(pe, p);
+            float sr = _r.Height * 0.07f, sy = _r.Y + _r.Height / 2;
+            foreach (float sx in new[] { _r.X + _r.Width * 0.055f, _r.Right - _r.Width * 0.055f })
+                using (var sb = new SolidBrush(Color.FromArgb(70, 70, 66))) g.FillEllipse(sb, sx - sr, sy - sr, sr * 2, sr * 2);
+            if (Text.Length > 0) Oh.Text(g, Text, _r.X + _r.Width / 2, sy, _r.Height * 0.42f, Color.FromArgb(40, 44, 48));
+        }
+    }
+
+    /// <summary>Requadre de línia fina amb les cantonades arrodonides (p.ex. la placa LIMIT SPD) i línies horitzontals opcionals.</summary>
+    internal sealed class OhRoundOutline : OhSilk
+    {
+        readonly RectangleF _r; readonly float _rad; readonly float[] _hLines;
+        public OhRoundOutline(RectangleF r, float radius, params float[] hLines) { _r = r; _rad = radius; _hLines = hLines; Bounds = RectangleF.Inflate(r, 2, 2); }
+        public override void Draw(Graphics g)
+        {
+            using var p = Oh.RoundRect(_r, _rad);
+            using var pe = new Pen(Color.FromArgb(200, Oh.Silk), 0.6f);
+            g.DrawPath(pe, p);
+            foreach (float y in _hLines) g.DrawLine(pe, _r.X + 1.5f, y, _r.Right - 1.5f, y);
         }
     }
 
@@ -1413,7 +1488,10 @@ namespace panelAIR1000
         /// Meitat esquerra = un pas enrere, meitat dreta = un pas endavant.
         /// </summary>
         public float ZoneHalfWidth, ZoneUp, ZoneDown;
+        /// <summary>Tres zones en lloc de dues: − (terç esquerre), PUSH (terç del mig, envia "PUSH") i + (terç dret).</summary>
+        public bool PushZone;
         RectangleF Zone => RectangleF.FromLTRB(_cx - _r * ZoneHalfWidth, _cy - _r * ZoneUp, _cx + _r * ZoneHalfWidth, _cy + _r * ZoneDown);
+        float PushHalf => _r * ZoneHalfWidth / 3f;
         public override bool HitTest(PointF p) => ZoneHalfWidth > 0 ? Zone.Contains(p) : base.HitTest(p);
         public override IEnumerable<RectangleF> HitAreas
         {
@@ -1421,6 +1499,13 @@ namespace panelAIR1000
             {
                 if (ZoneHalfWidth <= 0) { yield return RectangleF.Inflate(Bounds, 3, 3); yield break; }
                 var z = Zone;
+                if (PushZone)
+                {
+                    yield return RectangleF.FromLTRB(z.Left, z.Top, _cx - PushHalf, z.Bottom);            // −
+                    yield return RectangleF.FromLTRB(_cx - PushHalf, z.Top, _cx + PushHalf, z.Bottom);    // PUSH
+                    yield return RectangleF.FromLTRB(_cx + PushHalf, z.Top, z.Right, z.Bottom);           // +
+                    yield break;
+                }
                 yield return RectangleF.FromLTRB(z.Left, z.Top, _cx, z.Bottom);    // −
                 yield return RectangleF.FromLTRB(_cx, z.Top, z.Right, z.Bottom);   // +
             }
@@ -1435,10 +1520,11 @@ namespace panelAIR1000
         /// <summary>Posició amb molla (p.ex. RST del rellotge): en arribar-hi, torna sola a MomentaryReturn al cap d'un moment.</summary>
         public int MomentaryIndex = -1, MomentaryReturn = -1;
         float _momT;
-        public override bool Animating => Math.Abs(_ang - _angles[Index]) > 0.05f || _momT > 0;
+        public override bool Animating => Math.Abs(_ang - _angles[Index]) > 0.05f || _momT > 0 || _pushT > 0;
         public override void Tick(float dt)
         {
             _ang = Approach(_ang, _angles[Index], dt * 600f);
+            if (_pushT > 0) _pushT = Math.Max(0, _pushT - dt);
             if (_momT > 0 && (_momT -= dt) <= 0 && Index == MomentaryIndex && MomentaryReturn >= 0)
             {
                 Index = MomentaryReturn;
@@ -1449,9 +1535,14 @@ namespace panelAIR1000
         // la cua del rotatiu pot sobresortir de la base (fins a Outer radis): cal repintar aquesta zona en girar
         public override RectangleF DirtyBounds => RectangleF.Inflate(Bounds, _r * (Outer - 1f) + 5, _r * (Outer - 1f) + 5);
 
+        /// <summary>Envia "INC" / "DEC" (girar un pas) en lloc de "POS:n" (rotatius sense posicions, p.ex. BARO de l'ISIS).</summary>
+        public bool SendSteps;
+        float _pushT;   // efecte de prémer el pom (zona PUSH): s'empetiteix durant mig segon
         public override void Tap(PointF p)
         {
+            if (PushZone && Math.Abs(p.X - _cx) < PushHalf) { Owner.RaiseCommand(Id, "PUSH"); _pushT = 0.5f; Changed(); return; }
             int dir = p.X < _cx ? -1 : 1;
+            if (SendSteps) Owner.RaiseCommand(Id, dir > 0 ? "INC" : "DEC");
             int ni = Index + dir;
             if (Wrap) ni = (ni + _angles.Length) % _angles.Length;
             else ni = Math.Clamp(ni, 0, _angles.Length - 1);
@@ -1459,7 +1550,7 @@ namespace panelAIR1000
             if (Wrap && Math.Abs(_angles[ni] - _ang) > 180) _ang += _angles[ni] > _ang ? 360 : -360;
             Index = ni;
             if (ni == MomentaryIndex) _momT = 0.5f;   // posició amb molla: hi és mig segon i torna sola
-            Owner.RaiseCommand(Id, "POS:" + ni);   // posició nova cap a l'avió
+            if (!SendSteps) Owner.RaiseCommand(Id, "POS:" + ni);   // posició nova cap a l'avió
             Changed();
         }
         /// <summary>Posició llegida del simulador (sense enviar cap ordre). Retorna true si ha canviat.</summary>
@@ -1770,6 +1861,16 @@ namespace panelAIR1000
         }
 
         public override void Draw(Graphics g)
+        {
+            if (_pushT <= 0) { DrawKnob(g); return; }
+            // premut: més petit (un 12%) al voltant del seu centre
+            var st = g.Save();
+            g.TranslateTransform(_cx, _cy); g.ScaleTransform(0.88f, 0.88f); g.TranslateTransform(-_cx, -_cy);
+            DrawKnob(g);
+            g.Restore(st);
+        }
+
+        void DrawKnob(Graphics g)
         {
             if (Style == KnobStyle.Arrow) { DrawArrow(g); return; }
             var rect = new RectangleF(_cx - _r, _cy - _r, _r * 2, _r * 2);
@@ -2269,6 +2370,8 @@ namespace panelAIR1000
         }
         /// <summary>Estil del panell principal (marc fosc, cara enfonsada, barra de llum centrada).</summary>
         public bool Mip;
+        /// <summary>Text gran (p.ex. tecles del DCDU): ocupa més alçada de la tecla, sempre sense sortir de l'amplada.</summary>
+        public bool BigText;
 
         public override void Draw(Graphics g)
         {
@@ -2294,8 +2397,8 @@ namespace panelAIR1000
                 }
                 if (Label.Length > 0)
                 {
-                    float avail = Led ? mf.Height * 0.5f : mf.Height * 0.62f;
-                    float size = Math.Min(avail, mf.Width / (Label.Length * 0.6f + 0.5f)) * 0.85f;
+                    float avail = Led ? mf.Height * 0.5f : mf.Height * (BigText ? 0.98f : 0.62f);
+                    float size = Math.Min(avail, mf.Width / (Label.Length * 0.6f + (BigText ? 0.15f : 0.4f))) * (BigText ? 1.0f : 0.85f);
                     Oh.Text(g, Label, mf.X + mf.Width / 2, ty, size, Color.FromArgb(240, 242, 244));
                 }
                 return;
@@ -3326,47 +3429,135 @@ namespace panelAIR1000
         }
     }
 
-    /// <summary>Palanca del tren d'aterratge: ranura vertical i pom en forma de roda; puja i baixa animada.</summary>
+    /// <summary>
+    /// Palanca del tren d'aterratge (com a la captura del Fenix): ranura fosca ampla, pom negre de cilindre amb un
+    /// reflex gris a dalt, i la part de la palanca que queda a la vista negra i estriada; puja i baixa animada.
+    /// </summary>
     internal sealed class OhGearLever : OhElement
     {
-        readonly float _cx, _top, _bottom;
+        readonly float _cx, _top, _bottom, _hw, _kh;
         public bool Down = true;
         float _pos = 1f;   // 0 = amunt, 1 = avall
-        public OhGearLever(string id, float cx, float top, float bottom)
+        /// <param name="top">dalt de la ranura</param><param name="bottom">baix de la ranura</param>
+        /// <param name="halfWidth">mig ample de la ranura</param><param name="knobH">alçada del pom</param>
+        /// Avall, el pom queda just a sota de la ranura (fora); amunt, just a sobre.
+        public OhGearLever(string id, float cx, float top, float bottom, float halfWidth, float knobH)
         {
-            Id = id; _cx = cx; _top = top; _bottom = bottom;
-            Bounds = new RectangleF(cx - 14, top - 6, 28, bottom - top + 12);
+            Id = id; _cx = cx; _top = top; _bottom = bottom; _hw = halfWidth; _kh = knobH;
+            Bounds = new RectangleF(cx - halfWidth - 4, top - knobH - 4, halfWidth * 2 + 8, bottom - top + knobH * 2 + 8);
         }
         public override int State => Down ? 1 : 0;
         public override bool Animating => Math.Abs(_pos - (Down ? 1 : 0)) > 0.001f;
         public override void Tick(float dt) => _pos = Approach(_pos, Down ? 1 : 0, dt * 2.5f);
-        public override void Tap(PointF p) { Down = !Down; Changed(); }
+        public override void Tap(PointF p) { Down = !Down; Owner.RaiseCommand(Id, Down ? "DOWN" : "UP"); Changed(); }
+
+        /// <summary>Cilindre negre vertical (gradient horitzontal) amb un reflex gris a dalt.</summary>
+        static void Cylinder(Graphics g, RectangleF r, float kh)
+        {
+            using (var kb = new LinearGradientBrush(new RectangleF(r.X - 0.01f, 0, r.Width + 0.02f, 1), Color.Black, Color.Black, 0f)
+            {
+                InterpolationColors = new ColorBlend
+                {
+                    Colors = new[] { Color.FromArgb(5, 5, 6), Color.FromArgb(44, 46, 50), Color.FromArgb(64, 66, 70), Color.FromArgb(20, 21, 23), Color.FromArgb(4, 4, 5) },
+                    Positions = new[] { 0f, 0.3f, 0.42f, 0.72f, 1f }
+                }
+            }) g.FillRectangle(kb, r);
+            var hl = new RectangleF(r.X + r.Width * 0.28f, r.Y + kh * 0.07f, r.Width * 0.24f, kh * 0.32f);
+            using (var hp = Oh.RoundRect(hl, r.Width * 0.12f))
+            using (var hb = new LinearGradientBrush(hl, Color.FromArgb(160, 205, 208, 212), Color.FromArgb(0, 205, 208, 212), 90f)) g.FillPath(hb, hp);
+        }
+
         public override void Draw(Graphics g)
         {
-            // ranura
-            var slot = new RectangleF(_cx - 3.5f, _top, 7f, _bottom - _top);
-            using (var sp = Oh.RoundRect(slot, 3.5f))
-            using (var sb = new LinearGradientBrush(slot, Color.FromArgb(8, 8, 10), Color.FromArgb(40, 44, 48), 0f)) g.FillPath(sb, sp);
-            // braç i pom (roda blanca vista de cantell)
-            float hy = _top + 8 + (_bottom - _top - 16) * _pos;
-            var arm = new RectangleF(_cx - 2.2f, Math.Min(hy, _top + (_bottom - _top) / 2), 4.4f, Math.Abs(hy - (_top + (_bottom - _top) / 2)));
-            using (var ab = new LinearGradientBrush(new RectangleF(_cx - 2.5f, _top, 5f, _bottom - _top), Color.FromArgb(60, 62, 66), Color.FromArgb(150, 154, 160), 0f)) g.FillRectangle(ab, arm);
-            var wheel = new RectangleF(_cx - 9f, hy - 6.5f, 18f, 13f);
-            using (var wp = Oh.RoundRect(wheel, 6f))
+            float h = _bottom - _top, hw = _hw;
+            // ranura: vores amb escombretes estriades i, pel mig, l'obertura totalment negra
+            var slot = new RectangleF(_cx - hw, _top, hw * 2, h);
+            using (var sp = Oh.RoundRect(slot, hw * 0.6f))
             {
-                Oh.SoftShadow(g, wp, 1.6f, 2.4f, 2.6f, 140);
-                using (var wb = new LinearGradientBrush(wheel, Color.FromArgb(246, 246, 242), Color.FromArgb(150, 150, 146), 0f)
+                using (var sb = new LinearGradientBrush(new RectangleF(slot.X - 0.01f, 0, slot.Width + 0.02f, 1), Color.Black, Color.Black, 0f)
+                { InterpolationColors = new ColorBlend { Colors = new[] { Color.FromArgb(8, 9, 10), Color.FromArgb(34, 36, 40), Color.FromArgb(8, 9, 10), Color.FromArgb(34, 36, 40), Color.FromArgb(10, 11, 12) }, Positions = new[] { 0f, 0.3f, 0.5f, 0.72f, 1f } } })
+                    g.FillPath(sb, sp);
+                var st = g.Save();
+                g.SetClip(sp, CombineMode.Intersect);
+                using (var rp = new Pen(Color.FromArgb(80, 74, 78, 84), 0.35f))
+                    for (float x = slot.X + 0.8f; x < slot.Right - 0.4f; x += 1.05f) g.DrawLine(rp, x, slot.Y, x, slot.Bottom);
+                g.Restore(st);
+                var gap = new RectangleF(_cx - hw * 0.26f, _top + hw * 0.25f, hw * 0.52f, h - hw * 0.5f);
+                using (var gp = Oh.RoundRect(gap, hw * 0.26f)) using (var gb = new SolidBrush(Color.Black)) g.FillPath(gb, gp);
+                using (var lip = new Pen(Color.FromArgb(120, Oh.PlateHi), 0.5f)) { var st0 = g.Save(); g.TranslateTransform(0.4f, 0.4f); g.DrawPath(lip, sp); g.Restore(st0); }
+                using (var ep = new Pen(Color.FromArgb(220, 8, 10, 12), 0.8f)) g.DrawPath(ep, sp);
+            }
+            // pom: fora de la ranura (avall: just a sota; amunt: just a sobre), partit en dos cilindres
+            float kh = _kh, ky = (_top - kh) + (h + kh) * _pos;
+            var knob = new RectangleF(_cx - hw, ky, hw * 2, kh);
+            // barra del pom cap a l'eix de dins del panell: surt del pom, passa per sobre de la ranura seguint l'obertura
+            // negra i s'hi enfonsa en rampa (més ampla i clara a prop del pom, més estreta i fosca fins que es perd en el
+            // negre cap a la meitat de la ranura)
+            // La barra sempre apunta cap a l'eix (darrere del mig de la ranura): mentre el pom s'hi acosta, el tros visible
+            // s'escurça fins a desaparèixer quan el pom hi passa per davant, i després creix cap a l'altre costat
+            float pivotY = _top + h / 2f;
+            bool down = knob.Y > pivotY, up = knob.Bottom < pivotY;
+            if (down || up)
+            {
+                float edge = down ? knob.Y : knob.Bottom, dir = down ? -1 : 1;
+                float y0 = edge - dir * kh * 0.25f;   // (comença amagada sota el pom)
+                float y1 = pivotY;
+                float f = Math.Clamp(Math.Abs(edge - pivotY) / (h * 0.5f), 0f, 1f);   // 1 a les posicions fixes, 0 a l'eix
+                float w0 = hw * (0.3f + 0.32f * f), w1 = hw * 0.3f;
+                var bar = new[] { new PointF(_cx - w0, y0), new PointF(_cx + w0, y0), new PointF(_cx + w1, y1), new PointF(_cx - w1, y1) };
+                using var bp = new GraphicsPath(); bp.AddPolygon(bar);
+                // ombra sobre les escombretes: separada a prop del pom, s'ajunta amb la barra a dins
+                var shadow = new[] { new PointF(_cx - w0 + hw * 0.35f, y0), new PointF(_cx + w0 + hw * 0.35f, y0), new PointF(_cx + w1, y1), new PointF(_cx - w1, y1) };
+                using (var sb = new SolidBrush(Color.FromArgb(110, 0, 0, 0))) g.FillPolygon(sb, shadow);
+                // metall: cilindre (gradient de través)
+                using (var mb = new LinearGradientBrush(new RectangleF(_cx - w0 - 0.01f, 0, w0 * 2 + 0.02f, 1), Color.Black, Color.Black, 0f)
                 {
                     InterpolationColors = new ColorBlend
                     {
-                        Colors = new[] { Color.FromArgb(150, 150, 146), Color.FromArgb(250, 250, 246), Color.FromArgb(214, 214, 208), Color.FromArgb(120, 120, 116) },
-                        Positions = new[] { 0f, 0.35f, 0.65f, 1f }
+                        Colors = new[] { Color.FromArgb(40, 42, 46), Color.FromArgb(150, 154, 160), Color.FromArgb(196, 200, 206), Color.FromArgb(96, 100, 106), Color.FromArgb(30, 32, 36) },
+                        Positions = new[] { 0f, 0.3f, 0.42f, 0.7f, 1f }
                     }
-                }) g.FillPath(wb, wp);
-                using var pe = new Pen(Color.FromArgb(70, 70, 68), 0.6f); g.DrawPath(pe, wp);
+                }) g.FillPath(mb, bp);
+                // rampa: s'enfosqueix fins al negre a mesura que s'endinsa
+                using (var fb = new LinearGradientBrush(new PointF(0, y0), new PointF(0, y1 + dir * 0.01f), Color.FromArgb(0, 0, 0, 0), Color.FromArgb(255, 0, 0, 0))
+                { InterpolationColors = new ColorBlend { Colors = new[] { Color.FromArgb(0, 0, 0, 0), Color.FromArgb(70, 0, 0, 0), Color.FromArgb(255, 0, 0, 0) }, Positions = new[] { 0f, 0.45f, 1f } } })
+                    g.FillPath(fb, bp);
             }
-            using (var gp = new Pen(Color.FromArgb(110, 90, 90, 88), 0.5f))
-                for (int i = -2; i <= 2; i++) g.DrawLine(gp, _cx + i * 3f, wheel.Y + 1.5f, _cx + i * 3f, wheel.Bottom - 1.5f);
+            using var kp = Oh.RoundRect(knob, hw * 0.55f);
+            Oh.SoftShadow(g, kp, 0.6f, 1.4f, 1.8f, 150);
+            var st2 = g.Save();
+            g.SetClip(kp, CombineMode.Intersect);
+            Cylinder(g, new RectangleF(knob.X, knob.Y, knob.Width / 2, kh), kh);
+            Cylinder(g, new RectangleF(knob.X + knob.Width / 2, knob.Y, knob.Width / 2, kh), kh);
+            using (var sp2 = new Pen(Color.FromArgb(230, 0, 0, 0), Math.Max(0.4f, hw * 0.06f))) g.DrawLine(sp2, _cx, knob.Y, _cx, knob.Bottom);
+            g.Restore(st2);
+            using (var pe = new Pen(Color.FromArgb(200, 4, 4, 5), 0.5f)) g.DrawPath(pe, kp);
+        }
+    }
+
+    /// <summary>Fletxa buida (només el contorn), amunt o avall; opcionalment amb una ratlla dins la tija.</summary>
+    internal sealed class OhHollowArrow : OhSilk
+    {
+        readonly float _cx, _y0, _y1, _hw, _sw, _head; readonly bool _up, _inner;
+        /// <param name="y0">extrem de la punta</param><param name="y1">extrem de la cua</param>
+        public OhHollowArrow(float cx, float y0, float y1, float halfWidth, float shaftHalf, float head, bool up, bool innerLine)
+        {
+            _cx = cx; _y0 = y0; _y1 = y1; _hw = halfWidth; _sw = shaftHalf; _head = head; _up = up; _inner = innerLine;
+            Bounds = RectangleF.FromLTRB(cx - halfWidth - 2, Math.Min(y0, y1) - 2, cx + halfWidth + 2, Math.Max(y0, y1) + 2);
+        }
+        public override void Draw(Graphics g)
+        {
+            float d = _up ? 1 : -1, hb = _y0 + d * _head;   // base de la punta
+            var pts = new[]
+            {
+                new PointF(_cx, _y0), new PointF(_cx + _hw, hb), new PointF(_cx + _sw, hb), new PointF(_cx + _sw, _y1),
+                new PointF(_cx - _sw, _y1), new PointF(_cx - _sw, hb), new PointF(_cx - _hw, hb)
+            };
+            using var p = new Pen(Oh.Silk, 1.0f) { LineJoin = LineJoin.Miter };
+            g.DrawPolygon(p, pts);
+            if (_inner)
+                using (var ip = new Pen(Oh.Silk, Math.Max(0.6f, _sw * 0.5f)))
+                    g.DrawLine(ip, _cx, (_y1 + hb) / 2f, _cx, hb + d * 1.5f);
         }
     }
 
@@ -3387,63 +3578,80 @@ namespace panelAIR1000
             _a = Approach(_a, Accu, dt * 3f); _l = Approach(_l, Left, dt * 3f); _rr = Approach(_rr, Right, dt * 3f);
         }
         // tocar-lo simula el fre d'estacionament (0 ↔ 2000 PSI); amb SimConnect s'hi enviaran els valors reals
-        public override void Tap(PointF p) { float v = Left > 1 ? 0f : 2f; Left = v; Right = v; Changed(); }
+        public override void Tap(PointF p) { if (Owner.SimDriven) return; float v = Left > 1 ? 0f : 2f; Left = v; Right = v; Changed(); }
 
-        // angles des de dalt, en sentit horari: ACCU a dalt (-60..60), L a baix-esquerra, R a baix-dreta
-        static float AccuAng(float v) => -60f + v / 4f * 120f;
-        static float LAng(float v) => 250f - v / 4f * 60f;
-        static float RAng(float v) => 110f + v / 4f * 60f;
+        // Com a la captura del Fenix: tres eixos amb la seva agulla.
+        //  - ACCU PRESS: eix a dalt, l'agulla mira avall; escala 0 (avall-esquerra) … 4 (avall-dreta).
+        //  - BRAKES L / R: eixos a baix a l'esquerra i a la dreta; escala 3 (amunt) – 1 – 0 (cap al mig de baix).
+        // Angles des de dalt, en sentit horari.
+        static float AccuAng(float v) => 180f + 56f - Math.Clamp(v, 0, 4) / 4f * 112f;   // 0 → 236°, 4 → 124°
+        static float LAng(float v)
+        {
+            v = Math.Clamp(v, 0, 3);
+            return v >= 1 ? 47f + (1f - v) / 2f * 64f : 102f - v * 55f;   // 3 → -17°, 1 → 47°, 0 → 102°
+        }
+        static float RAng(float v) => -LAng(v);
 
         public override void Draw(Graphics g)
         {
             var o = new RectangleF(_cx - _r, _cy - _r, _r * 2, _r * 2);
             Oh.SoftShadowEllipse(g, o, 1.6f, 2.4f, 3f, 140);
             using (var bb = new LinearGradientBrush(o, Color.FromArgb(196, 204, 212), Color.FromArgb(70, 78, 86), 50f)) g.FillEllipse(bb, o);
-            var face = RectangleF.Inflate(o, -_r * 0.12f, -_r * 0.12f);
+            var face = RectangleF.Inflate(o, -_r * 0.09f, -_r * 0.09f);
             using (var fb = new SolidBrush(Color.FromArgb(10, 11, 12))) g.FillEllipse(fb, face);
             float fr = face.Width / 2f;
-            void Arc(float a0, float a1, Color c, float rad, float w)
-            {
-                using var p = new Pen(c, w);
-                g.DrawArc(p, _cx - rad, _cy - rad, rad * 2, rad * 2, Math.Min(a0, a1) - 90, Math.Abs(a1 - a0));
-            }
-            void Ticks(Func<float, float> ang, string[] labels)
-            {
-                using var tp = new Pen(Color.FromArgb(235, 235, 230), 0.8f);
-                for (int i = 0; i <= 4; i++)
-                {
-                    double a = (ang(i) - 90) * Math.PI / 180.0;
-                    float c = (float)Math.Cos(a), s = (float)Math.Sin(a);
-                    g.DrawLine(tp, _cx + c * fr * 0.80f, _cy + s * fr * 0.80f, _cx + c * fr * 0.93f, _cy + s * fr * 0.93f);
-                    if (labels[i].Length > 0) Oh.Text(g, labels[i], _cx + c * fr * 0.66f, _cy + s * fr * 0.66f, fr * 0.16f, Color.FromArgb(235, 235, 230));
-                }
-            }
-            // zones de color (verd = normal, groc = baixa pressió)
-            Arc(AccuAng(0), AccuAng(1), Color.FromArgb(230, 190, 40), fr * 0.86f, 1.6f);
-            Arc(AccuAng(2.5f), AccuAng(3.5f), Color.FromArgb(70, 200, 90), fr * 0.86f, 1.6f);
-            Arc(LAng(0), LAng(1), Color.FromArgb(230, 190, 40), fr * 0.86f, 1.6f);
-            Arc(RAng(0), RAng(1), Color.FromArgb(230, 190, 40), fr * 0.86f, 1.6f);
-            Ticks(AccuAng, new[] { "0", "1", "2", "3", "4" });
-            Ticks(LAng, new[] { "0", "", "", "", "3" });
-            Ticks(RAng, new[] { "0", "", "", "", "3" });
             var tc = Color.FromArgb(235, 235, 230);
-            Oh.Text(g, "ACCU", _cx - fr * 0.30f, _cy - fr * 0.30f, fr * 0.15f, tc);
-            Oh.Text(g, "PRESS", _cx + fr * 0.34f, _cy - fr * 0.18f, fr * 0.13f, tc);
-            Oh.Text(g, "BRAKES", _cx, _cy + fr * 0.70f, fr * 0.14f, tc);
-            // agulles
-            void Needle(float angDeg, float len)
+            var teal = Color.FromArgb(40, 175, 165);
+            var hubA = new PointF(_cx, _cy - fr * 0.64f);
+            var hubL = new PointF(_cx - fr * 0.6f, _cy + fr * 0.375f);
+            var hubR = new PointF(_cx + fr * 0.6f, _cy + fr * 0.375f);
+            PointF At(PointF c, float angDeg, float rad)
+            {
+                double a = (angDeg - 90) * Math.PI / 180.0;
+                return new PointF(c.X + (float)Math.Cos(a) * rad, c.Y + (float)Math.Sin(a) * rad);
+            }
+            // escala: arc, marques (llargues als valors amb número), números i franja turquesa
+            void Scale(PointF c, Func<float, float> ang, float vMax, float rad, (float v, string t)[] labels, float t0, float t1)
+            {
+                using (var bp = new Pen(teal, fr * 0.07f))
+                {
+                    float a0 = ang(t0), a1 = ang(t1);
+                    g.DrawArc(bp, c.X - rad * 0.9f, c.Y - rad * 0.9f, rad * 1.8f, rad * 1.8f, Math.Min(a0, a1) - 90, Math.Abs(a1 - a0));
+                }
+                using var p = new Pen(tc, Math.Max(0.5f, fr * 0.025f));
+                float s0 = ang(0), s1 = ang(vMax);
+                g.DrawArc(p, c.X - rad, c.Y - rad, rad * 2, rad * 2, Math.Min(s0, s1) - 90, Math.Abs(s1 - s0));
+                for (float v = 0; v <= vMax + 0.01f; v += 0.5f)
+                {
+                    bool major = Math.Abs(v - Math.Round(v)) < 0.01f;
+                    g.DrawLine(p, At(c, ang(v), rad), At(c, ang(v), rad + fr * (major ? 0.1f : 0.06f)));
+                }
+                foreach (var (v, t) in labels) { var q = At(c, ang(v), rad + fr * 0.2f); Oh.Text(g, t, q.X, q.Y, fr * 0.15f, tc); }
+            }
+            Scale(hubA, AccuAng, 4, fr * 0.32f, new[] { (0f, "0"), (4f, "4") }, 2.6f, 3.4f);
+            Scale(hubL, LAng, 3, fr * 0.42f, new[] { (0f, "0"), (1f, "1"), (3f, "3") }, 0.05f, 0.9f);
+            Scale(hubR, RAng, 3, fr * 0.42f, new[] { (1f, "1"), (3f, "3") }, 0.05f, 0.9f);
+            Oh.Text(g, "ACCU", _cx - fr * 0.5f, _cy - fr * 0.68f, fr * 0.15f, tc);
+            Oh.Text(g, "PRESS", _cx + fr * 0.52f, _cy - fr * 0.68f, fr * 0.15f, tc);
+            Oh.Text(g, "BRAKES", _cx, _cy + fr * 0.72f, fr * 0.14f, tc);
+            Oh.Text(g, "PSIx1000", _cx, _cy + fr * 0.86f, fr * 0.1f, Color.FromArgb(70, 130, 215));
+            // agulles blanques amb l'eix negre gran (com a la captura)
+            void Needle(PointF c, float angDeg, float len)
             {
                 var st = g.Save();
-                g.TranslateTransform(_cx, _cy); g.RotateTransform(angDeg);
-                var pts = new[] { new PointF(-fr * 0.035f, 0), new PointF(fr * 0.035f, 0), new PointF(fr * 0.012f, -len), new PointF(-fr * 0.012f, -len) };
+                g.TranslateTransform(c.X, c.Y); g.RotateTransform(angDeg);
+                var pts = new[] { new PointF(-fr * 0.05f, 0), new PointF(fr * 0.05f, 0), new PointF(fr * 0.018f, -len), new PointF(-fr * 0.018f, -len) };
                 using (var sb = new SolidBrush(Color.FromArgb(120, 0, 0, 0))) { var stt = g.Save(); g.TranslateTransform(0.6f, 0.9f); g.FillPolygon(sb, pts); g.Restore(stt); }
                 using (var nb = new SolidBrush(Color.FromArgb(250, 250, 246))) g.FillPolygon(nb, pts);
                 g.Restore(st);
+                float hr = fr * 0.16f;
+                var hub = new RectangleF(c.X - hr, c.Y - hr, hr * 2, hr * 2);
+                Oh.SoftShadowEllipse(g, hub, 0.5f, 0.8f, 1f, 120);
+                using (var hb = new LinearGradientBrush(hub, Color.FromArgb(58, 60, 64), Color.FromArgb(6, 6, 7), 60f)) g.FillEllipse(hb, hub);
             }
-            Needle(AccuAng(_a), fr * 0.82f);
-            Needle(LAng(_l), fr * 0.82f);
-            Needle(RAng(_rr), fr * 0.82f);
-            using (var hb = new SolidBrush(Color.FromArgb(60, 62, 66))) g.FillEllipse(hb, _cx - fr * 0.1f, _cy - fr * 0.1f, fr * 0.2f, fr * 0.2f);
+            Needle(hubA, AccuAng(_a), fr * 0.34f);
+            Needle(hubL, LAng(_l), fr * 0.44f);
+            Needle(hubR, RAng(_rr), fr * 0.44f);
             using (var vg = new LinearGradientBrush(face, Color.FromArgb(26, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 60f))
                 g.FillPie(vg, face.X, face.Y, face.Width, face.Height, 180, 120);
         }
@@ -3648,6 +3856,23 @@ namespace panelAIR1000
                 Redraw(d.DirtyBounds);
                 if (d.Animating) { _animating.Add(d); StartAnim(); }
             }
+        }
+
+        /// <summary>Indicador de pressió de frens llegit del simulador (milers de PSI: acumulador, fre esquerre, fre dret).</summary>
+        public void SetBrakeGauge(float accu, float left, float right)
+        {
+            if (!_byId.TryGetValue("MIP_BRAKE_GAUGE", out var e) || e is not OhBrakeGauge bg) return;
+            if (Math.Abs(bg.Accu - accu) < 0.01f && Math.Abs(bg.Left - left) < 0.01f && Math.Abs(bg.Right - right) < 0.01f) return;
+            bg.Accu = accu; bg.Left = left; bg.Right = right;
+            if (bg.Animating) { _animating.Add(bg); StartAnim(); }
+        }
+
+        /// <summary>Palanca del tren llegida del simulador (true = avall).</summary>
+        public void SetGearLever(bool down)
+        {
+            if (!_byId.TryGetValue("MIP_GEAR_LEVER", out var e) || e is not OhGearLever gl || gl.Down == down) return;
+            gl.Down = down;
+            if (gl.Animating) { _animating.Add(gl); StartAnim(); }
         }
 
         /// <summary>Pantalla del FCU llegida del simulador.</summary>
@@ -4290,6 +4515,8 @@ namespace panelAIR1000
         Rectangle AreasRect => new(AreasLocation ?? DefaultAreasPos, new Size(ZoomBtnSize, ZoomBtnSize));
         /// <summary>Posició del botó "mostrar àrees clicables" (null = cantonada de dalt a l'esquerra).</summary>
         public Point? AreasLocation { get; set; }
+        /// <summary>Rectangle del botó "mostrar àrees" (coordenades del control), per posar-hi el ⚙ de l'app a sota.</summary>
+        public Rectangle AreasButtonBounds => AreasRect;
         /// <summary>Si es ressalten les zones clicables (compartit pel panell principal i l'overhead).</summary>
         static bool s_showAreas;
         /// <summary>Color del botó "mostrar àrees": taronja, dibuixat molt subtil (poca opacitat) (a joc amb el panell A320).</summary>
@@ -5545,29 +5772,89 @@ namespace panelAIR1000
             // TERR ON ND (capità)
             // DCDU, tapa cega, TERR ON ND i ISIS pujats en bloc: la vora de baix del DCDU alineada amb la de l'ECAM inferior
             const float Up = 40f;
-            Panel(890 * k, (655 - Up) * k, (1016 - 890) * k, (792 - 655) * k);
-            Lb("TERR ON ND", 945, 667 - Up);
-            Pb("MIP_TERR_ON_ND_1", 942, 698 - Up, 40, 40, "••", "ON");
+            // Columna entre l'ND i l'ECAM, copiada de la captura del Fenix: matrícula, placa LIMIT SPD, ISIS empotrat amb
+            // el forat de la pantalla (pop-out), TERR ON ND i el forat enfonsat; a sota, el DCDU
+            void Lp(string t, float x, float y, float size, Color? c = null) =>
+                _silk.Add(new OhLabel(t, x * k, y * k, size, c ?? Oh.Silk, false, allowBelowMin: true));   // lletra petita de placa
 
-            // ISIS (pantalla negra amb botons)
-            _silk.Add(new OhScreen(R(1030, 520 - Up, 1222, 714 - Up), R(1058, 548 - Up, 1196, 688 - Up), 12f, false));
-            Key("MIP_ISIS_BUGS", 1078 * k, (526 - Up) * k, 34 * k, 16 * k, "BUGS");
-            Key("MIP_ISIS_LS", 1144 * k, (526 - Up) * k, 30 * k, 16 * k, "LS");
-            Key("MIP_ISIS_PLUS", 1037 * k, (578 - Up) * k, 12 * k, 24 * k, "+");
-            Key("MIP_ISIS_MINUS", 1037 * k, (640 - Up) * k, 12 * k, 24 * k, "-");
-            Key("MIP_ISIS_ATT", 1052 * k, (694 - Up) * k, 30 * k, 15 * k, "ATT");
-            Key("MIP_ISIS_RST", 1088 * k, (694 - Up) * k, 30 * k, 15 * k, "RST");
-            Knob("MIP_ISIS_BARO", 1193 * k, (686 - Up) * k, 10f, 0, Enumerable.Range(0, 12).Select(i => i * 30f).ToArray(), KnobStyle.Round).Wrap = true;
-            // panell buit sota l'ISIS
-            _silk.Add(new OhPanel(new[] { Pt(1036, 730 - Up), Pt(1228, 730 - Up), Pt(1228, 970 - Up), Pt(1036, 970 - Up) },
-                                  new[] { Pt(1048, 744 - Up), Pt(1216, 744 - Up), Pt(1048, 956 - Up), Pt(1216, 956 - Up) }));
+            // placa de la matrícula (el text s'hi posarà més endavant)
+            // (ISIS un 10% més alt cap amunt: la placa LIMIT SPD puja 18; la matrícula puja una mica i és una mica més baixa)
+            _silk.Add(new OhRegPlate(R(932, 348, 1192, 393), 8 * k));
+
+            // placa LIMIT SPD (línia fina, text petit com al real)
+            const float Lu = 18;
+            _silk.Add(new OhRoundOutline(R(1085, 418 - Lu, 1189, 532 - Lu), 4 * k, (474 - Lu) * k));
+            const float ps = 5.3f;
+            Lp("LIMIT", 1102, 427 - Lu, ps); Lp("SPD(IAS)", 1159, 427 - Lu, ps);
+            Lp("VLE", 1100, 442 - Lu, ps); Lp("280KT/M67", 1160, 442 - Lu, ps);
+            Lp("VLO", 1100, 454 - Lu, ps); Lp("EXT 250KT", 1160, 454 - Lu, ps);
+            Lp("RET 220KT", 1167, 467 - Lu, ps);
+            Lp("VFE", 1100, 488 - Lu, ps);
+            Lp("1", 1132, 481 - Lu, ps); Lp("230KT", 1171, 481 - Lu, ps);
+            Lp("1+F", 1132, 492 - Lu, ps); Lp("215KT", 1171, 492 - Lu, ps);
+            Lp("2", 1132, 501 - Lu, ps); Lp("200KT", 1171, 501 - Lu, ps);
+            Lp("3", 1132, 511 - Lu, ps); Lp("185KT", 1171, 511 - Lu, ps);
+            Lp("FULL", 1124, 522 - Lu, ps); Lp("177KT", 1171, 522 - Lu, ps);
+
+            // ISIS: cos empotrat amb les cantonades aixamfranades (un 10% més alt, cap amunt); al mig, el forat per al
+            // seu pop-out
+            {
+                const float l = 1040, r = 1233, t = 526, b = 722, c = 14;
+                var pts = new[] { Pt(l + c, t), Pt(r - c, t), Pt(r, t + c), Pt(r, b - c), Pt(r - c, b), Pt(l + c, b), Pt(l, b - c), Pt(l, t + c) };
+                // (del mateix color que la planxa: empotrat, no negre)
+                _silk.Add(new OhInsetPanel(pts, new float[pts.Length].Select(_ => 2f * k).ToArray(), Array.Empty<PointF>()));
+            }
+            // forat: el mateix marge (5) entre BUGS/LS i el forat que entre el forat i ATT/RST
+            _silk.Add(new OhDarkWindow(R(1066, 548, 1214, 701)));
+            _silk.Add(new OhDarkWindow(R(1223, 569, 1229, 577)));   // sensor de llum
+            var gIsis = R(1068, 550, 1212, 699);
+            _screenGlass.Add(gIsis);   // forat (vidre 4): s'hi encaixa la finestra pop-out de l'ISIS
+            Key("MIP_ISIS_BUGS", 1088 * k, 533 * k, 38 * k, 12 * k, "BUGS").BigText = true;
+            Key("MIP_ISIS_LS", 1154 * k, 533 * k, 38 * k, 12 * k, "LS").BigText = true;
+            Key("MIP_ISIS_PLUS", 1047 * k, 570 * k, 13 * k, 33 * k, "+").BigText = true;
+            Key("MIP_ISIS_MINUS", 1047 * k, 634 * k, 13 * k, 33 * k, "-").BigText = true;
+            Key("MIP_ISIS_RST", 1088 * k, 704 * k, 35 * k, 12 * k, "RST").BigText = true;
+            Lp("ATT", 1072, 710, 6f);
+            Lp("BARO", 1168, 716, 5.5f);   // a l'esquerra del pom, que no el tapi
+            {
+                // pom el doble de gran, sencer per sota del forat (sobresurt del cos de l'ISIS i tapa una mica la part de
+                // dalt del forat enfonsat); tres àrees clicables tan amples com el diàmetre del pom: −, PUSH i +
+                var baro = Knob("MIP_ISIS_BARO", 1210 * k, 723 * k, 13f, 0, Enumerable.Range(0, 12).Select(i => i * 30f).ToArray(), KnobStyle.Round);
+                baro.Wrap = true;
+                baro.ZoneHalfWidth = 3f; baro.ZoneUp = 1.1f; baro.ZoneDown = 1.1f;
+                baro.PushZone = true;
+                baro.SendSteps = true;   // gir: INC / DEC
+            }
+
+            // TERR ON ND (capità): panell empotrat amb 2 cargols en diagonal; les cantonades de dalt a la dreta i de baix a
+            // l'esquerra fan el graó del panell dels frens (dos girs de 90° amb radi petit)
+            {
+                var pts = new[]
+                {
+                    Pt(912, 677), Pt(1010, 677), Pt(1010, 697), Pt(1024, 697),   // graó de dalt a la dreta
+                    Pt(1024, 816), Pt(926, 816), Pt(926, 796), Pt(912, 796)      // graó de baix a l'esquerra
+                };
+                var radii = new[] { 6f, 5f, 3.5f, 3.5f, 6f, 5f, 3.5f, 3.5f }.Select(x => x * k).ToArray();
+                _silk.Add(new OhInsetPanel(pts, radii, new[] { Pt(927, 706), Pt(1009, 800) }));
+            }
+            Lb("TERR ON ND", 958, 688, 7.2f);
+            Lp("403VU", 1004, 706, 4.5f, Color.FromArgb(70, 130, 215));
+            Pb("MIP_TERR_ON_ND_1", 962, 724, 36, 36, "••", "ON");
+
+            // forat enfonsat sota l'ISIS, amb les cantonades aixamfranades; s'allarga per baix fins a prop del DCDU (sense tocar-lo)
+            {
+                const float l = 1038, r = 1226, t = 729, b = 944, c = 22;
+                _silk.Add(new OhRecess(new[] { Pt(l + c, t), Pt(r - c, t), Pt(r, t + c), Pt(r, b - c), Pt(r - c, b), Pt(l + c, b), Pt(l, b - c), Pt(l, t + c) }, 2.2f * k));
+            }
 
             // DCDU (pantalla negra amb tecles laterals)
-            _silk.Add(new OhScreen(R(880, 996 - Up, 1206, 1176 - Up), R(930, 1016 - Up, 1156, 1152 - Up), 6f, true));
+            // (21 unitats més a la dreta: centrat entre la vora de la planxa i el marc de l'ECAM; text de les tecles més gran)
+            const float Dx = 21;
+            _silk.Add(new OhScreen(R(880 + Dx, 996 - Up, 1206 + Dx, 1176 - Up), R(930 + Dx, 1016 - Up, 1156 + Dx, 1152 - Up), 6f, true));
             string[] dl = { "BRT", "DIM", "MSG-", "MSG+", "", "" };
             string[] dr = { "PRINT", "PGE-", "PGE+", "", "" };
-            for (int i = 0; i < dl.Length; i++) Key("MIP_DCDU_L" + i, 890 * k, (1016 - Up + i * 22) * k, 28 * k, 15 * k, dl[i]).Momentary = true;
-            for (int i = 0; i < dr.Length; i++) Key("MIP_DCDU_R" + i, 1166 * k, (1032 - Up + i * 22) * k, 30 * k, 15 * k, dr[i]).Momentary = true;
+            for (int i = 0; i < dl.Length; i++) { var dk = Key("MIP_DCDU_L" + i, (890 + Dx) * k, (1016 - Up + i * 22) * k, 28 * k, 15 * k, dl[i]); dk.Momentary = true; dk.BigText = true; }
+            for (int i = 0; i < dr.Length; i++) { var dk = Key("MIP_DCDU_R" + i, (1166 + Dx) * k, (1032 - Up + i * 22) * k, 30 * k, 15 * k, dr[i]); dk.Momentary = true; dk.BigText = true; }
 
             // LDG GEAR / BRK FAN / AUTO BRK / A-SKID / TERR ON ND: un sol panell empotrat (maqueta "Panells LDG GEAR i
             // rellotge"), amb 3 cargols; quatre cantonades amb graó (dos girs de 90° amb radi petit), una de 90° amb radi
@@ -5665,18 +5952,29 @@ namespace panelAIR1000
             // zones de toc grans: el doble d'altes i el triple d'amples que la primera versió (1,3 x 1,5 radis)
             foreach (var kn in new[] { gps, run }) { kn.ZoneHalfWidth = 3.9f; kn.ZoneUp = 3f; kn.ZoneDown = 3f; }
 
-            // palanca del tren
-            Panel(1720 * k, 740 * k, (1836 - 1720) * k, (958 - 740) * k);
-            Lb("UP", 1803, 766); Lb("DOWN", 1803, 946);
-            _silk.Add(new OhArrow(1803 * k, 790 * k, 270, 5f, Oh.Silk));
-            WLn(1803 * k, 794 * k, 1803 * k, 830 * k);
-            WLn(1803 * k, 848 * k, 1803 * k, 926 * k);
-            _silk.Add(new OhArrow(1803 * k, 930 * k, 90, 5f, Oh.Silk));
-            Add(new OhGearLever("MIP_GEAR_LEVER", 1762 * k, 788 * k, 932 * k));
+            // palanca del tren (com a la captura del Fenix): panell empotrat amb la cantonada de dalt a l'esquerra molt
+            // arrodonida, dues cantonades aixamfranades amb un cargol cadascuna (dalt a la dreta i baix a l'esquerra);
+            // ranura ampla a l'esquerra, fletxes buides i UP / DOWN a la dreta
+            {
+                const float l = 1720, r = 1836, t = 740, b = 958, c = 12;
+                var pts = new[] { Pt(l, t), Pt(r - c, t), Pt(r, t + c), Pt(r, b), Pt(l + c, b), Pt(l, b - c) };
+                var radii = new[] { 16f, 0f, 0f, 6f, 0f, 0f }.Select(x => x * k).ToArray();
+                // cargols una mica cap endins, sense tocar el xamfrà de la cantonada
+                _silk.Add(new OhInsetPanel(pts, radii, new[] { Pt(1818, 759), Pt(1738, 943) }));
+            }
+            Lb("UP", 1800, 768); Lb("DOWN", 1802, 940);
+            _silk.Add(new OhHollowArrow(1802 * k, 777 * k, 816 * k, 6.5f * k, 2.4f * k, 15 * k, true, false));
+            _silk.Add(new OhHollowArrow(1802 * k, 918 * k, 838 * k, 6.5f * k, 2.4f * k, 15 * k, false, true));
+            // ranura més curta (retallada per baix): avall, el pom (54 d'alt) queda a sota, fora de la ranura
+            Add(new OhGearLever("MIP_GEAR_LEVER", 1756 * k, 791 * k, 879 * k, 12f * k, 54f * k));
 
-            // indicador de pressió de frens (agulles mòbils)
-            Panel(1856 * k, 812 * k, (1984 - 1856) * k, (944 - 812) * k);
-            Add(new OhBrakeGauge("MIP_BRAKE_GAUGE", 1920 * k, 878 * k, 36f));
+            // indicador de pressió de frens (ACCU PRESS / BRAKES): panell empotrat aixamfranat, sense cargols
+            {
+                const float l = 1856, r = 1984, t = 812, b = 944, c = 16;
+                var pts = new[] { Pt(l + c, t), Pt(r - c, t), Pt(r, t + c), Pt(r, b - c), Pt(r - c, b), Pt(l + c, b), Pt(l, b - c), Pt(l, t + c) };
+                _silk.Add(new OhInsetPanel(pts, new float[pts.Length].Select(_ => 2f * k).ToArray(), Array.Empty<PointF>()));
+            }
+            Add(new OhBrakeGauge("MIP_BRAKE_GAUGE", 1920 * k, 878 * k, 37f));
 
             // tots els botons i tecles del panell principal amb l'estil validat (marc fosc, cara enfonsada)
             foreach (var el in _els)

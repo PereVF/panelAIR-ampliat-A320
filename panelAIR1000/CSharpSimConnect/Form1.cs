@@ -6201,6 +6201,23 @@ namespace SimConnect3
         /// (la resta de botons del Form, com ⚙, queden per sobre). pbMain s'amaga mentre dura el mode
         /// perquè no consumeixi CPU repintant-se per sota.
         /// </summary>
+        /// <summary>Posició habitual del ⚙ mentre el mode A320 el té desplaçat (null = no desplaçat).</summary>
+        private Point? _gearHomePos;
+
+        /// <summary>
+        /// Mode A320: el ⚙ (obre la pantalla AUX) va just a sota del botó del dit (mostrar àrees clicables), a la
+        /// cantonada de dalt a l'esquerra, en lloc del mig de la pantalla. A G1000 / TBM es queda on és.
+        /// </summary>
+        private void PlaceGearForA320()
+        {
+            if (_a320Overhead == null || !_a320Active) return;
+            _gearHomePos ??= _gearBtn.Location;
+            var r = _a320Overhead.AreasButtonBounds;
+            var origin = _a320Overhead.Location;   // (el control de l'A320 ocupa la finestra; per si no comença a 0,0)
+            _gearBtn.Location = new Point(origin.X + r.X, origin.Y + r.Bottom + 12);
+            _gearBtn.BringToFront();
+        }
+
         private void SetA320Active(bool active)
         {
             if (calibrationMode) return;
@@ -6251,6 +6268,7 @@ namespace SimConnect3
                         _a320PageBtnPos = _a320Overhead.PageLocation;
                         _a320AreasBtnPos = _a320Overhead.AreasLocation;
                         _a320ThBtnPos = _a320Overhead.ThLocation;
+                        PlaceGearForA320();   // el ⚙ segueix el botó del dit
                         try { ExportCalibrationPositions(silent: true); } catch { }
                     };
                     this.Controls.Add(_a320Overhead);
@@ -6262,6 +6280,7 @@ namespace SimConnect3
                 this.Controls.SetChildIndex(_a320Overhead, this.Controls.GetChildIndex(pbMain));
                 _a320Overhead.Visible = true;
                 pbMain.Visible = false;
+                PlaceGearForA320();
                 // els forats depenen de la mida i posició finals del panell: es tornen a calcular quan ja s'ha col·locat
                 BeginInvoke(new Action(() => { if (_a320Active) ApplyA320Region(); }));
                 _thrQuadrantBtn.Visible = false;
@@ -6272,6 +6291,8 @@ namespace SimConnect3
                 if (_a320Overhead != null) _a320Overhead.Visible = false; // allibera el bitmap (OnVisibleChanged)
                 if (_tintPanel != null) _tintPanel.Visible = false;
                 pbMain.Visible = true;
+                // el ⚙ torna al seu lloc de sempre (G1000 / TBM)
+                if (_gearHomePos is Point home) { _gearBtn.Location = home; _gearHomePos = null; }
                 _thrQuadrantBtn.Visible = _g3000Active;
                 pbMain.Invalidate();
             }
@@ -13069,7 +13090,8 @@ namespace SimConnect3
             if (_configBtn != null) sb.AppendLine($"CONFBTN:conf:{_configBtn.Location.X}:{_configBtn.Location.Y}");
             sb.AppendLine($"CLOSEBTN:close:{closeButton.Location.X}:{closeButton.Location.Y}");
             sb.AppendLine($"SHOWBTN:show:{_showAreasBtnPos.X}:{_showAreasBtnPos.Y}");
-            sb.AppendLine($"GEARBTN:gear:{_gearBtn.Location.X}:{_gearBtn.Location.Y}");
+            var gearPos = _gearHomePos ?? _gearBtn.Location;   // (en mode A320, la posició habitual, no la de l'A320)
+            sb.AppendLine($"GEARBTN:gear:{gearPos.X}:{gearPos.Y}");
             sb.AppendLine($"OVGEARBTN:ovgear:{_overlayGearBtn.Location.X}:{_overlayGearBtn.Location.Y}");
             sb.AppendLine($"VOLGRP:vg:{_volGrpAnchor.X}:{_volGrpAnchor.Y}");
             sb.AppendLine($"FSBTN:fs:{_fullscreenBtn.Location.X}:{_fullscreenBtn.Location.Y}");
