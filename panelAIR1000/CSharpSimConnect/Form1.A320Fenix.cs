@@ -312,6 +312,7 @@ namespace SimConnect3
             var ov = _a320Overhead;
             if (ov == null || !_fxData || !IsA320Fenix() || (_xp != null && _xp.A320Loaded)) return;
             ov.SimDriven = true;
+            if (_msReg != null) ov.SetRegistration(_msReg);   // matrícula (ATC ID de l'MSFS, igual que al FlyByWire)
             if (_fxFcu != null) ov.SetFcu(_fxFcu);
             if (_fxAltStep is bool st) ov.SetKnobRing("MIP_FCU_ALT", st);
             if (_fxBaro is var (bp, bm, bv, bh)) ov.SetBaro(bp, bm, bv, bh);

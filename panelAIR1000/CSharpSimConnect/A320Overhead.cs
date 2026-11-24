@@ -523,7 +523,19 @@ namespace panelAIR1000
             float sr = _r.Height * 0.07f, sy = _r.Y + _r.Height / 2;
             foreach (float sx in new[] { _r.X + _r.Width * 0.055f, _r.Right - _r.Width * 0.055f })
                 using (var sb = new SolidBrush(Color.FromArgb(70, 70, 66))) g.FillEllipse(sb, sx - sr, sy - sr, sr * 2, sr * 2);
-            if (Text.Length > 0) Oh.Text(g, Text, _r.X + _r.Width / 2, sy, _r.Height * 0.42f, Color.FromArgb(40, 44, 48));
+            // com la placa real: matrícula a l'esquerra | SELCAL a la dreta (el simulador no el dona: "- -")
+            var ink = Color.FromArgb(40, 44, 48);
+            float dx = _r.X + _r.Width * 0.55f;
+            using (var dp = new Pen(Color.FromArgb(150, 60, 66, 72), 0.6f)) g.DrawLine(dp, dx, _r.Y + _r.Height * 0.18f, dx, _r.Bottom - _r.Height * 0.18f);
+            if (Text.Length > 0)
+            {
+                float avail = dx - (_r.X + _r.Width * 0.11f);   // entre el cargol i la ratlla
+                float size = Math.Min(_r.Height * 0.42f, avail / (Text.Length * 0.62f + 0.2f));
+                Oh.Text(g, Text, (_r.X + _r.Width * 0.08f + dx) / 2, sy, size, ink);
+            }
+            float rx = (dx + _r.Right - _r.Width * 0.08f) / 2;
+            Oh.Text(g, "SELCAL CODE", rx, _r.Y + _r.Height * 0.3f, Math.Max(Oh.MinSilk, _r.Height * 0.2f), ink);
+            Oh.Text(g, "- -", rx, _r.Y + _r.Height * 0.66f, _r.Height * 0.32f, ink);
         }
     }
 
@@ -3458,7 +3470,6 @@ namespace panelAIR1000
             _pos = Approach(_pos, Down ? 1 : 0, dt * 1f);   // recorregut sencer en 1 s
             if (_holdT > 0 && (_holdT -= dt) <= 0)
             {
-                A320OverheadControl.GearPerf($"decisio app={Down} sim={_simDown}");
                 if (_simDown is bool s && s != Down) Down = s;
             }
         }
@@ -3466,12 +3477,8 @@ namespace panelAIR1000
         {
             Down = !Down;
             if (Owner.SimDriven) _holdT = 2f;
-            A320OverheadControl.GearPerfOn = true;
-            A320OverheadControl.GearPerf($"tap down={Down}");
             Changed();   // l'animació comença abans d'enviar l'ordre
-            var t0 = Stopwatch.GetTimestamp();
             Owner.RaiseCommand(Id, Down ? "DOWN" : "UP");
-            A320OverheadControl.GearPerf($"ordre enviada {(Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency:0.0}ms");
         }
         /// <summary>Posició llegida del simulador. Retorna true si la palanca s'ha de moure (fora del segon d'espera).</summary>
         public bool SetFromSim(bool down)
@@ -3778,18 +3785,6 @@ namespace panelAIR1000
         public event Action<string, int>? ElementChanged;
         /// <summary>Ordre d'un element cap a l'avió (id, ordre), p.ex. ("MIP_BARO", "INC").</summary>
         public event Action<string, string>? Command;
-
-        // ─── mesura temporal de la palanca del tren (fitxer %TEMP%\panelair_gear.log) ───
-        static readonly System.Text.StringBuilder s_gearLog = new();
-        static readonly Stopwatch s_perfClock = Stopwatch.StartNew();
-        public static bool GearPerfOn;
-        public static void GearPerf(string s) { if (GearPerfOn && s_gearLog.Length < 300000) s_gearLog.Append($"{s_perfClock.Elapsed.TotalMilliseconds:0.0} {s}\r\n"); }
-        static void GearPerfFlush()
-        {
-            try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "panelair_gear.log"), s_gearLog + "----\r\n"); } catch { }
-            s_gearLog.Clear(); GearPerfOn = false;
-        }
-        double _gearLastTick;
         /// <summary>S'ha començat a prémer un element (amb el dit o el ratolí), abans de deixar-lo anar.</summary>
         public event Action<string>? ElementPressed;
         internal void RaiseCommand(string id, string cmd) => Command?.Invoke(id, cmd);
@@ -3912,11 +3907,19 @@ namespace panelAIR1000
             if (bg.Animating) { _animating.Add(bg); StartAnim(); }
         }
 
+        /// <summary>Matrícula de l'avió (placa del panell principal), llegida del simulador.</summary>
+        public void SetRegistration(string reg)
+        {
+            reg = (reg ?? "").Trim().ToUpperInvariant();
+            foreach (var si in _silk)
+                if (si is OhRegPlate rp && rp.Text != reg) { rp.Text = reg; Redraw(rp.Bounds); }
+        }
+
         /// <summary>Palanca del tren llegida del simulador (true = avall).</summary>
         public void SetGearLever(bool down)
         {
             if (!_byId.TryGetValue("MIP_GEAR_LEVER", out var e) || e is not OhGearLever gl || !gl.SetFromSim(down)) return;
-            if (gl.Animating) { GearPerfOn = true; GearPerf($"sim mou palanca down={down}"); _animating.Add(gl); StartAnim(); }
+            if (gl.Animating) { _animating.Add(gl); StartAnim(); }
         }
 
         /// <summary>Pantalla del FCU llegida del simulador.</summary>
@@ -4960,7 +4963,6 @@ namespace panelAIR1000
                 el.Tick(dt);
                 if (el is OhGearLever && el.Animating) RedrawFast(el);
                 else { if (el == _fastEl) DropFast(); Redraw(TopDirty(el)); }
-                if (el is OhGearLever) { GearPerf($"tick gap={(now - _gearLastTick) * 1000:0.0}ms"); _gearLastTick = now; if (!el.Animating) GearPerfFlush(); }
                 if (!el.Animating) _animating.Remove(el);
             }
 

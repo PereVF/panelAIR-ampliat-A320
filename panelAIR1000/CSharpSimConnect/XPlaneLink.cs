@@ -90,6 +90,14 @@ namespace SimConnect3
             // palanca del tren (ordres estàndard d'X-Plane)
             [("MIP_GEAR_LEVER", "UP")] = "sim/flight_controls/landing_gear_up",
             [("MIP_GEAR_LEVER", "DOWN")] = "sim/flight_controls/landing_gear_down",
+            // ISIS (al ToLiss "ISI"): + i − són la brillantor; el pom del baròmetre (girar) va a part, amb ISISetSelRotation
+            [("MIP_ISIS_BUGS", "PUSH")] = "AirbusFBW/ISIBugsPress",
+            [("MIP_ISIS_LS", "PUSH")] = "AirbusFBW/ISILSDirToPress",
+            [("MIP_ISIS_PLUS", "PUSH")] = "AirbusFBW/ISIBrightnessUp",
+            [("MIP_ISIS_MINUS", "PUSH")] = "AirbusFBW/ISIBrightnessDown",
+            [("MIP_ISIS_RST", "PUSH")] = "AirbusFBW/ISIResetPress",
+            [("MIP_ISIS_BARO", "PUSH")] = "AirbusFBW/ISISetSelPress",
+            [("XP_POPUP_ISI", "PUSH")] = "AirbusFBW/PopUpISI",
             // rellotge del panell principal
             [("MIP_CLK_CHR", "PUSH")] = "toliss_airbus/chrono/ChronoStartStopPush",
             [("MIP_CLK_RST", "PUSH")] = "toliss_airbus/chrono/ChronoResetPush",
@@ -115,12 +123,28 @@ namespace SimConnect3
             "sim/cockpit/autopilot/altitude", "AirbusFBW/ALTmanaged",
             "sim/cockpit/autopilot/vertical_velocity", "sim/cockpit2/autopilot/fpa", "AirbusFBW/VSdashed",
             "AirbusFBW/ALT100_1000",                                        // selector ALT 100 (0) / 1000 (1)
-            GearHandleDr,                                                   // palanca del tren (1 = avall)
+            GearLeverAnimDr,                                                // palanca del tren 3D (0 amunt … 1 avall)
+            IsiRotDr,                                                       // pom del baròmetre de l'ISIS (comptador)
+            AccuNeedleDr, LeftBrakeNeedleDr, RightBrakeNeedleDr,            // indicador ACCU / BRAKES (0…1)
+            TailDr,                                                         // matrícula
         };
-        const string GearHandleDr = "sim/cockpit2/controls/gear_handle_down";
+        /// <summary>Matrícula de l'avió (dataref de tipus "data": l'API l'envia en base64).</summary>
+        const string TailDr = "sim/aircraft/view/acf_tailnum";
+        /// <summary>Matrícula de l'avió (al fil de la interfície).</summary>
+        public event Action<string>? RegistrationChanged;
+        string? _lastTail;
+        /// <summary>Palanca del tren 3D del ToLiss: diu si la palanca de la VC s'ha mogut de debò (com al FBW).</summary>
+        const string GearLeverAnimDr = "AirbusFBW/GearLeverAnim";
+        const string IsiRotDr = "AirbusFBW/ISISetSelRotation";
+        double? _pendingIsiRot; long _pendingIsiTicks;
+        /// <summary>Agulles de l'indicador de frens (comprovat: 0…1; amb el fre d'aparcament, L/R 0,7 = 2100 PSI → ×3000).</summary>
+        const string AccuNeedleDr = "AirbusFBW/AccuNeedle", LeftBrakeNeedleDr = "AirbusFBW/LeftBrakeNeedle", RightBrakeNeedleDr = "AirbusFBW/RightBrakeNeedle";
         /// <summary>Palanca del tren: true = avall (al fil de la interfície).</summary>
         public event Action<bool>? GearChanged;
         bool? _lastGear;
+        /// <summary>Indicador de frens en milers de PSI: acumulador, esquerre, dret (al fil de la interfície).</summary>
+        public event Action<float, float, float>? BrakesChanged;
+        (float, float, float)? _lastBrakes;
 
         /// <summary>Llums de tecles i polsadors: element del panell → dataref (encès si el valor arriba al llindar).</summary>
         static readonly (string id, string dataref, double min)[] LightMap =
@@ -299,7 +323,7 @@ namespace SimConnect3
         /// <summary>Una sessió amb el ToLiss carregat: resol IDs, se subscriu i escolta fins que es tanca o canvia l'avió.</summary>
         async Task SessionAsync(CancellationToken ct)
         {
-            _cmdIds.Clear(); _drIds.Clear(); _drNames.Clear(); _values.Clear(); _lastBaro = null; _lastFcu = null; _lastAltStep = null; _lastLights.Clear(); _lastPos.Clear(); _lastThr = null; _lastLegends.Clear(); _lastClock = null; _lastGear = null;
+            _cmdIds.Clear(); _drIds.Clear(); _drNames.Clear(); _values.Clear(); _lastBaro = null; _lastFcu = null; _lastAltStep = null; _lastLights.Clear(); _lastPos.Clear(); _lastThr = null; _lastLegends.Clear(); _lastClock = null; _lastGear = null; _lastBrakes = null; _pendingIsiRot = null; _lastTail = null;
             foreach (var name in AllReads())
                 if (!_drIds.ContainsKey(name) && await LookupId("datarefs", name, ct) is long id) { _drIds[name] = id; _drNames[id] = name; }
             foreach (var w in WriteMap.Values)
@@ -389,6 +413,16 @@ namespace SimConnect3
                     if (max > double.MinValue) lock (_values) _values[name] = max;
                     continue;
                 }
+                if (name == TailDr)
+                {
+                    // text en base64 (bytes acabats en zeros)
+                    if (v.ValueKind != JsonValueKind.String) continue;
+                    string tail;
+                    try { tail = Encoding.ASCII.GetString(Convert.FromBase64String(v.GetString() ?? "")).Split('\0')[0].Trim(); }
+                    catch { continue; }
+                    if (_lastTail != tail) { _lastTail = tail; Post(() => RegistrationChanged?.Invoke(tail)); }
+                    continue;
+                }
                 if (v.ValueKind == JsonValueKind.Array) { if (v.GetArrayLength() == 0) continue; v = v[0]; }
                 if (v.ValueKind == JsonValueKind.Number) lock (_values) _values[name] = v.GetDouble();
             }
@@ -397,11 +431,18 @@ namespace SimConnect3
 
         void PublishGear()
         {
-            if (!_values.TryGetValue(GearHandleDr, out var v)) return;
-            bool down = v >= 0.5;
-            if (_lastGear == down) return;
-            _lastGear = down;
-            Post(() => GearChanged?.Invoke(down));
+            if (_values.TryGetValue(GearLeverAnimDr, out var v))
+            {
+                // es dona per moguda quan surt un 5% de l'extrem on era
+                bool down = _lastGear ?? v >= 0.5;
+                if (down && v < 0.95) down = false; else if (!down && v > 0.05) down = true;
+                if (_lastGear != down) { _lastGear = down; Post(() => GearChanged?.Invoke(down)); }
+            }
+            if (_values.TryGetValue(AccuNeedleDr, out var a) && _values.TryGetValue(LeftBrakeNeedleDr, out var l) && _values.TryGetValue(RightBrakeNeedleDr, out var r))
+            {
+                var b = ((float)Math.Round(a * 3, 2), (float)Math.Round(l * 3, 2), (float)Math.Round(r * 3, 2));
+                if (_lastBrakes != b) { _lastBrakes = b; Post(() => BrakesChanged?.Invoke(b.Item1, b.Item2, b.Item3)); }
+            }
         }
 
         void PublishLegends()
@@ -509,6 +550,18 @@ namespace SimConnect3
         {
             if (!A320Loaded || _ws == null) return;
             if (id == "MIP_BARO" && (cmd == "INC" || cmd == "DEC") && TryBaroHpaStep(cmd == "INC" ? 1 : -1)) return;
+            // pom del baròmetre de l'ISIS: AirbusFBW/ISISetSelRotation és un comptador (cada pas, ±1; comprovat al ToLiss)
+            if (id == "MIP_ISIS_BARO" && (cmd == "INC" || cmd == "DEC"))
+            {
+                if (!_drIds.TryGetValue(IsiRotDr, out var rid)) return;
+                long now = Environment.TickCount64;
+                double cur;
+                lock (_values) cur = _pendingIsiRot.HasValue && now - _pendingIsiTicks < 1000 ? _pendingIsiRot.Value : _values.GetValueOrDefault(IsiRotDr);
+                double next = cur + (cmd == "INC" ? 1 : -1);
+                _pendingIsiRot = next; _pendingIsiTicks = now;
+                _ = SendAsync(new { req_id = NextReq(), type = "dataref_set_values", @params = new { datarefs = new[] { new { id = rid, value = next } } } });
+                return;
+            }
             if (id == "MIP_THROTTLE")
             {
                 // palanques arrossegades a l'app ("BOTH:v", "LEFT:v", "RIGHT:v"): s'escriu throttle_input de cada motor

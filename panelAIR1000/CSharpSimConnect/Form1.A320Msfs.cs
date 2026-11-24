@@ -241,6 +241,25 @@ namespace SimConnect3
             simconnect.RegisterDataDefineStruct<A320GlareStruct>(readDef);
             simconnect.RequestDataOnSimObject((REQUESTS)MsfsA320ReadReq, readDef, SimConnect.SIMCONNECT_OBJECT_ID_USER,
                 SIMCONNECT_PERIOD.VISUAL_FRAME, SIMCONNECT_DATA_REQUEST_FLAG.CHANGED, 0, 0, 0);
+
+            // matrícula de l'avió (FlyByWire i Fenix): variable estàndard ATC ID, un cop per segon i només si canvia
+            var regDef = (DEFINITIONS)MsfsRegDef;
+            simconnect.AddToDataDefinition(regDef, "ATC ID", null, SIMCONNECT_DATATYPE.STRING64, 0, SimConnect.SIMCONNECT_UNUSED);
+            simconnect.RegisterDataDefineStruct<MsfsRegStruct>(regDef);
+            simconnect.RequestDataOnSimObject((REQUESTS)MsfsRegReq, regDef, SimConnect.SIMCONNECT_OBJECT_ID_USER,
+                SIMCONNECT_PERIOD.SECOND, SIMCONNECT_DATA_REQUEST_FLAG.CHANGED, 0, 0, 0);
+        }
+
+        const uint MsfsRegDef = 7110, MsfsRegReq = 7110;
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Ansi, Pack = 1)]
+        struct MsfsRegStruct { [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 64)] public string id; }
+        private string? _msReg;   // matrícula llegida de l'MSFS
+
+        /// <summary>Matrícula llegida de l'MSFS: es posa a la placa si l'A320 és de l'MSFS (no si hi ha el ToLiss).</summary>
+        private void OnMsfsReg(string reg)
+        {
+            _msReg = reg.Trim();
+            if (IsA320Msfs() && (_xp == null || !_xp.A320Loaded)) _a320Overhead?.SetRegistration(_msReg);
         }
         private readonly Dictionary<string, DEFINITIONS> _msWriteDefs = new();
 
@@ -438,7 +457,6 @@ namespace SimConnect3
             if (ad && gAnim < 0.95) ad = false; else if (!ad && gAnim > 0.05) ad = true;
             _msGearAnimDown = ad;
             _msGearDown = ad;
-            panelAIR1000.A320OverheadControl.GearPerf($"fbw req={v[45]:0.##} anim={gAnim:0.###} -> {ad}");
             _msClock = (chrTxt, MsUtcText(), etTxt);
             ApplyMsfsA320State();
         }
@@ -448,33 +466,22 @@ namespace SimConnect3
         {
             var ov = _a320Overhead;
             if (ov == null || !_msA320Data || (_xp != null && _xp.A320Loaded)) return;
-            // (mesura temporal: quant tarda cada part)
-            var sw = System.Diagnostics.Stopwatch.StartNew(); var parts = new System.Text.StringBuilder();
-            void Mark(string n) { parts.Append($" {n}={sw.Elapsed.TotalMilliseconds:0.0}"); sw.Restart(); }
             ov.SimDriven = true;
+            if (_msReg != null) ov.SetRegistration(_msReg);
             if (_msFcu != null) ov.SetFcu(_msFcu);
-            Mark("fcu");
             if (_msAltStep is bool st) ov.SetKnobRing("MIP_FCU_ALT", st);
             foreach (var kv in _msLights) ov.SetLight(kv.Key, kv.Value);
-            Mark("lights");
             foreach (var kv in _msPos) ov.SetPosition(kv.Key, kv.Value);
-            Mark("pos");
             // palanques de gas: només amb el FlyByWire (amb el Fenix aquestes LVARs no existeixen i valdrien 0)
             if (_msThr is var (tl, tr) && IsA320FBW()) ov.SetThrottle(tl, tr);
-            Mark("thr");
             if (IsA320FBW())
             {
                 foreach (var kv in _msLegends)
                     ov.SetLegend(kv.Key.id, kv.Key.upper ? (kv.Value ? 1f : 0f) : null, kv.Key.upper ? null : (kv.Value ? 1f : 0f));
-                Mark("legends");
                 if (_msClock is var (mc, mu, me)) ov.SetClock(mc, mu, me);
-                Mark("clock");
                 if (_msBrakes is var (ba, bl, br)) ov.SetBrakeGauge(ba, bl, br);
-                Mark("brakes");
                 if (_msGearDown is bool gd) ov.SetGearLever(gd);
-                Mark("gear");
             }
-            panelAIR1000.A320OverheadControl.GearPerf("apply" + parts + $" gearDown={_msGearDown}");
         }
     }
 }
