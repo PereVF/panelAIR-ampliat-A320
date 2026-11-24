@@ -71,6 +71,45 @@ namespace panelAIR1000
             g.Restore(st);
         }
 
+        /// <summary>
+        /// Vis DZUS (maqueta "Visos DZUS", v3): anell gruixut en relleu (llum a dalt-esquerra), cara plana enfonsada
+        /// una mica més fosca i una sola ranura recta vertical amb un fil de llum. Va dins una osca de la planxa.
+        /// </summary>
+        public static void DzusRing(Graphics g, float cx, float cy, float r)
+        {
+            var outer = new RectangleF(cx - r, cy - r, r * 2, r * 2);
+            SoftShadowEllipse(g, outer, r * 0.1f, r * 0.14f, r * 0.35f, 150);
+            using (var lg = new LinearGradientBrush(outer, Color.Black, Color.Black, 45f))
+            {
+                lg.InterpolationColors = new ColorBlend
+                {
+                    Colors = new[] { Color.FromArgb(0x8b, 0x98, 0xa5), Color.FromArgb(0x66, 0x72, 0x7e), Color.FromArgb(0x46, 0x50, 0x5a) },
+                    Positions = new[] { 0f, 0.5f, 1f }
+                };
+                g.FillEllipse(lg, outer);
+            }
+            using (var pe = new Pen(Color.FromArgb(217, 15, 20, 25), Math.Max(0.6f, r * 0.05f))) g.DrawEllipse(pe, outer);
+            float ri = r * 0.70f;
+            var face = new RectangleF(cx - ri, cy - ri, ri * 2, ri * 2);
+            using (var fb = new LinearGradientBrush(face, Color.FromArgb(0x4c, 0x56, 0x61), Color.FromArgb(0x5b, 0x66, 0x71), 45f)) g.FillEllipse(fb, face);
+            // graó anell→cara: fosc a dalt-esquerra, llum a baix-dreta
+            using (var eb = new LinearGradientBrush(RectangleF.Inflate(face, 0.5f, 0.5f), Color.Black, Color.Black, 45f))
+            {
+                eb.InterpolationColors = new ColorBlend
+                {
+                    Colors = new[] { Color.FromArgb(204, 10, 14, 18), Color.FromArgb(51, 10, 14, 18), Color.FromArgb(140, 190, 205, 220) },
+                    Positions = new[] { 0f, 0.5f, 1f }
+                };
+                using var ep = new Pen(eb, Math.Max(0.6f, r * 0.07f));
+                g.DrawEllipse(ep, face);
+            }
+            // ranura recta
+            float L = ri * 0.86f, W = Math.Max(1f, r * 0.11f), lw = Math.Max(0.5f, r * 0.045f);
+            using (var sb = new SolidBrush(Color.FromArgb(0x16, 0x1b, 0x20))) g.FillRectangle(sb, cx - W / 2f, cy - L, W, L * 2);
+            using (var hp = new Pen(Color.FromArgb(140, 200, 214, 228), lw))
+                g.DrawLine(hp, cx + W / 2f + lw / 2f, cy - L * 0.95f, cx + W / 2f + lw / 2f, cy + L * 0.95f);
+        }
+
         /// <summary>Escala lògic→píxel del dibuix actual (perquè el gra de pintura sigui d'1 píxel real).</summary>
         public static float PixelScale = 1f;
 
@@ -366,6 +405,93 @@ namespace panelAIR1000
                               new PointF(r.X + ix, r.Bottom - iy), new PointF(r.Right - ix, r.Bottom - iy) };
         }
 
+        /// <summary>
+        /// Panell amb visos DZUS dins osques en U a les vores laterals (maqueta "Visos DZUS" v3). L'osca envolta el vis
+        /// amb una mitja lluna de radi DzR i s'uneix a la vora amb un arrodoniment de radi DzR/2.
+        /// </summary>
+        public OhPanel(RectangleF r, bool dzusNotch) : this(r)
+        {
+            if (!dzusNotch) return;
+            _dzus = true;
+            _screws = new[] { new PointF(r.X + DzIn, r.Y + 20f), new PointF(r.Right - DzIn, r.Y + 20f),
+                              new PointF(r.X + DzIn, r.Bottom - 20f), new PointF(r.Right - DzIn, r.Bottom - 20f) };
+        }
+        bool _dzus;
+        const float DzScrewR = 5.6f, DzR = DzScrewR * 1.28f, DzIn = DzScrewR;   // la cara exterior del vis queda en línia amb la vora del panell
+
+        /// <summary>Contorn: rectangle de cantonades arrodonides amb les osques (sentit horari).</summary>
+        GraphicsPath MakeNotchedPath()
+        {
+            var r = _rect; float rad = 5f, d = rad * 2, f = DzR / 2f;
+            var p = new GraphicsPath();
+            p.AddArc(r.X, r.Y, d, d, 180, 90);
+            p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
+            // vora dreta, baixant
+            foreach (var s in _screws.Where(s => s.X > r.X + r.Width / 2).OrderBy(s => s.Y))
+            {
+                float x1 = r.Right, cy = s.Y;
+                p.AddArc(x1 - 2 * f, cy - DzR - 2 * f, 2 * f, 2 * f, 0, 90);
+                p.AddArc(s.X - DzR, cy - DzR, 2 * DzR, 2 * DzR, 270, -180);
+                p.AddArc(x1 - 2 * f, cy + DzR, 2 * f, 2 * f, 270, 90);
+            }
+            p.AddArc(r.Right - d, r.Bottom - d, d, d, 0, 90);
+            p.AddArc(r.X, r.Bottom - d, d, d, 90, 90);
+            // vora esquerra, pujant
+            foreach (var s in _screws.Where(s => s.X <= r.X + r.Width / 2).OrderByDescending(s => s.Y))
+            {
+                float x0 = r.X, cy = s.Y;
+                p.AddArc(x0, cy + DzR, 2 * f, 2 * f, 180, 90);
+                p.AddArc(s.X - DzR, cy - DzR, 2 * DzR, 2 * DzR, 90, -180);
+                p.AddArc(x0, cy - DzR - 2 * f, 2 * f, 2 * f, 90, 90);
+            }
+            p.CloseFigure();
+            return p;
+        }
+
+        /// <summary>Panell poligonal (sense arrodonir) amb visos DZUS en osques a les vores verticals.</summary>
+        public OhPanel(PointF[] poly, PointF[] screws, bool dzusNotch) : this(poly, screws) { _dzus = dzusNotch; }
+
+        /// <summary>Contorn d'un polígon amb osques a les vores verticals (arcs mostrejats, sentit horari).</summary>
+        GraphicsPath MakeNotchedPoly()
+        {
+            var poly = _poly!; float f = DzR / 2f;
+            var pts = new List<PointF>();
+            void Arc(float cx, float cy, float rad, float a0, float a1)
+            {
+                int n = Math.Max(8, (int)(Math.Abs(a1 - a0) / 6f));
+                for (int i = 0; i <= n; i++)
+                {
+                    double t = (a0 + (a1 - a0) * i / n) * Math.PI / 180.0;
+                    pts.Add(new PointF(cx + rad * (float)Math.Cos(t), cy + rad * (float)Math.Sin(t)));
+                }
+            }
+            for (int i = 0; i < poly.Length; i++)
+            {
+                PointF a = poly[i], b = poly[(i + 1) % poly.Length];
+                pts.Add(a);
+                if (Math.Abs(a.X - b.X) > 0.5f) continue;
+                float lo = Math.Min(a.Y, b.Y), hi = Math.Max(a.Y, b.Y), x = a.X;
+                var on = _screws.Where(s => Math.Abs(s.X - x) <= DzIn + 1f && s.Y > lo && s.Y < hi);
+                if (b.Y > a.Y)   // vora dreta, baixant
+                    foreach (var s in on.OrderBy(s => s.Y))
+                    {
+                        float cy = s.Y, cx = x - DzIn;
+                        Arc(x - f, cy - DzR - f, f, 0, 90);
+                        Arc(cx, cy, DzR, 270, 90);
+                        Arc(x - f, cy + DzR + f, f, 270, 360);
+                    }
+                else             // vora esquerra, pujant
+                    foreach (var s in on.OrderByDescending(s => s.Y))
+                    {
+                        float cy = s.Y, cx = x + DzIn;
+                        Arc(x + f, cy + DzR + f, f, 180, 270);
+                        Arc(cx, cy, DzR, 90, -90);
+                        Arc(x + f, cy - DzR - f, f, 90, 180);
+                    }
+            }
+            var p = new GraphicsPath(); p.AddPolygon(pts.ToArray()); return p;
+        }
+
         public OhPanel(PointF[] poly, PointF[] screws)
         {
             _poly = poly; _screws = screws;
@@ -376,6 +502,7 @@ namespace panelAIR1000
 
         GraphicsPath MakePath()
         {
+            if (_dzus) return _poly == null ? MakeNotchedPath() : MakeNotchedPoly();
             if (_poly == null) return Oh.RoundRect(_rect, 5f);
             var p = new GraphicsPath(); p.AddPolygon(_poly); return p;
         }
@@ -396,7 +523,8 @@ namespace panelAIR1000
                 g.FillPath(fill, path);
             Oh.Grain(g, path);
             foreach (var s in _screws)
-                Oh.Dzus(g, s.X, s.Y, 5.6f, 20f + (s.X * 7.3f + s.Y * 3.1f) % 50f);
+                if (_dzus) Oh.DzusRing(g, s.X, s.Y, DzScrewR);
+                else Oh.Dzus(g, s.X, s.Y, 5.6f, 20f + (s.X * 7.3f + s.Y * 3.1f) % 50f);
         }
     }
 
@@ -536,6 +664,111 @@ namespace panelAIR1000
             float rx = (dx + _r.Right - _r.Width * 0.08f) / 2;
             Oh.Text(g, "SELCAL CODE", rx, _r.Y + _r.Height * 0.3f, Math.Max(Oh.MinSilk, _r.Height * 0.2f), ink);
             Oh.Text(g, "- -", rx, _r.Y + _r.Height * 0.66f, _r.Height * 0.32f, ink);
+        }
+    }
+
+    /// <summary>
+    /// Zona dels genolls sota el PFD i l'ND (dibuix de la maqueta aprovada, centrat): a dalt la taula plegable (marc fosc,
+    /// barra amb dos reflexos i una frontissa a cada punta); a sota, la franja fosca amb els dos recolzapeus estriats i
+    /// la caixa central. La caixa central té volum: una cara de dalt curta (com la dels recolzapeus) i la resta vertical,
+    /// amb un reflex suau al doblec que es talla a les juntes de la tapa interior.
+    /// Es dibuixa en les coordenades de la imatge de referència (1068 d'ample) i s'escala a l'amplada donada.
+    /// </summary>
+    internal sealed class OhKneeConsole : OhSilk
+    {
+        const float W = 1068f, H = 264f;
+        readonly float _x, _y, _s;
+        readonly RectangleF _band;   // franja fosca (coordenades del panell): de la vora de dalt fins a baix de tot
+        public RectangleF Band => _band;
+        /// <param name="bandLeft">vora esquerra de la franja fosca</param><param name="bandRight">vora dreta</param>
+        /// <param name="bandBottom">vora de baix (la del panell)</param>
+        public OhKneeConsole(float x, float y, float width, float bandLeft, float bandRight, float bandBottom)
+        {
+            _x = x; _y = y; _s = width / W;
+            _band = RectangleF.FromLTRB(bandLeft, y + 64 * _s, bandRight, bandBottom);
+            Bounds = RectangleF.Union(new RectangleF(x - 2, y - 2, width + 4, H * _s + 4), RectangleF.Inflate(_band, 1, 1));
+        }
+
+        static Color C(int rgb, float a = 1f) => Color.FromArgb((int)Math.Round(a * 255), (rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
+
+        /// <summary>Rectangle (arrodonit si rx > 0) amb un degradat vertical o horitzontal de diverses parades.</summary>
+        static void Grad(Graphics g, RectangleF r, float rx, bool vertical, params (float p, Color c)[] stops)
+        {
+            var br = vertical ? new RectangleF(r.X, r.Y - 0.01f, r.Width, r.Height + 0.02f) : new RectangleF(r.X - 0.01f, r.Y, r.Width + 0.02f, r.Height);
+            using var b = new LinearGradientBrush(br, Color.Black, Color.Black, vertical ? 90f : 0f)
+            {
+                InterpolationColors = new ColorBlend { Colors = stops.Select(s => s.c).ToArray(), Positions = stops.Select(s => s.p).ToArray() }
+            };
+            if (rx > 0) { using var p = Oh.RoundRect(r, rx); g.FillPath(b, p); }
+            else g.FillRectangle(b, r);
+        }
+        static void Fill(Graphics g, RectangleF r, float rx, Color c)
+        {
+            using var b = new SolidBrush(c);
+            if (rx > 0) { using var p = Oh.RoundRect(r, rx); g.FillPath(b, p); }
+            else g.FillRectangle(b, r);
+        }
+        static void Line(Graphics g, Color c, float w, float x0, float y0, float x1, float y1)
+        {
+            using var p = new Pen(c, w);
+            g.DrawLine(p, x0, y0, x1, y1);
+        }
+
+        public override void Draw(Graphics g)
+        {
+            // franja fosca de baix: tota l'amplada de la planxa i fins a la vora de baix del panell, d'un sol to
+            Fill(g, _band, 0, C(0x161a1f));
+
+            var st = g.Save();
+            g.TranslateTransform(_x, _y);
+            g.ScaleTransform(_s, _s);
+
+            // taula plegable: marc fosc, barra amb dos reflexos, frontisses a les puntes
+            Grad(g, new RectangleF(130, 10, 808, 56), 0, true, (0, C(0x2a3139)), (1, C(0x14181c)));
+            Line(g, C(0x4a545e), 1.6f, 130, 10.8f, 938, 10.8f);
+            Grad(g, new RectangleF(168, 22, 732, 30), 0, true,
+                (0, C(0x5c6670)), (0.18f, C(0x3a424b)), (0.5f, C(0x2b3239)), (0.62f, C(0x6a747e)), (0.72f, C(0x3a424b)), (1, C(0x20262c)));
+            Line(g, C(0xc9cdd8, 0.55f), 1.2f, 170, 24, 898, 24);
+            Line(g, C(0xd7dbe4, 0.6f), 1.4f, 170, 40.5f, 898, 40.5f);
+            foreach (float cx in new[] { 140f, 896f })
+                Grad(g, new RectangleF(cx, 18, 32, 40), 3, false, (0, C(0x0e1114)), (0.5f, C(0x2a3139)), (1, C(0x0e1114)));
+            foreach (var (dx, dy) in new[] { (146f, 27f), (146f, 46f), (915f, 27f), (915f, 46f) })
+                Fill(g, new RectangleF(dx, dy, 7, 3), 1.5f, C(0xe8ebf2));
+
+            // recolzapeus (mirall): cara estriada clara i caixa fosca amb el bisell cap a la caixa del mig
+            var ribs = new (float, Color)[]
+            {
+                (0, C(0xd9dce3)), (0.08f, C(0x9da2ae)), (0.16f, C(0xd2d5dc)), (0.24f, C(0x9da2ae)), (0.32f, C(0xcfd2d9)),
+                (0.40f, C(0x999eaa)), (0.48f, C(0xcdd0d8)), (0.56f, C(0x979ca8)), (0.64f, C(0xcacdd5)), (0.72f, C(0x959aa6)),
+                (0.80f, C(0xc8cbd3)), (0.90f, C(0x8d929e)), (1, C(0x6b7080)),
+            };
+            foreach (bool left in new[] { true, false })
+            {
+                float ox = left ? 0 : 772;   // el dret és el mateix desplaçat (simètric respecte del mig)
+                Fill(g, new RectangleF(10 + ox, 88, 276, 112), 6, C(0x15191d));
+                Grad(g, new RectangleF((left ? 15 : 791), 93, 262, 44), 2, true, ribs);
+                float bx = left ? 8 : 778;
+                Grad(g, new RectangleF(bx, 142, 282, 56), 8, true, (0, C(0x2c333b)), (0.55f, C(0x23292f)), (1, C(0x171b20)));
+                Line(g, C(0x6f7a85, 0.7f), 1.6f, bx + 8, 150, bx + 274, 150);
+                var bev = new RectangleF(left ? 262 : 778, 142, 28, 56);
+                if (left) Grad(g, bev, 8, false, (0, C(0x23292f, 0f)), (1, C(0x5d6873, 0.8f)));
+                else Grad(g, bev, 8, false, (0, C(0x5d6873, 0.8f)), (1, C(0x23292f, 0f)));
+            }
+
+            // caixa central: cara de dalt curta, la resta vertical; tapa interior amb les mateixes dues cares
+            Grad(g, new RectangleF(366, 86, 336, 44), 0, true, (0, C(0x2e353d)), (1, C(0x3d4650)));
+            Grad(g, new RectangleF(366, 130, 336, 90), 0, true, (0, C(0x2a3138)), (1, C(0x181c21)));
+            Grad(g, new RectangleF(400, 92, 268, 38), 0, true, (0, C(0x333b44)), (1, C(0x434c57)));
+            Grad(g, new RectangleF(400, 130, 268, 87), 0, true, (0, C(0x2e353d)), (1, C(0x1b2025)));
+            // reflex del doblec: franja suau i discreta, tallada a les juntes de la tapa
+            foreach (var (gx, gw) in new[] { (368f, 29f), (403f, 262f), (671f, 29f) })
+                Grad(g, new RectangleF(gx, 125, gw, 10), 0, true,
+                    (0, C(0xeef1f6, 0f)), (0.38f, C(0xeef1f6, 0.12f)), (0.5f, C(0xf4f6fa, 0.45f)), (0.62f, C(0xeef1f6, 0.1f)), (1, C(0xeef1f6, 0f)));
+            using (var p = new Pen(C(0x56616c), 1.6f)) g.DrawRectangle(p, 400, 92, 268, 125);
+            Line(g, C(0x14181c), 1f, 399, 93, 399, 216);
+            Line(g, C(0x14181c), 1f, 669, 93, 669, 216);
+
+            g.Restore(st);
         }
     }
 
@@ -4427,6 +4660,9 @@ namespace panelAIR1000
         {
             var full = new RectangleF(0, CurShift, LW, CurLH);
             var FramePoly = CurFrame;
+            // la franja fosca de la zona dels genolls queda fora de la llum global (ha de ser d'un sol to, uniforme)
+            var stL = g.Save();
+            if (_page == 1 && !_kneeRect.IsEmpty) g.ExcludeClip(new Region(_kneeRect));
             using (var v = new LinearGradientBrush(full, Color.Black, Color.Black, 90f)
             {
                 InterpolationColors = new ColorBlend
@@ -4443,7 +4679,10 @@ namespace panelAIR1000
                     Positions = new[] { 0f, 0.14f, 0.86f, 1f }
                 }
             }) g.FillPolygon(h, FramePoly);
+            g.Restore(stL);
         }
+        /// <summary>Franja fosca de la zona dels genolls (panell principal), que no rep la llum global.</summary>
+        RectangleF _kneeRect;
 
         void DrawFrame(Graphics g)
         {
@@ -5248,7 +5487,7 @@ namespace panelAIR1000
             if (el is OhGuard g) Register(g.Inner);
         }
 
-        void Panel(float x, float y, float w, float h) => _silk.Add(new OhPanel(new RectangleF(x, y, w, h)));
+        void Panel(float x, float y, float w, float h) => _silk.Add(new OhPanel(new RectangleF(x, y, w, h), true));
         // Escala de serigrafia i interruptors. EXT LT i AIR COND ja tenen les mides finals (escala 1);
         // la resta de l'overhead s'iguala proporcionalment amb TextScale.
         const float TextScale = 1.22f;
@@ -5374,7 +5613,7 @@ namespace panelAIR1000
 
             // Panell inferior esquerre (EVAC, EMER ELEC, GPWS, RCDR, OXYGEN, CALLS, WIPER)
             _silk.Add(new OhPanel(new PointF[] { new(26, 562), new(308, 562), new(308, 1248), new(26, 1098) },
-                                  new PointF[] { new(35, 571), new(299, 571), new(35, 1088), new(298, 1232) }));
+                                  new PointF[] { new(31.6f, 582), new(302.4f, 582), new(31.6f, 1078), new(302.4f, 1228) }, true));
             L("COMMAND", 131, 573, 6f); L("EVAC", 195, 573, 9f); L("HORN SHUT OFF", 195, 586, 5.5f); L("CAPT & PURS", 262, 581, 6f);
             GrayGuard("EVAC_COMMAND", 131, 586, "EVAC", "ON", 44, 42);
             Round("EVAC_HORN_SHUTOFF", 195, 612, 13);
@@ -5699,6 +5938,8 @@ namespace panelAIR1000
         void BuildMain()
         {
             const float k = 0.625f;
+            // vora de dalt de la franja fosca de la zona dels genolls (on s'acaba la tauleta): 800 + 64 × 844/1068
+            const float KneeTop = 800f + 64f * (868f - 24f) / 1068f;
             RectangleF R(float x0, float y0, float x1, float y1) => RectangleF.FromLTRB(x0 * k, y0 * k, x1 * k, y1 * k);
             PointF Pt(float x, float y) => new(x * k, y * k);
             void Lb(string t, float x, float y, float size = 8.15f) => L(t, x * k, y * k, size);
@@ -5844,8 +6085,9 @@ namespace panelAIR1000
 
             // ── Panell principal ──
             // planxa de l'esquerra (PFD/ND i zona dels genolls)
-            _silk.Add(new OhPanel(new[] { Pt(15, 338), Pt(872, 338), Pt(872, 1046), Pt(15, 1046) },
-                                  new[] { Pt(28, 352), Pt(858, 352), Pt(28, 1032), Pt(858, 1032) }));
+            // (s'acaba on s'acaba la tauleta dels genolls: per sota només hi ha la franja fosca, sense cargols)
+            _silk.Add(new OhPanel(new[] { Pt(15, 338), Pt(872, 338), Pt(872, KneeTop), Pt(15, KneeTop) },
+                                  new[] { Pt(28, 352), Pt(858, 352) }));
             // planxa central i dreta
             // (sense el cargol de dalt a la dreta: quedaria al graó del panell LDG GEAR i semblaria un quart cargol seu)
             _silk.Add(new OhPanel(new[] { Pt(880, 338), Pt(1982, 338), Pt(1982, 1178), Pt(880, 1178) },
@@ -5859,15 +6101,16 @@ namespace panelAIR1000
             _silk.Add(new OhBezel(R(24, 372, 428, 772), gPfd));      // PFD
             _silk.Add(new OhBezel(R(454, 372, 868, 772), gNd));      // ND
             _screenGlass.AddRange(new[] { gPfd, gNd, gEwd, gSd });
-            _silk.Add(new OhBlock(R(520, 776, 812, 796), Oh.T(120, 132, 144, 116, 142, 164), Oh.T(70, 80, 90, 66, 88, 106), 3f));
             _silk.Add(new OhBezel(R(1254, 344, 1686, 736), gEwd));  // ECAM superior
             _silk.Add(new OhBezel(R(1254, 744, 1686, 1136), gSd));   // ECAM inferior
 
-            // zona dels genolls (fosca)
-            _silk.Add(new OhBlock(R(15, 846, 660, 914), Color.FromArgb(70, 72, 76), Color.FromArgb(14, 14, 16), 12f));
-            _silk.Add(new OhBlock(R(22, 926, 482, 1044), Color.FromArgb(58, 60, 64), Color.FromArgb(26, 26, 28), 2f));
-            _silk.Add(new OhBlock(R(550, 926, 788, 1036), Color.FromArgb(70, 72, 76), Color.FromArgb(30, 30, 32), 2f, 7));
-            Oh_BigScrews(new[] { Pt(676, 818), Pt(860, 948) });
+            // zona dels genolls: taula plegable, recolzapeus i caixa central, centrats sota el PFD + ND (maqueta aprovada)
+            // franja fosca: de la vora esquerra a la dreta de la planxa i fins a baix de tot de la pàgina
+            // (la pàgina comença a MainTopCut: la vora de baix de tot és MainTopCut + MainLH; a l'esquerra, des de la vora
+            //  del marc del panell, perquè no hi quedi cap tira d'un altre color)
+            var knee = new OhKneeConsole(24 * k, 800 * k, (868 - 24) * k, 7f, 872 * k, MainTopCut + MainLH + 1);
+            _silk.Add(knee);
+            _kneeRect = knee.Band;
             // quadrant de gas (mòdul opcional, botó TH): a sota del rectangle que hi ha sota l'ND, centrat amb ell
             // (més gran: la carcassa comença just sota la llengüeta i tapa el cargol; l'espai de dalt de l'element
             //  només el fa servir el pom quan la palanca és a TO GA)
@@ -6196,7 +6439,7 @@ namespace panelAIR1000
 
             // Panell inferior dret
             _silk.Add(new OhPanel(new PointF[] { new(946, 550), new(1226, 550), new(1226, 1098), new(946, 1248) },
-                                  new PointF[] { new(955, 559), new(1217, 559), new(1217, 1088), new(958, 1231) }));
+                                  new PointF[] { new(951.6f, 570), new(1220.4f, 570), new(1220.4f, 1078), new(951.6f, 1228) }, true));
             L("CARGO VENT", 1086, 566, 10f);
             WLn(1066, 578, 1066, 724);
             L("AFT ISOL VALVE", 1008, 581, 5f);
