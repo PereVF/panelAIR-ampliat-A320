@@ -87,6 +87,9 @@ namespace SimConnect3
             [("MIP_AUTOBRK_MED", "PUSH")] = "AirbusFBW/AbrkMed",
             [("MIP_AUTOBRK_MAX", "PUSH")] = "AirbusFBW/AbrkMax",
             [("MIP_BRK_FAN", "PUSH")] = "toliss_airbus/gear/brake_fan",
+            // palanca del tren (ordres estàndard d'X-Plane)
+            [("MIP_GEAR_LEVER", "UP")] = "sim/flight_controls/landing_gear_up",
+            [("MIP_GEAR_LEVER", "DOWN")] = "sim/flight_controls/landing_gear_down",
             // rellotge del panell principal
             [("MIP_CLK_CHR", "PUSH")] = "toliss_airbus/chrono/ChronoStartStopPush",
             [("MIP_CLK_RST", "PUSH")] = "toliss_airbus/chrono/ChronoResetPush",
@@ -112,7 +115,12 @@ namespace SimConnect3
             "sim/cockpit/autopilot/altitude", "AirbusFBW/ALTmanaged",
             "sim/cockpit/autopilot/vertical_velocity", "sim/cockpit2/autopilot/fpa", "AirbusFBW/VSdashed",
             "AirbusFBW/ALT100_1000",                                        // selector ALT 100 (0) / 1000 (1)
+            GearHandleDr,                                                   // palanca del tren (1 = avall)
         };
+        const string GearHandleDr = "sim/cockpit2/controls/gear_handle_down";
+        /// <summary>Palanca del tren: true = avall (al fil de la interfície).</summary>
+        public event Action<bool>? GearChanged;
+        bool? _lastGear;
 
         /// <summary>Llums de tecles i polsadors: element del panell → dataref (encès si el valor arriba al llindar).</summary>
         static readonly (string id, string dataref, double min)[] LightMap =
@@ -291,7 +299,7 @@ namespace SimConnect3
         /// <summary>Una sessió amb el ToLiss carregat: resol IDs, se subscriu i escolta fins que es tanca o canvia l'avió.</summary>
         async Task SessionAsync(CancellationToken ct)
         {
-            _cmdIds.Clear(); _drIds.Clear(); _drNames.Clear(); _values.Clear(); _lastBaro = null; _lastFcu = null; _lastAltStep = null; _lastLights.Clear(); _lastPos.Clear(); _lastThr = null; _lastLegends.Clear(); _lastClock = null;
+            _cmdIds.Clear(); _drIds.Clear(); _drNames.Clear(); _values.Clear(); _lastBaro = null; _lastFcu = null; _lastAltStep = null; _lastLights.Clear(); _lastPos.Clear(); _lastThr = null; _lastLegends.Clear(); _lastClock = null; _lastGear = null;
             foreach (var name in AllReads())
                 if (!_drIds.ContainsKey(name) && await LookupId("datarefs", name, ct) is long id) { _drIds[name] = id; _drNames[id] = name; }
             foreach (var w in WriteMap.Values)
@@ -384,7 +392,16 @@ namespace SimConnect3
                 if (v.ValueKind == JsonValueKind.Array) { if (v.GetArrayLength() == 0) continue; v = v[0]; }
                 if (v.ValueKind == JsonValueKind.Number) lock (_values) _values[name] = v.GetDouble();
             }
-            lock (_values) { PublishBaro(); PublishFcu(); PublishLights(); PublishPositions(); PublishLegends(); PublishClock(); }
+            lock (_values) { PublishBaro(); PublishFcu(); PublishLights(); PublishPositions(); PublishLegends(); PublishClock(); PublishGear(); }
+        }
+
+        void PublishGear()
+        {
+            if (!_values.TryGetValue(GearHandleDr, out var v)) return;
+            bool down = v >= 0.5;
+            if (_lastGear == down) return;
+            _lastGear = down;
+            Post(() => GearChanged?.Invoke(down));
         }
 
         void PublishLegends()
@@ -625,15 +642,47 @@ namespace SimConnect3
         const uint SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020, SWP_SHOWWINDOW = 0x0040;
         const uint GW_HWNDPREV = 3;
 
+        // Llista de processos: buscar-la (GetProcessesByName) és lent (desenes de ms) i abans es feia per a cada títol
+        // cada segon, cosa que aturava l'app uns 300 ms; ara es reaprofita durant 3 s.
+        static readonly Dictionary<string, (HashSet<int> pids, long at)> s_pidCache = new();
+        static HashSet<int> Pids(string[] processNames)
+        {
+            string key = string.Join("|", processNames);
+            long now = Environment.TickCount64;
+            if (s_pidCache.TryGetValue(key, out var c) && now - c.at < 3000) return c.pids;
+            var pids = new HashSet<int>();
+            foreach (var n in processNames)
+                foreach (var p in System.Diagnostics.Process.GetProcessesByName(n)) { pids.Add(p.Id); p.Dispose(); }
+            s_pidCache[key] = (pids, now);
+            return pids;
+        }
+
+        /// <summary>Per a cada títol, la primera finestra visible d'aquests processos que el té (una sola passada).</summary>
+        public static Dictionary<string, IntPtr> FindEach(IEnumerable<string> titles, params string[] processNames)
+        {
+            var res = new Dictionary<string, IntPtr>();
+            foreach (var t in titles) res[t] = IntPtr.Zero;
+            var pids = Pids(processNames);
+            if (pids.Count == 0) return res;
+            EnumWindows((h, l) =>
+            {
+                GetWindowThreadProcessId(h, out int pid);
+                if (!pids.Contains(pid) || !IsWindowVisible(h)) return true;
+                var sb = new StringBuilder(256);
+                GetWindowText(h, sb, 256);
+                if (res.TryGetValue(sb.ToString(), out var cur) && cur == IntPtr.Zero) res[sb.ToString()] = h;
+                return true;
+            }, IntPtr.Zero);
+            return res;
+        }
+
         /// <summary>Finestra visible d'X-Plane amb aquest títol (o IntPtr.Zero).</summary>
         public static IntPtr Find(string title) => Find(title, "X-Plane");
 
         /// <summary>Finestra visible d'algun d'aquests processos (p.ex. "FlightSimulator") amb aquest títol (o IntPtr.Zero).</summary>
         public static IntPtr Find(string title, params string[] processNames)
         {
-            var pids = new HashSet<int>();
-            foreach (var n in processNames)
-                foreach (var p in System.Diagnostics.Process.GetProcessesByName(n)) { pids.Add(p.Id); p.Dispose(); }
+            var pids = Pids(processNames);
             if (pids.Count == 0) return IntPtr.Zero;
             IntPtr found = IntPtr.Zero;
             EnumWindows((h, l) =>
@@ -651,9 +700,7 @@ namespace SimConnect3
         /// <summary>Totes les finestres visibles d'aquests processos amb aquest títol, de la de dalt a la de sota.</summary>
         public static List<IntPtr> FindAll(string title, params string[] processNames)
         {
-            var pids = new HashSet<int>();
-            foreach (var n in processNames)
-                foreach (var p in System.Diagnostics.Process.GetProcessesByName(n)) { pids.Add(p.Id); p.Dispose(); }
+            var pids = Pids(processNames);
             var list = new List<IntPtr>();
             if (pids.Count == 0) return list;
             EnumWindows((h, l) =>

@@ -355,6 +355,13 @@ namespace SimConnect3
         private void PlaceFenixScreens()
         {
             var wins = FenixWindows();
+            // Pantalles ja assentades (1 minut ben col·locades): no es fa res més que mirar si la llista de finestres
+            // canvia (un pop-out nou o una finestra tancada); si canvia, es torna a activar tot.
+            if (_fxSettled && _fxSettledTitle == _currentAircraftTitle)
+            {
+                if (wins.Count == _fxSlots.Count && wins.TrueForAll(_fxSlots.ContainsKey)) return;
+                _fxSettled = false; _fxStableSince = DateTime.UtcNow;
+            }
             foreach (var h in new List<IntPtr>(_fxSlots.Keys)) if (!wins.Contains(h)) _fxSlots.Remove(h);
             foreach (var h in new List<IntPtr>(_fxSeen.Keys)) if (!wins.Contains(h)) _fxSeen.Remove(h);
             _fxTentative.RemoveWhere(h => !wins.Contains(h));
@@ -363,8 +370,14 @@ namespace SimConnect3
             for (int i = wins.Count - 1; i >= 0; i--) if (!_fxSeen.ContainsKey(wins[i])) _fxSeen[wins[i]] = (now, _fxSeq++);
             _fxLastKind.Keys.Where(h => !wins.Contains(h)).ToList().ForEach(h => { _fxLastKind.Remove(h); _fxMismatch.Remove(h); });
             bool pending = wins.Exists(h => !_fxSlots.ContainsKey(h) || _fxTentative.Contains(h));
-            bool verify = (now - _fxLastVerify).TotalSeconds >= 6;   // revisió de les ja confirmades (cada 6 s)
-            if ((pending && (now - _fxLastClassify).TotalSeconds >= 2) || verify)
+            // un cop les 4 pantalles fan 1 minut seguit ben col·locades, ja no es revisen (es torna a fer amb un altre avió)
+            if (_fxSettledTitle != _currentAircraftTitle) { _fxSettled = false; _fxStableSince = now; _fxSettledTitle = _currentAircraftTitle; }
+            bool stable = !pending && _fxSlots.Values.Count(s => s < 4) == 4 && _fxMismatch.Count == 0;
+            if (!stable) _fxStableSince = now;
+            else if ((now - _fxStableSince).TotalSeconds >= 60) _fxSettled = true;
+            bool paused = now < _fxPauseUntil;   // s'està prement / animant la palanca del tren
+            bool verify = !_fxSettled && !paused && (now - _fxLastVerify).TotalSeconds >= 6;   // revisió de les ja confirmades (cada 6 s)
+            if ((pending && !paused && (now - _fxLastClassify).TotalSeconds >= 2) || verify)
             {
                 _fxLastClassify = now;
                 if (verify) _fxLastVerify = now;
@@ -426,6 +439,9 @@ namespace SimConnect3
             UpdatePopoutMessage(4 - _fxSlots.Values.Count(s => s < 4), 4, _msfsSince, ref _fxPopoutMsgShown, FenixPopoutText);
         }
         private DateTime _fxLastClassify = DateTime.MinValue, _fxLastVerify = DateTime.MinValue;
+        private DateTime _fxPauseUntil = DateTime.MinValue, _fxStableSince = DateTime.MinValue;
+        private bool _fxSettled;               // pantalles ben col·locades 1 minut seguit: ja no es revisen
+        private string? _fxSettledTitle;       // avió amb què s'ha fet (un altre avió torna a activar la revisió)
         private readonly Dictionary<IntPtr, int> _fxLastKind = new();    // última classificació de cada finestra
         private readonly Dictionary<IntPtr, int> _fxMismatch = new();    // revisions seguides en què no sembla el seu forat
         private bool _fxPopoutMsgShown;

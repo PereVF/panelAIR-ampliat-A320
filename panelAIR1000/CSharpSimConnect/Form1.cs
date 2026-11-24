@@ -929,6 +929,7 @@ namespace SimConnect3
         private (float l, float r)? _xpThr;                             // palanques de gas des d'X-Plane (posició de l'app)
         private readonly Dictionary<(string id, bool upper), bool> _xpLegends = new();   // llegendes (tren, autofre, BRK FAN) des d'X-Plane
         private (string chr, string utc, string et)? _xpClock;          // pantalles del rellotge des d'X-Plane
+        private bool? _xpGear;                                          // palanca del tren des d'X-Plane
         private void ApplyXpLegend(string id, bool upper, bool on) =>
             _a320Overhead?.SetLegend(id, upper ? (on ? 1f : 0f) : null, upper ? null : (on ? 1f : 0f));
         private readonly Dictionary<string, int> _xpPos = new();       // posicions de selectors des d'X-Plane   // llums de tecles/polsadors des d'X-Plane                                     // selector ALT 100/1000 des d'X-Plane (true = 1000)                       // última lectura de la pantalla del FCU des d'X-Plane   // última lectura del QNH de l'A320 (veure RequestA320Baro)
@@ -5267,6 +5268,8 @@ namespace SimConnect3
             // indicadors del tren, autofre i BRK FAN (llegenda de dalt / de baix) i pantalles del rellotge
             _xp.LegendChanged += (id, upper, on) => { _xpLegends[(id, upper)] = on; ApplyXpLegend(id, upper, on); };
             _xp.ClockChanged += (c, u, e) => { _xpClock = (c, u, e); _a320Overhead?.SetClock(c, u, e); };
+            _xp.GearChanged += d => { _xpGear = d; _a320Overhead?.SetGearLever(d); };
+            _xp.A320Changed += on => { if (!on) _xpGear = null; };
             _xp.A320Changed += on => { if (!on) { _xpLegends.Clear(); _xpClock = null; _a320Overhead?.SetClock("", "", ""); } };
             _xp.A320Changed += on => { if (!on) { _xpLights.Clear(); _xpPos.Clear(); } if (_a320Overhead != null) _a320Overhead.SimDriven = on; };
             _xp.A320Changed += on => { if (!on) { _xpFcu = null; _a320Overhead?.SetFcu(new panelAIR1000.FcuState(false, 0, false, false, false, 0, false, false, false, 0, false, 0, 0, false)); } };
@@ -5907,14 +5910,18 @@ namespace SimConnect3
             // els forats de les pantalles de l'A320 es revisen cada segon (només es tornen a aplicar si han canviat)
             if (_a320Active) ApplyA320Region();
             PlaceMsfsScreens();   // MSFS + FlyByWire (no fa res si no és el cas)
-            if (_xp == null || !_xp.A320Loaded || !_a320Active || _a320Overhead == null || !_a320Overhead.Visible) return;
+            if (_xp == null || !_xp.A320Loaded || !_a320Active || _a320Overhead == null || !_a320Overhead.Visible) { _xpSettle.Title = null; return; }
+            if (DateTime.UtcNow < _fxPauseUntil) return;   // s'està prement / animant la palanca del tren
+            var xpWins = new Dictionary<string, IntPtr>();
+            foreach (var (_, title, _) in XpScreens) if (title != null) xpWins[title] = XPlaneWindows.Find(title);
+            if (SettleSkip(_xpSettle, xpWins.Values, "ToLiss")) return;
             int missing = 0;
             foreach (var (glass, title, cmd) in XpScreens)
             {
                 if (title == null) continue;
                 try
                 {
-                    var h = XPlaneWindows.Find(title);
+                    var h = xpWins[title];
                     if (h == IntPtr.Zero)
                     {
                         missing++;
@@ -5932,6 +5939,38 @@ namespace SimConnect3
                 catch { }
             }
             UpdatePopoutMessage(missing, XpScreens.Length, _xpAskedAt, ref _xpPopoutMsgShown, XpPopoutText);
+            SettleUpdate(_xpSettle, xpWins.Values, missing == 0);
+        }
+
+        /// <summary>
+        /// Aturada de la col·locació de pantalles (ToLiss i FlyByWire; el Fenix fa el mateix pel seu compte): quan totes
+        /// les pantalles porten 1 minut seguit col·locades, ja no es toquen. Només es mira si la llista de finestres canvia
+        /// (un pop-out nou o una finestra tancada) o si canvia l'avió: llavors es torna a activar tot.
+        /// </summary>
+        private sealed class ScreenSettle
+        {
+            public bool Settled; public DateTime StableSince; public string? Title;
+            public HashSet<IntPtr> Wins = new();
+        }
+        private readonly ScreenSettle _xpSettle = new(), _fbwSettle = new();
+
+        /// <summary>true si les pantalles ja estan assentades i la llista de finestres no ha canviat (no cal fer res).</summary>
+        private static bool SettleSkip(ScreenSettle s, IEnumerable<IntPtr> wins, string title)
+        {
+            var set = new HashSet<IntPtr>(wins.Where(h => h != IntPtr.Zero));
+            if (s.Title != title) { s.Title = title; s.Settled = false; s.StableSince = DateTime.UtcNow; s.Wins = set; return false; }
+            if (!s.Settled) return false;
+            if (set.SetEquals(s.Wins)) return true;
+            s.Settled = false; s.StableSince = DateTime.UtcNow; s.Wins = set;   // pop-out nou o finestra tancada
+            return false;
+        }
+
+        /// <summary>Després de col·locar: compta el minut seguit amb totes les pantalles al seu lloc.</summary>
+        private static void SettleUpdate(ScreenSettle s, IEnumerable<IntPtr> wins, bool allPlaced)
+        {
+            var set = new HashSet<IntPtr>(wins.Where(h => h != IntPtr.Zero));
+            if (!allPlaced || !set.SetEquals(s.Wins)) { s.StableSince = DateTime.UtcNow; s.Wins = set; }
+            else if ((DateTime.UtcNow - s.StableSince).TotalSeconds >= 60) s.Settled = true;
         }
 
         /// <summary>
@@ -5970,22 +6009,41 @@ namespace SimConnect3
         {
             bool active = simconnect != null && IsA320Msfs() && _a320Active && (_xp == null || !_xp.A320Loaded)
                           && _a320Overhead != null && _a320Overhead.Visible;
-            if (!active) { _msfsSince = DateTime.MinValue; return; }
+            if (!active) { _msfsSince = DateTime.MinValue; _fbwSettle.Title = null; return; }
             if (_msfsSince == DateTime.MinValue) _msfsSince = DateTime.UtcNow;
             if (IsA320Fenix()) { PlaceFenixScreens(); return; }   // Fenix: finestres sense títol propi (Form1.A320Fenix.cs)
+            if (DateTime.UtcNow < _fxPauseUntil) return;   // s'està prement / animant la palanca del tren
             int missing = 0;
+            var found = XPlaneWindows.FindEach(MsfsScreens.Select(s => s.title).Concat(FbwIsisTitles), MsfsProcesses);   // una sola passada
+            if (SettleSkip(_fbwSettle, found.Values, _currentAircraftTitle)) return;
             foreach (var (glass, title) in MsfsScreens)
             {
                 try
                 {
-                    var h = XPlaneWindows.Find(title, MsfsProcesses);
+                    var h = found[title];
                     if (h == IntPtr.Zero) { missing++; continue; }
                     if (SimWindowRect(glass, MsfsExtraHeight) is Rectangle wr) XPlaneWindows.Place(h, wr, this.Handle);
                 }
                 catch { }
             }
+            // ISIS (opcional, no compta a l'avís): al forat 4, un 21,9% més gran que el forat (al Fenix, 12,9%)
+            foreach (var title in FbwIsisTitles)
+            {
+                try
+                {
+                    var h = found[title];
+                    if (h == IntPtr.Zero || SimWindowRect(4, MsfsExtraHeight) is not Rectangle ir) continue;
+                    ir.Inflate((int)Math.Round(ir.Width * 0.1095), (int)Math.Round(ir.Height * 0.1095));
+                    XPlaneWindows.Place(h, ir, this.Handle);
+                    break;
+                }
+                catch { }
+            }
             UpdatePopoutMessage(missing, MsfsScreens.Length, _msfsSince, ref _msfsPopoutMsgShown, MsfsPopoutText);
+            SettleUpdate(_fbwSettle, found.Values, missing == 0);
         }
+        /// <summary>Títol de la finestra pop-out de l'ISIS del FlyByWire.</summary>
+        private static readonly string[] FbwIsisTitles = { "A32NX_ISIS", "ISIS" };
 
         private DateTime _xpAskedAt = DateTime.MinValue;   // quan s'han demanat les pantalles (per a l'avís de pop-out)
         private bool _xpPopoutMsgShown;                      // l'avís ja s'ha mostrat en aquesta sessió del ToLiss
@@ -6243,6 +6301,9 @@ namespace SimConnect3
                         try { AppSettings.Instance.Save(); } catch { }
                     };
                     _a320Overhead.Command += OnA320Command;
+                    // palanca del tren: mentre es prem i s'anima, el Fenix no fa la revisió de pantalles (frenaria l'animació)
+                    _a320Overhead.ElementPressed += id => { if (id == "MIP_GEAR_LEVER") _fxPauseUntil = DateTime.UtcNow.AddSeconds(3); };
+                    _a320Overhead.Command += (id, c) => { if (id == "MIP_GEAR_LEVER") _fxPauseUntil = DateTime.UtcNow.AddSeconds(3); };
                     _a320Overhead.HolesChanged += () => { if (_a320Active) ApplyA320Region(); };
                     if (_xp != null && _xp.A320Loaded && _xpBaro is var (xp, xm, xv, xhg))
                         _a320Overhead.SetBaro(xp, xm, xv, xhg);
@@ -6256,6 +6317,7 @@ namespace SimConnect3
                         if (_xpThr is var (tl, tr)) _a320Overhead.SetThrottle(tl, tr);
                         foreach (var kv in _xpLegends) ApplyXpLegend(kv.Key.id, kv.Key.upper, kv.Value);
                         if (_xpClock is var (xc, xu, xe)) _a320Overhead.SetClock(xc, xu, xe);
+                        if (_xpGear is bool xg) _a320Overhead.SetGearLever(xg);
                     }
                     else if (_a320Baro is A320BaroStruct ab)
                         _a320Overhead.SetBaro(ab.powered > 0.5, (int)Math.Round(ab.mode), ab.value, ab.isInhg > 0.5);
@@ -8102,6 +8164,13 @@ namespace SimConnect3
 
 
         protected override void WndProc(ref Message m)
+        {
+            long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+            WndProcCore(ref m);
+            double ms = (System.Diagnostics.Stopwatch.GetTimestamp() - t0) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            if (ms > 5) panelAIR1000.A320OverheadControl.GearPerf($"Form1 msg 0x{m.Msg:X} {ms:0.0}ms");
+        }
+        private void WndProcCore(ref Message m)
         {
             if (m.Msg == WM_USER_SIMCONNECT)
             {

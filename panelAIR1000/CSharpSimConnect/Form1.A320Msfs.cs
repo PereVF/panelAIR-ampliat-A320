@@ -109,6 +109,9 @@ namespace SimConnect3
             "A32NX_CHRONO_ELAPSED_TIME", "A32NX_CHRONO_ET_ELAPSED_TIME", "A32NX_CHRONO_ET_SWITCH_POS",
             // 42-45 indicador triple (frens alternatius i acumulador, en PSI) i palanca del tren (1 = avall)
             "A32NX_HYD_BRAKE_ALTN_ACC_PRESS", "A32NX_HYD_BRAKE_ALTN_LEFT_PRESS", "A32NX_HYD_BRAKE_ALTN_RIGHT_PRESS",
+            // 45 petició de la palanca del tren (el que es mou a la VC); si no existeix no canvia mai i mana GEAR HANDLE POSITION
+            "A32NX_GEAR_LEVER_POSITION_REQUEST",
+            // 46 posició animada de la palanca 3D (0 amunt … 1 avall): diu si la palanca de la VC s'ha mogut de debò
             "A32NX_GEAR_HANDLE_POSITION",
         };
         /// <summary>Variables de simulació (amb unitat) que es llegeixen després dels selectors: A/SKID (1 = ON) i hora UTC (s).</summary>
@@ -116,10 +119,11 @@ namespace SimConnect3
         {
             ("ANTISKID BRAKES ACTIVE", "Bool"), ("ZULU TIME", "Seconds"),   // (amb el prefix "E:" SimConnect torna 0)
             ("ZULU MONTH OF YEAR", "Number"), ("ZULU DAY OF MONTH", "Number"), ("ZULU YEAR", "Number"),   // data del DATE
+            ("GEAR HANDLE POSITION", "Bool"),   // maneta del tren (canvia de cop; la LVAR del FBW és l'animació 3D)
         };
 
         // lectura: pantalla + llums + selectors + variables de simulació, tot en un sol bloc de nombres
-        const int MsfsA320ReadCount = 46 + 17 + 4 + 5;
+        const int MsfsA320ReadCount = 47 + 17 + 4 + 6;
 
         /// <summary>
         /// DATE del rellotge al FBW: el FBW canvia entre hora i data a cada ordre i no té cap LVAR que ho digui. L'app envia
@@ -186,6 +190,7 @@ namespace SimConnect3
         private (string chr, string utc, string et)? _msClock;                           // pantalles del rellotge
         private (float accu, float left, float right)? _msBrakes;                        // indicador triple (milers de PSI)
         private bool? _msGearDown;                                                       // palanca del tren
+        private bool? _msGearAnimDown;                                                   // palanca 3D (amb marge del 5%)
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct A320GlareStruct
         {
@@ -312,6 +317,38 @@ namespace SimConnect3
                     System.Threading.Tasks.Task.Delay(150).ContinueWith(_ => { try { BeginInvoke(new Action(() => SendGenericRpn($"0 (>L:{abLvar})"))); } catch { } });
                     return true;
                 }
+                // ISIS (codis dels presets de HubHop del FBW): BUGS i LS canvien el seu estat; + i − es premen i es deixen
+                // anar; el pom gira en sentit horari / antihorari o es prem (els codis decideixen si mou els bugs o el QNH)
+                switch (id)
+                {
+                    case "MIP_ISIS_BUGS" when cmd == "PUSH":
+                        SendGenericRpn("(>H:A32NX_ISIS_BUGS_PRESSED) (L:A32NX_ISIS_BUGS_ACTIVE) ! (>L:A32NX_ISIS_BUGS_ACTIVE)"); return true;
+                    case "MIP_ISIS_LS" when cmd == "PUSH":
+                        SendGenericRpn("(>H:A32NX_ISIS_LS_PRESSED) (L:A32NX_ISIS_LS_ACTIVE) ! (>L:A32NX_ISIS_LS_ACTIVE)"); return true;
+                    case "MIP_ISIS_RST" when cmd == "PUSH":
+                        SendGenericRpn("0 (>H:A32NX_ISIS_RST_PRESSED)"); return true;
+                    case "MIP_ISIS_PLUS" or "MIP_ISIS_MINUS" when cmd == "PUSH":
+                    {
+                        string b = id == "MIP_ISIS_PLUS" ? "PLUS" : "MINUS";
+                        SendGenericRpn($"(>H:A32NX_ISIS_{b}_PRESSED)");
+                        System.Threading.Tasks.Task.Delay(150).ContinueWith(_ => { try { BeginInvoke(new Action(() => SendGenericRpn($"(>H:A32NX_ISIS_{b}_RELEASED)"))); } catch { } });
+                        return true;
+                    }
+                    case "MIP_ISIS_BARO" when cmd == "INC" || cmd == "DEC":
+                    {
+                        string h = cmd == "INC" ? "A32NX_ISIS_KNOB_CLOCKWISE" : "A32NX_ISIS_KNOB_ANTI_CLOCKWISE";
+                        string k = cmd == "INC" ? "KOHLSMAN_INC" : "KOHLSMAN_DEC";
+                        string op = cmd == "INC" ? "++" : "--";
+                        SendGenericRpn($"(L:A32NX_ISIS_BUGS_ACTIVE, enum) 1 == if{{ 0 (>H:{h}) }} els{{ (L:A32NX_ISIS_BARO_MODE, enum) 1 != if{{ " +
+                                       $"(L:A32NX_ISIS_BARO_UNIT_INHG, enum) if{{ 3 (>K:{k}) }} els{{ 3 (A:KOHLSMAN SETTING MB:3, millibars) {op} 16 * (>K:2:KOHLSMAN_SET) }} }} }}");
+                        return true;
+                    }
+                    case "MIP_ISIS_BARO" when cmd == "PUSH":
+                        SendGenericRpn("(L:A32NX_ISIS_BUGS_ACTIVE, bool) if{ 0 (>H:A32NX_ISIS_KNOB_PRESSED, number) } els{ (L:A32NX_ISIS_BARO_MODE, enum) 0 == if{ " +
+                                       "1 (>L:A32NX_ISIS_BARO_MODE, enum) (A:KOHLSMAN SETTING MB:2, bars) 16000 * (>O:A32NX_ISIS_BARO_SAVED, number) 2 16211 (>K:2:KOHLSMAN_SET) } " +
+                                       "els{ 0 (>L:A32NX_ISIS_BARO_MODE, enum) 2 (O:A32NX_ISIS_BARO_SAVED, number) (>K:2:KOHLSMAN_SET) } }");
+                        return true;
+                }
                 // palanca del tren: ordres estàndard que el FBW intercepta (a terra, el bloqueig de la palanca la frena)
                 if (id == "MIP_GEAR_LEVER" && (cmd == "UP" || cmd == "DOWN")) { SendGenericRpn(cmd == "UP" ? "(>K:GEAR_UP)" : "(>K:GEAR_DOWN)"); return true; }
                 if (id == "MIP_BRK_FAN" && cmd == "PUSH") { SendGenericRpn("(L:A32NX_BRAKE_FAN_BTN_PRESSED) ! (>L:A32NX_BRAKE_FAN_BTN_PRESSED)"); return true; }
@@ -377,7 +414,6 @@ namespace SimConnect3
             string chrTxt = chr > 0 ? $"{Math.Min(99, cs / 60):00}:{cs % 60:00}" : "";
             string etTxt = et >= 0 ? $"{Math.Min(99, es / 3600):00}:{es / 60 % 60:00}" : "";
             _msBrakes = ((float)(v[42] / 1000.0), (float)(v[43] / 1000.0), (float)(v[44] / 1000.0));
-            _msGearDown = v[45] > 0.5;
             int etPos = (int)Math.Round(v[41]);
             if (etPos >= 0 && etPos <= 2) _msPos["MIP_CLK_RUN"] = etPos;
             int k = MsfsA320Display.Length;
@@ -393,6 +429,16 @@ namespace SimConnect3
             int us = (int)Math.Floor(Math.Max(0, v[k++])) % 86400;
             int zm = (int)Math.Round(v[k++]), zd = (int)Math.Round(v[k++]), zy = (int)Math.Round(v[k++]);
             _msZulu = (us, zm, zd, zy);
+            // tren: la petició (moure la palanca a la VC) arriba de seguida i és la que fa començar l'animació de l'app;
+            // passats 0,3 s mana la palanca 3D: si no ha sortit de l'extrem on era, la palanca no s'ha mogut (p.ex. bloquejada
+            // a terra) i l'app torna enrere. (La palanca 3D es dona per moguda en quan surt un 5% del seu extrem.)
+            // (mesurat en vol: la petició, v[45], salta 0/1 a cada lectura mentre el tren es mou; no es fa servir)
+            double gAnim = v[46]; k++;   // (GEAR HANDLE POSITION: tarda uns 5 s, no es fa servir)
+            bool ad = _msGearAnimDown ?? gAnim > 0.5;
+            if (ad && gAnim < 0.95) ad = false; else if (!ad && gAnim > 0.05) ad = true;
+            _msGearAnimDown = ad;
+            _msGearDown = ad;
+            panelAIR1000.A320OverheadControl.GearPerf($"fbw req={v[45]:0.##} anim={gAnim:0.###} -> {ad}");
             _msClock = (chrTxt, MsUtcText(), etTxt);
             ApplyMsfsA320State();
         }
@@ -402,21 +448,33 @@ namespace SimConnect3
         {
             var ov = _a320Overhead;
             if (ov == null || !_msA320Data || (_xp != null && _xp.A320Loaded)) return;
+            // (mesura temporal: quant tarda cada part)
+            var sw = System.Diagnostics.Stopwatch.StartNew(); var parts = new System.Text.StringBuilder();
+            void Mark(string n) { parts.Append($" {n}={sw.Elapsed.TotalMilliseconds:0.0}"); sw.Restart(); }
             ov.SimDriven = true;
             if (_msFcu != null) ov.SetFcu(_msFcu);
+            Mark("fcu");
             if (_msAltStep is bool st) ov.SetKnobRing("MIP_FCU_ALT", st);
             foreach (var kv in _msLights) ov.SetLight(kv.Key, kv.Value);
+            Mark("lights");
             foreach (var kv in _msPos) ov.SetPosition(kv.Key, kv.Value);
+            Mark("pos");
             // palanques de gas: només amb el FlyByWire (amb el Fenix aquestes LVARs no existeixen i valdrien 0)
             if (_msThr is var (tl, tr) && IsA320FBW()) ov.SetThrottle(tl, tr);
+            Mark("thr");
             if (IsA320FBW())
             {
                 foreach (var kv in _msLegends)
                     ov.SetLegend(kv.Key.id, kv.Key.upper ? (kv.Value ? 1f : 0f) : null, kv.Key.upper ? null : (kv.Value ? 1f : 0f));
+                Mark("legends");
                 if (_msClock is var (mc, mu, me)) ov.SetClock(mc, mu, me);
+                Mark("clock");
                 if (_msBrakes is var (ba, bl, br)) ov.SetBrakeGauge(ba, bl, br);
+                Mark("brakes");
                 if (_msGearDown is bool gd) ov.SetGearLever(gd);
+                Mark("gear");
             }
+            panelAIR1000.A320OverheadControl.GearPerf("apply" + parts + $" gearDown={_msGearDown}");
         }
     }
 }

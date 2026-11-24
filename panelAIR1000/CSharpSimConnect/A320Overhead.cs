@@ -859,8 +859,9 @@ namespace panelAIR1000
         /// <summary>Fins quan no s'han de fer cas les lectures del simulador per a cada palanca (acabada d'arrossegar).</summary>
         public double HoldL, HoldR;
         public bool Grabbing => _grab != 0;
-        public bool HeldL(double now) => (_grab != 0 && (_grab < 0 || _grabBoth)) || now < HoldL;
-        public bool HeldR(double now) => (_grab != 0 && (_grab > 0 || _grabBoth)) || now < HoldR;
+        // amb el simulador connectat, les palanques només les mou el que es llegeix del simulador (mai el dit)
+        public bool HeldL(double now) => !Owner.SimDriven && ((_grab != 0 && (_grab < 0 || _grabBoth)) || now < HoldL);
+        public bool HeldR(double now) => !Owner.SimDriven && ((_grab != 0 && (_grab > 0 || _grabBoth)) || now < HoldR);
 
         public override void PressStart(PointF p)
         {
@@ -889,7 +890,7 @@ namespace panelAIR1000
             if (MathF.Abs(v - _last) < 0.001f) return;
             _last = v;
             float l = _grab < 0 || _grabBoth ? v : PosL, r = _grab > 0 || _grabBoth ? v : PosR;
-            Owner.MoveThrottle(l, r);
+            if (!Owner.SimDriven) Owner.MoveThrottle(l, r);   // amb simulador: només s'envia; es mourà amb la lectura
             if (Now - _lastSend >= 0.04) Send();
         }
 
@@ -3447,9 +3448,39 @@ namespace panelAIR1000
             Bounds = new RectangleF(cx - halfWidth - 4, top - knobH - 4, halfWidth * 2 + 8, bottom - top + knobH * 2 + 8);
         }
         public override int State => Down ? 1 : 0;
-        public override bool Animating => Math.Abs(_pos - (Down ? 1 : 0)) > 0.001f;
-        public override void Tick(float dt) => _pos = Approach(_pos, Down ? 1 : 0, dt * 2.5f);
-        public override void Tap(PointF p) { Down = !Down; Owner.RaiseCommand(Id, Down ? "DOWN" : "UP"); Changed(); }
+        // En tocar-la fa tot el recorregut lliure (1 s) i envia l'ordre; durant 2 s no fa cas del simulador.
+        // Als 2 s mira la palanca del simulador: si no ha fet el canvi, torna enrere; si l'ha fet, es queda.
+        float _holdT;      // temps que falta per tornar a fer cas del simulador
+        bool? _simDown;    // última posició llegida del simulador
+        public override bool Animating => Math.Abs(_pos - (Down ? 1 : 0)) > 0.001f || _holdT > 0;
+        public override void Tick(float dt)
+        {
+            _pos = Approach(_pos, Down ? 1 : 0, dt * 1f);   // recorregut sencer en 1 s
+            if (_holdT > 0 && (_holdT -= dt) <= 0)
+            {
+                A320OverheadControl.GearPerf($"decisio app={Down} sim={_simDown}");
+                if (_simDown is bool s && s != Down) Down = s;
+            }
+        }
+        public override void Tap(PointF p)
+        {
+            Down = !Down;
+            if (Owner.SimDriven) _holdT = 2f;
+            A320OverheadControl.GearPerfOn = true;
+            A320OverheadControl.GearPerf($"tap down={Down}");
+            Changed();   // l'animació comença abans d'enviar l'ordre
+            var t0 = Stopwatch.GetTimestamp();
+            Owner.RaiseCommand(Id, Down ? "DOWN" : "UP");
+            A320OverheadControl.GearPerf($"ordre enviada {(Stopwatch.GetTimestamp() - t0) * 1000.0 / Stopwatch.Frequency:0.0}ms");
+        }
+        /// <summary>Posició llegida del simulador. Retorna true si la palanca s'ha de moure (fora del segon d'espera).</summary>
+        public bool SetFromSim(bool down)
+        {
+            _simDown = down;
+            if (_holdT > 0 || Down == down) return false;
+            Down = down;
+            return true;
+        }
 
         /// <summary>Cilindre negre vertical (gradient horitzontal) amb un reflex gris a dalt.</summary>
         static void Cylinder(Graphics g, RectangleF r, float kh)
@@ -3747,6 +3778,20 @@ namespace panelAIR1000
         public event Action<string, int>? ElementChanged;
         /// <summary>Ordre d'un element cap a l'avió (id, ordre), p.ex. ("MIP_BARO", "INC").</summary>
         public event Action<string, string>? Command;
+
+        // ─── mesura temporal de la palanca del tren (fitxer %TEMP%\panelair_gear.log) ───
+        static readonly System.Text.StringBuilder s_gearLog = new();
+        static readonly Stopwatch s_perfClock = Stopwatch.StartNew();
+        public static bool GearPerfOn;
+        public static void GearPerf(string s) { if (GearPerfOn && s_gearLog.Length < 300000) s_gearLog.Append($"{s_perfClock.Elapsed.TotalMilliseconds:0.0} {s}\r\n"); }
+        static void GearPerfFlush()
+        {
+            try { System.IO.File.AppendAllText(System.IO.Path.Combine(System.IO.Path.GetTempPath(), "panelair_gear.log"), s_gearLog + "----\r\n"); } catch { }
+            s_gearLog.Clear(); GearPerfOn = false;
+        }
+        double _gearLastTick;
+        /// <summary>S'ha començat a prémer un element (amb el dit o el ratolí), abans de deixar-lo anar.</summary>
+        public event Action<string>? ElementPressed;
         internal void RaiseCommand(string id, string cmd) => Command?.Invoke(id, cmd);
 
         /// <summary>
@@ -3870,9 +3915,8 @@ namespace panelAIR1000
         /// <summary>Palanca del tren llegida del simulador (true = avall).</summary>
         public void SetGearLever(bool down)
         {
-            if (!_byId.TryGetValue("MIP_GEAR_LEVER", out var e) || e is not OhGearLever gl || gl.Down == down) return;
-            gl.Down = down;
-            if (gl.Animating) { _animating.Add(gl); StartAnim(); }
+            if (!_byId.TryGetValue("MIP_GEAR_LEVER", out var e) || e is not OhGearLever gl || !gl.SetFromSim(down)) return;
+            if (gl.Animating) { GearPerfOn = true; GearPerf($"sim mou palanca down={down}"); _animating.Add(gl); StartAnim(); }
         }
 
         /// <summary>Pantalla del FCU llegida del simulador.</summary>
@@ -4101,18 +4145,22 @@ namespace panelAIR1000
         public void SetLegend(string id, float? upper, float? lower)
         {
             if (!_byId.TryGetValue(id, out var el)) return;
+            // només es redibuixa si ha canviat alguna cosa (el simulador ho envia a cada lectura)
+            bool changed = false;
+            void Put(ref float f, float? v) { if (v is float x && (x = Math.Clamp(x, 0f, 1f)) != f) { f = x; changed = true; } }
             if (el is OhPushButton pb)
             {
-                if (upper.HasValue) pb.UpperLevel = Math.Clamp(upper.Value, 0f, 1f);
-                if (lower.HasValue) { pb.LowerLevel = Math.Clamp(lower.Value, 0f, 1f); }
+                float u = pb.UpperLevel, l = pb.LowerLevel; Put(ref u, upper); Put(ref l, lower);
+                if (changed) { pb.UpperLevel = u; pb.LowerLevel = l; }
             }
-            else if (el is OhFireButton fb && upper.HasValue) fb.Lit = Math.Clamp(upper.Value, 0f, 1f);
+            else if (el is OhFireButton fb && upper.HasValue) { float f = fb.Lit; Put(ref f, upper); if (changed) fb.Lit = f; }
             else if (el is OhGearInd gi)
             {
-                if (upper.HasValue) gi.Unlk = Math.Clamp(upper.Value, 0f, 1f);
-                if (lower.HasValue) gi.Down = Math.Clamp(lower.Value, 0f, 1f);
+                float u = gi.Unlk, d = gi.Down; Put(ref u, upper); Put(ref d, lower);
+                if (changed) { gi.Unlk = u; gi.Down = d; }
             }
-            Redraw(TopDirty(el));
+            else changed = true;
+            if (changed) Redraw(TopDirty(el));
         }
 
         public void SetDisplay(string id, string text)
@@ -4275,18 +4323,56 @@ namespace panelAIR1000
                 (int)Math.Ceiling(logical.Right * _s) + 1, (int)Math.Ceiling((logical.Bottom - CurShift) * _s) + 1);
             px.Intersect(new Rectangle(0, 0, _bmp.Width, _bmp.Height));
             if (px.Width <= 0 || px.Height <= 0) return;
+            if (_fastBg != null && px.IntersectsWith(_fastPx)) DropFast();   // el fons guardat ja no val
             DrawContent(_bmp, _s, px, CancellationToken.None);
             if (invalidate) Invalidate(new Rectangle(px.X + _offX, px.Y + _offY - _scrollY, px.Width, px.Height));
         }
 
-        /// <summary>Dibuixa la zona px (píxels del bitmap) del panell a l'escala s. Pot córrer en segon pla.</summary>
-        void DrawContent(Bitmap target, float s, Rectangle px, CancellationToken ct)
+        // Animació llarga (palanca del tren): el fons de sota (tot el que es dibuixa abans de l'element, sense la llum
+        // global) es guarda un cop i a cada fotograma només es copia i s'hi dibuixa l'element, el que té a sobre i la llum.
+        Bitmap? _fastBg, _fastBmp; OhElement? _fastEl; Rectangle _fastPx; float _fastS, _fastShift;
+        void DropFast() { _fastBg?.Dispose(); _fastBg = null; _fastEl = null; }
+        void RedrawFast(OhElement el)
         {
-            float sh = CurShift;
-            var lr = RectangleF.FromLTRB(px.Left / s, px.Top / s + sh, px.Right / s, px.Bottom / s + sh);
-            using var g = Graphics.FromImage(target);
+            if (_bmp == null) return;
+            if (_bgRendering) { Redraw(el.DirtyBounds); return; }
+            var logical = el.DirtyBounds;
+            var px = Rectangle.FromLTRB(
+                (int)Math.Floor(logical.Left * _s) - 1, (int)Math.Floor((logical.Top - CurShift) * _s) - 1,
+                (int)Math.Ceiling(logical.Right * _s) + 1, (int)Math.Ceiling((logical.Bottom - CurShift) * _s) + 1);
+            px.Intersect(new Rectangle(0, 0, _bmp.Width, _bmp.Height));
+            if (px.Width <= 0 || px.Height <= 0) return;
+            var dst = new Rectangle(0, 0, px.Width, px.Height);
+            if (_fastBg == null || _fastBmp != _bmp || _fastEl != el || _fastPx != px || _fastS != _s || _fastShift != CurShift)
+            {
+                DropFast();
+                DrawContent(_bmp, _s, px, CancellationToken.None, el, false);
+                _fastBg = new Bitmap(px.Width, px.Height, PixelFormat.Format32bppPArgb);
+                using (var cg = Graphics.FromImage(_fastBg)) { cg.CompositingMode = CompositingMode.SourceCopy; cg.DrawImage(_bmp, dst, px, GraphicsUnit.Pixel); }
+                _fastEl = el; _fastBmp = _bmp; _fastPx = px; _fastS = _s; _fastShift = CurShift;
+            }
+            using (var g = Graphics.FromImage(_bmp))
+            {
+                g.CompositingMode = CompositingMode.SourceCopy;
+                g.DrawImage(_fastBg, px, dst, GraphicsUnit.Pixel);
+                g.CompositingMode = CompositingMode.SourceOver;
+                float sh = CurShift;
+                var lr = RectangleF.FromLTRB(px.Left / _s, px.Top / _s + sh, px.Right / _s, px.Bottom / _s + sh);
+                PrepareGraphics(g, _s, px, sh);
+                bool after = false;
+                foreach (var e in _els)
+                {
+                    if (e == el) after = true;
+                    if (after && e.DirtyBounds.IntersectsWith(lr)) e.Draw(g);
+                }
+                DrawLighting(g);
+            }
+            Invalidate(new Rectangle(px.X + _offX, px.Y + _offY - _scrollY, px.Width, px.Height));
+        }
+
+        static void PrepareGraphics(Graphics g, float s, Rectangle px, float sh)
+        {
             g.SetClip(px);
-            g.FillRectangle(Brushes.Black, px);
             g.SmoothingMode = SmoothingMode.AntiAlias;
             g.TextRenderingHint = TextRenderingHint.AntiAlias;
             g.PixelOffsetMode = PixelOffsetMode.Half;
@@ -4294,6 +4380,18 @@ namespace panelAIR1000
             g.ScaleTransform(s, s);
             g.TranslateTransform(0, -sh);
             Oh.PixelScale = s;
+        }
+
+        /// <summary>Dibuixa la zona px (píxels del bitmap) del panell a l'escala s. Pot córrer en segon pla.
+        /// Amb stopAt, s'atura abans d'aquest element; lighting = false no hi posa la llum global.</summary>
+        void DrawContent(Bitmap target, float s, Rectangle px, CancellationToken ct, OhElement? stopAt = null, bool lighting = true)
+        {
+            float sh = CurShift;
+            var lr = RectangleF.FromLTRB(px.Left / s, px.Top / s + sh, px.Right / s, px.Bottom / s + sh);
+            using var g = Graphics.FromImage(target);
+            g.SetClip(px);
+            g.FillRectangle(Brushes.Black, px);
+            PrepareGraphics(g, s, px, sh);
             DrawFrame(g);
             foreach (var si in _silk)
             {
@@ -4303,9 +4401,10 @@ namespace panelAIR1000
             foreach (var e in _els)
             {
                 if (ct.IsCancellationRequested) return;
+                if (e == stopAt) break;
                 if (e.DirtyBounds.IntersectsWith(lr)) e.Draw(g);
             }
-            DrawLighting(g);
+            if (lighting) DrawLighting(g);
         }
 
         static readonly PointF[] FramePoly =
@@ -4859,7 +4958,9 @@ namespace panelAIR1000
             foreach (var el in _animating.ToArray())
             {
                 el.Tick(dt);
-                Redraw(TopDirty(el));
+                if (el is OhGearLever && el.Animating) RedrawFast(el);
+                else { if (el == _fastEl) DropFast(); Redraw(TopDirty(el)); }
+                if (el is OhGearLever) { GearPerf($"tick gap={(now - _gearLastTick) * 1000:0.0}ms"); _gearLastTick = now; if (!el.Animating) GearPerfFlush(); }
                 if (!el.Animating) _animating.Remove(el);
             }
 
@@ -4975,6 +5076,7 @@ namespace panelAIR1000
         {
             if (_bmp == null || ElementAt(pt, out var pp) is not OhElement pe) return;
             _pressEl = pe;
+            ElementPressed?.Invoke(pe.Id);
             pe.PressStart(pp);
             if (pe.Animating) { _animating.Add(pe); StartAnim(); }
         }
