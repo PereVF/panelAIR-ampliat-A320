@@ -22,17 +22,30 @@ namespace panelAIR1000
         static readonly PointF[] PedFramePoly = MakePedFrame();
         static PointF[] MakePedFrame()
         {
-            PointF P(float x, float y) => new(x * PedK, y * PedK);
-            // part ampla (MCDU, RMP, ACP, quadrant de gas) i, a sota, la part estreta (frens, flaps, trim de direcció)
-            var pts = new[]
+            // Com l'overhead: marc de gruix constant (14 unitats lògiques entre la vora dels panells i la vora del
+            // marc) i cantonades de radi 2,5 (el mateix que els panells). Envolupant dels panells (px de referència):
+            //   part ampla x 66.6..1925.4, y 30..1930 · part estreta x 272..1696, fins a y 2987 (tires estriades fins a 3100)
+            const float gap = 14f;
+            float L = SideL0 * PedK - gap, Rr = SideR1 * PedK + gap, T = 30 * PedK - gap, Yw = 1930 * PedK + gap;
+            float NL = 272 * PedK - gap, NR = 1696 * PedK + gap, B = 3100 * PedK + gap;   // a baix, sota les tires estriades
+            return Oh.RoundAll(new PointF[]
             {
-                P(996, 0), P(1992, 0), P(1992, 1950), P(1746, 1950), P(1746, 3080),
-                P(212, 3080), P(212, 1950), P(0, 1950), P(0, 0), P(500, 0)
-            };
-            float[] rad = { 0, 28, 50, 50, 40, 40, 50, 50, 28, 0 };
-            for (int i = pts.Length - 2; i >= 1; i--) pts = Oh.RoundAt(pts, i, rad[i] * PedK);
-            return pts;
+                new(L, T), new(Rr, T), new(Rr, Yw), new(NR, Yw), new(NR, B), new(NL, B), new(NL, Yw), new(L, Yw)
+            }, 2.5f);
         }
+
+        // Columnes laterals (MCDU, RMP, ACP...): estretes perquè quedin a 6 unitats lògiques (9,6 px de referència) de
+        // la columna central, com l'espai entre panells de l'overhead; el mateix retall a la vora exterior (simètric).
+        //   esquerra: 62..595 → 66.6..590.4 · dreta: 1396..1929 → 1399.6..1925.4
+        const float SideL0 = 66.6f, SideL1 = 590.4f, SideR0 = 1399.6f, SideR1 = 1925.4f;
+        static float SideX(float x) => x switch { 62f => SideL0, 595f => SideL1, 1396f => SideR0, 1929f => SideR1, _ => x };
+
+        /// <summary>Pom de la GRAVITY GEAR (sobresurt per sota del marc; la capa no el retalla).</summary>
+        static readonly PointF[] PedGearKnob =
+        {
+            new(946 * PedK, 3108 * PedK), new(1006 * PedK, 3108 * PedK), new(1056 * PedK, 3168 * PedK),
+            new(1046 * PedK, 3206 * PedK), new(908 * PedK, 3206 * PedK), new(898 * PedK, 3168 * PedK)
+        };
 
         void BuildPedestal()
         {
@@ -41,7 +54,17 @@ namespace panelAIR1000
             PointF Pt(float x, float y) => new(x * k, y * k);
             void Lb(string t, float x, float y, float size, bool bold = true) => _silk.Add(new OhLabel(t, x * k, y * k, size, Oh.Silk, bold));
             void Vt(string t, float x, float y, float size) => _silk.Add(new OhVText(t, x * k, y * k, size));
-            void Pp(float x0, float y0, float x1, float y1) => _silk.Add(new OhPanel(R(x0, y0, x1, y1), true, 70f));
+            // DZUS (mida i osca com a l'overhead) només on n'hi ha a la imatge de referència: l = alçades a la vora esquerra, r = a la dreta
+            // lc / rc = alçades dels cargols d'estrella grans que van a la mateixa osca que un DZUS
+            float[] Sk(float[]? v) => (v ?? Array.Empty<float>()).Select(y => y * k).ToArray();
+            void Pp(float x0, float y0, float x1, float y1, float[]? l = null, float[]? r = null, float[]? lc = null, float[]? rc = null) =>
+                _silk.Add(new OhPanel(R(SideX(x0), y0, SideX(x1), y1), Sk(l), Sk(r), 1.5f, 2.5f, Sk(lc), Sk(rc)));
+            float[] Y(params float[] v) => v;
+            // cargols solts (no DZUS), en px de referència: estrella gran, estrella petit, "+" encastat, ranura petit
+            void ScX(params float[] xy) { for (int i = 0; i < xy.Length; i += 2) _silk.Add(new OhScrew(PedScrewKind.Cross, xy[i] * k, xy[i + 1] * k, 8.4f)); }
+            void ScP(params float[] xy) { for (int i = 0; i < xy.Length; i += 2) _silk.Add(new OhScrew(PedScrewKind.Plus, xy[i] * k, xy[i + 1] * k, 6.2f)); }
+            void ScL(params float[] xy) { for (int i = 0; i < xy.Length; i += 2) _silk.Add(new OhScrew(PedScrewKind.Slot, xy[i] * k, xy[i + 1] * k, 8.4f)); }
+            void ScS(params float[] xy) { for (int i = 0; i < xy.Length; i += 2) _silk.Add(new OhScrew(PedScrewKind.Slot, xy[i] * k, xy[i + 1] * k, 6.2f)); }
             void Wl(params float[] xy)
             {
                 var pts = new PointF[xy.Length / 2];
@@ -67,15 +90,48 @@ namespace panelAIR1000
             // ═══════════════ MCDU (capità a l'esquerra, primer oficial a la dreta) ═══════════════
             void Mcdu(string p, float dx)
             {
-                Pp(62 + dx, 30, 595 + dx, 856);
-                _silk.Add(new OhScreen(R(143 + dx, 53, 507 + dx, 372), R(155 + dx, 65, 495 + dx, 360), 12f * k, false));
+                // L = MCDU de l'esquerra, refeta segons la imatge de referència (la de la dreta, de moment, com abans)
+                bool L = dx == 0;
+                if (L)
+                {
+                    // 1) planxa de sota: llisa, sense osques (els DZUS hi queden per sobre)
+                    Pp(62, 30, 595, 856);
+                    // 2) planxa de la cara (tecles laterals, lletres i números): osques DZUS a la meitat de dalt; a la
+                    //    meitat de baix va per dins de la nansa
+                    _silk.Add(new OhMcduFace(k));
+                    // nansa d'extracció: braços des del capdamunt de les frontisses, desviament als DZUS de baix i tram de baix
+                    _silk.Add(new OhMcduHandle(k));
+                    // 6 DZUS: 4 a les cantonades i 2 sobre les frontisses
+                    foreach (var (sx, sy) in new[] { (83.04f, 75f), (573.96f, 75f), (83.04f, 453f), (573.96f, 453f), (83.04f, 813f), (573.96f, 813f) })
+                        _silk.Add(new OhScrew(PedScrewKind.Dzus, sx * k, sy * k, 8.4f));
+                    // 3) planxa de les tecles de control (DIR…MCDU MENU, AIR PORT, NEXT PAGE, fletxes), aixecada sobre la cara
+                    _silk.Add(new OhPanel(Oh.RoundAll(new[] { Pt(116, 376), Pt(466, 376), Pt(466, 428), Pt(532, 428), Pt(532, 482),
+                                                              Pt(262, 482), Pt(262, 626), Pt(116, 626) }, 4f * k), Array.Empty<PointF>()));
+                    // marc gris clar de cantonades molt arrodonides (pantalla interior: la mateixa de sempre)
+                    _silk.Add(new OhMcduBezel(R(138, 48, 512, 378), R(155, 65, 495, 360), 30f * k, 10f * k));
+                }
+                else
+                {
+                    Pp(62 + dx, 30, 595 + dx, 856, Y(75, 215, 455), Y(75, 455));
+                    _silk.Add(new OhScreen(R(143 + dx, 53, 507 + dx, 372), R(155 + dx, 65, 495 + dx, 360), 12f * k, false));
+                }
                 _silk.Add(new OhLed((131 + dx) * k, 48 * k, 8f * k));
                 _silk.Add(new OhLed((510 + dx) * k, 46 * k, 8f * k));
                 for (int i = 0; i < 6; i++)
                 {
                     float y = 103 + i * 43.4f;
-                    PK(p + "_LSK" + (i + 1) + "L", 117 + dx, y, 40, 26, "—");
-                    PK(p + "_LSK" + (i + 1) + "R", 533 + dx, y, 40, 26, "—");
+                    if (L)
+                    {
+                        // més amples i més baixes, amb el traç blanc que assenyala la pantalla
+                        PK(p + "_LSK" + (i + 1) + "L", 112, y, 44, 22, "—");
+                        PK(p + "_LSK" + (i + 1) + "R", 538, y, 44, 22, "—");
+                        Wl(134, y, 143, y); Wl(507, y, 516, y);
+                    }
+                    else
+                    {
+                        PK(p + "_LSK" + (i + 1) + "L", 117 + dx, y, 40, 26, "—");
+                        PK(p + "_LSK" + (i + 1) + "R", 533 + dx, y, 40, 26, "—");
+                    }
                 }
                 Lb("BRT", 533 + dx, 363, 9f);
                 Kn(p + "_BRT", 508 + dx, 393, 8f, 4, Brt, KnobStyle.Round);
@@ -90,7 +146,9 @@ namespace panelAIR1000
                 foreach (var f in fk)
                 {
                     string id = p + "_" + (f.a + (f.b ?? "")).Replace("-", "").Replace("↑", "UP").Replace("↓", "DOWN").Replace("←", "PREV").Replace("→", "NEXT");
-                    PK(id, f.x + dx, f.y, 60, f.h, f.a, f.b, 12f);
+                    bool arrow = f.a is "↑" or "↓" or "←" or "→";
+                    var fkey = PK(id, f.x + dx, f.y, 60, f.h, f.a, f.b, L && arrow ? 30f : 12f);
+                    if (L && arrow) fkey.ArrowDir = f.a switch { "↑" => 1, "↓" => 2, "←" => 3, _ => 4 };
                 }
                 // lletres
                 string[] rows = { "ABCDE", "FGHIJ", "KLMNO", "PQRST", "UVWXY" };
@@ -98,10 +156,14 @@ namespace panelAIR1000
                 float[] ly = { 536, 589, 643, 697, 750 };
                 for (int r = 0; r < 5; r++)
                     for (int c = 0; c < 5; c++)
-                        PK(p + "_KEY_" + rows[r][c], lx[c] + dx, ly[r], 42, 40, rows[r][c].ToString(), null, 15f);
-                PK(p + "_KEY_Z", lx[0] + dx, 809, 42, 40, "Z", null, 15f);
-                PK(p + "_KEY_SLASH2", lx[1] + dx, 809, 42, 40, "-", null, 15f);   // − (signe)
-                PK(p + "_KEY_PLUS", lx[2] + dx, 809, 42, 40, "+", null, 15f);
+                    {
+                        var key = PK(p + "_KEY_" + rows[r][c], lx[c] + dx, ly[r], 42, 40, rows[r][c].ToString(), null, L ? 18f : 15f);
+                        if (L) key.TextScale = 1.3f;
+                        if (L && "ENSW".Contains(rows[r][c])) { key.BoxLabel = true; key.TextScale = 1.05f; }
+                    }
+                PK(p + "_KEY_Z", lx[0] + dx, 809, 42, 40, "Z", null, L ? 18f : 15f).TextScale = L ? 1.3f : 1f;
+                PK(p + "_KEY_SLASH2", lx[1] + dx, 809, 42, 40, "-", null, L ? 18f : 15f).TextScale = L ? 1.3f : 1f;   // − (signe)
+                PK(p + "_KEY_PLUS", lx[2] + dx, 809, 42, 40, "+", null, L ? 18f : 15f).TextScale = L ? 1.3f : 1f;
                 PK(p + "_KEY_OVFY", lx[3] + dx, 809, 42, 40, "OVFY", "Δ", 10f);
                 PK(p + "_KEY_CLR", lx[4] + dx, 809, 42, 40, "CLR", null, 11f);
                 // xifres (tecles rodones)
@@ -124,7 +186,7 @@ namespace panelAIR1000
             // ═══════════════ RMP ═══════════════
             void Rmp(string p, float dx, string act, string stby)
             {
-                Pp(62 + dx, 866, 595 + dx, 1182);
+                Pp(62 + dx, 866, 595 + dx, 1182, Y(915, 1130), Y(915, 1130));
                 Lb("ACTIVE", 190 + dx, 888, 15f); Lb("STBY/CRS", 452 + dx, 888, 15f);
                 Seg(p + "_ACTIVE", (118 + dx) * k, 906 * k, 152 * k, 48 * k, act, 6);
                 var xf = Key(p + "_XFER", (288 + dx) * k, 902 * k, 56 * k, 56 * k, "");
@@ -167,7 +229,7 @@ namespace panelAIR1000
             // ═══════════════ ACP ═══════════════
             void Acp(string p, float dx)
             {
-                Pp(62 + dx, 1190, 595 + dx, 1496);
+                Pp(62 + dx, 1190, 595 + dx, 1496, Y(1265, 1440), Y(1265, 1440));
                 float[] xs = { 126, 192, 258, 324, 390, 456, 522 };
                 string[] tx = { "VHF1", "VHF2", "VHF3", "HF1", "HF2", "INT", "CAB" };
                 for (int i = 0; i < 7; i++)
@@ -205,7 +267,7 @@ namespace panelAIR1000
             Acp("PED_ACP2", 1334);
 
             // ═══════════════ FLOOD LT / INTEG LT (capità) i FLOOD LT PED / AIDS / DFDR (primer oficial) ═══════════════
-            Pp(62, 1504, 595, 1672);
+            Pp(62, 1504, 595, 1672, Y(1545), Y(1615));
             Lb("FLOOD LT", 175, 1525, 14f); Lb("MAIN PNL", 175, 1547, 10f);
             Kn("PED_FLOOD_LT_MAIN", 178, 1598, 19f, 0, Brt, KnobStyle.Round);
             Lb("OFF", 138, 1640, 9f); Lb("BRT", 222, 1640, 9f);
@@ -213,7 +275,7 @@ namespace panelAIR1000
             Kn("PED_INTEG_LT_MAIN", 320, 1598, 19f, 0, Brt, KnobStyle.Round);
             Lb("OFF", 284, 1640, 9f); Lb("BRT", 368, 1640, 9f);
 
-            Pp(1396, 1504, 1929, 1672);
+            Pp(1396, 1504, 1929, 1672, Y(1545), Y(1615));
             Lb("FLOOD LT", 1510, 1522, 14f); Lb("PED", 1510, 1543, 10f);
             Kn("PED_FLOOD_LT_PED", 1513, 1592, 19f, 0, Brt, KnobStyle.Round);
             Lb("OFF", 1474, 1640, 9f); Lb("BRT", 1556, 1640, 9f);
@@ -224,7 +286,7 @@ namespace panelAIR1000
             Round("PED_DFDR_EVENT", 1813 * k, 1606 * k, 13f);
 
             // ═══════════════ RADAR METEOROLÒGIC ═══════════════
-            Pp(62, 1682, 595, 1930);
+            Pp(62, 1682, 595, 1930, Y(1730, 1875), Y(1730, 1875));
             Lb("GAIN", 167, 1698, 11f); Lb("MULTISCAN", 278, 1698, 11f); Lb("GCS", 387, 1698, 11f); Lb("TLT", 467, 1698, 11f);
             Kn("PED_WX_GAIN", 157, 1787, 19f, 4, new float[] { -140, -105, -70, -30, 0, 30, 70, 105, 140 }, KnobStyle.Fluted);
             foreach (var (t, x, y) in new[] { ("CAL", 162f, 1727f), ("-4", 120f, 1740f), ("+4", 205f, 1740f), ("-8", 104f, 1770f), ("+8", 230f, 1770f),
@@ -242,7 +304,7 @@ namespace panelAIR1000
             Lb("OFF", 394, 1884, 9f); HTog("PED_WX_PWS", 438, 1884, 2, 1); Lb("AUTO", 492, 1884, 9f); Lb("PWS", 438, 1910, 9f);
 
             // ═══════════════ ATC / TCAS ═══════════════
-            Pp(1396, 1682, 1929, 1930);
+            Pp(1396, 1682, 1929, 1930, Y(1735, 1880), Y(1735, 1880));
             Vt("ATC", 1413, 1808, 9f); Vt("TCAS", 1912, 1800, 9f);
             Lb("STBY", 1441, 1705, 9f); Lb("AUTO", 1483, 1694, 9f); Lb("ON", 1523, 1705, 9f);
             Kn("PED_ATC_MODE", 1484, 1738, 12f, 1, new float[] { -40, 0, 40 });
@@ -261,7 +323,7 @@ namespace panelAIR1000
             Kn("PED_TCAS_MODE", 1835, 1890, 12f, 2, new float[] { -40, 0, 40 });
 
             // ═══════════════ SWITCHING ═══════════════
-            Pp(600, 30, 1390, 272);
+            Pp(600, 30, 1390, 272, Y(75, 215), Y(75, 215));
             Lb("SWITCHING", 990, 48, 14f);
             string[] swN = { "ATT HDG", "AIR DATA", "EIS DMC", "ECAM / ND XFR" };
             string[] swId = { "ATT_HDG", "AIR_DATA", "EIS_DMC", "ECAM_ND_XFR" };
@@ -277,7 +339,7 @@ namespace panelAIR1000
             }
 
             // ═══════════════ ECAM: lluminositat de les pantalles i panell de control ═══════════════
-            Pp(600, 288, 768, 553);
+            Pp(600, 288, 768, 553, Y(330, 465));
             Lb("ECAM", 695, 322, 14f);
             Lb("UPPER DISPLAY", 697, 344, 9f);
             _silk.Add(new OhArrowArc(690 * k, 392 * k, 37 * k, -135, 135));
@@ -288,7 +350,7 @@ namespace panelAIR1000
             Kn("PED_ECAM_LOWER_BRT", 690, 502, 16f, 4, Brt, KnobStyle.Round);
             Lb("OFF", 650, 537, 9f); Lb("BRT", 742, 537, 9f);
 
-            Pp(775, 288, 1390, 553);
+            Pp(775, 288, 1390, 553, null, Y(330, 465));
             {
                 string?[,] grid =
                 {
@@ -316,8 +378,8 @@ namespace panelAIR1000
             }
 
             // planxes llises entre l'ECAM i el quadrant de gas
-            Pp(600, 562, 1390, 652);
-            Pp(600, 668, 790, 1690); Pp(1195, 668, 1390, 1690);
+            Pp(600, 562, 1390, 652, Y(605), Y(605));
+            Pp(600, 668, 790, 1960); Pp(1195, 668, 1390, 1960);   // columnes de les rodes del trim: una sola planxa fins a baix
             Pp(790, 668, 1195, 830); Pp(790, 830, 1195, 895);
 
             // ═══════════════ QUADRANT DE GAS, RODES DEL TRIM I ESCALES DEL THS ═══════════════
@@ -331,8 +393,8 @@ namespace panelAIR1000
             Lb("1", 909, 1644, 12f); Lb("2", 1086, 1644, 12f);
 
             // ═══════════════ ENG ═══════════════
-            Pp(795, 1675, 1192, 1960);
-            Pp(600, 1690, 795, 1960); Pp(1192, 1690, 1390, 1960);
+            Pp(795, 1675, 1192, 1960, null, null, Y(1693, 1941), Y(1693, 1941));   // ENG: estrelles grans
+
             Lb("ENG", 1003, 1700, 15f);
             Lb("MASTER 1", 917, 1702, 9f); Lb("MASTER 2", 1095, 1702, 9f);
             Add(new OhEngMaster("PED_ENG_MASTER_1", R(865, 1714, 965, 1788), "1"));
@@ -348,7 +410,7 @@ namespace panelAIR1000
             Lb("1", 880, 1932, 10f); Lb("2", 1110, 1932, 10f);
 
             // ═══════════════ SPEED BRAKE ═══════════════
-            Pp(272, 1966, 797, 2330);
+            Pp(272, 1966, 797, 2330, null, null, Y(2015, 2290), Y(2030, 2290));   // SPEED BRAKE: estrelles grans
             Lb("SPEED", 443, 2143, 14f); Lb("BRAKE", 443, 2167, 14f);
             _silk.Add(new OhBoxLabel("GND SPLRS ARMED", 668 * k, 1993 * k, 9f, Oh.Silk));
             Wl(610, 2258, 622, 2258, 622, 2030); Wl(610, 2105, 622, 2105); Wl(610, 2159, 622, 2159); Wl(610, 2210, 622, 2210);
@@ -361,7 +423,7 @@ namespace panelAIR1000
             Add(new OhSpeedBrake("PED_SPEEDBRAKE", 672 * k, 2015 * k, 2290 * k, 17 * k, 1925 * k, 2232 * k, 120 * k, 92 * k));
 
             // ═══════════════ RUD TRIM i PARKING BRK ═══════════════
-            Pp(810, 1970, 1145, 2750);
+            Pp(810, 1970, 1145, 2750, Y(2018, 2715), Y(2018, 2715));
             Wl(822, 2155, 1135, 2155); Wl(822, 2390, 1135, 2390); Wl(822, 2525, 1135, 2525);
             Seg("PED_RUD_TRIM_DISP", 850 * k, 2194 * k, 116 * k, 66 * k, "L0.0", 3);
             Lb("+/-", 830, 2216, 9f); Lb("20°", 830, 2240, 9f);
@@ -379,18 +441,18 @@ namespace panelAIR1000
             Add(new OhParkBrake("PED_PARK_BRK", 1033 * k, 2672 * k, 232 * k, 64 * k, 80 * k));
 
             // ═══════════════ FLAPS ═══════════════
-            Pp(1154, 1975, 1690, 2336);
+            Pp(1154, 1975, 1690, 2336, null, null, Y(2025, 2305), Y(2025, 2305));   // FLAPS: estrelles grans
             Lb("FLAPS", 1471, 2178, 15f);
             Add(new OhFlapsLever("PED_FLAPS", R(1204, 2030, 1364, 2322), new[] { 2046f, 2108f, 2166f, 2230f, 2292f }.Select(y => y * k).ToArray(),
                                  new[] { "0", "1", "2", "3", "FULL" }, 112 * k, 128 * k));
 
             // ═══════════════ COCKPIT DOOR ═══════════════
-            Pp(272, 2345, 797, 2547);
+            Pp(272, 2345, 797, 2547, Y(2400), Y(2400));
             Lb("COCKPIT DOOR", 443, 2384, 14f);
             Add(new OhAnnunciator("PED_COCKPIT_DOOR", R(330, 2437, 392, 2502), "FAULT", "OFF"));
             TogS("PED_COCKPIT_DOOR_SW", 452 * k, 2465 * k, 3, 1, ToggleStyle.Metal, 12f);
             Lb("UNLOCK", 535, 2432, 8.2f); Lb("NORM", 527, 2463, 8.2f); Lb("LOCK", 527, 2494, 8.2f);
-            Pp(272, 2555, 800, 2987);
+            Pp(272, 2555, 800, 2987, Y(2607, 2940), Y(2607, 2940));
 
             // ═══════════════ GRAVITY GEAR EXTN ═══════════════
             Pp(808, 2755, 1149, 2987);
@@ -400,10 +462,10 @@ namespace panelAIR1000
             Add(new OhGravityGear("PED_GRAVITY_GEAR", 976 * k, 2878 * k, 104 * k, k));
 
             // ═══════════════ part de darrere: barra cromada, safata, SLEW ═══════════════
-            Pp(1154, 2345, 1696, 2560);
+            Pp(1154, 2345, 1696, 2560, Y(2510), Y(2510));
             _silk.Add(new OhChromeBar(R(1194, 2352, 1656, 2472)));
             _silk.Add(new OhSlotPlate(R(1196, 2478, 1655, 2546)));
-            Pp(1154, 2565, 1696, 2987);
+            Pp(1154, 2565, 1696, 2987, Y(2895), Y(2895));
             _silk.Add(new OhPenBar(R(1205, 2836, 1638, 2864)));
             PK("PED_SLEW", 1290, 2953, 56, 34, "SLEW", null, 9f);
             _silk.Add(new OhBall(1430 * k, 2955 * k, 20 * k));
@@ -411,12 +473,186 @@ namespace panelAIR1000
             // sòcols de la part de baix (estriats)
             _silk.Add(new OhRibbed(R(262, 2995, 880, 3100)));
             _silk.Add(new OhRibbed(R(1074, 2995, 1695, 3100)));
+
+            // ═══════════════ cargols que no són DZUS (posicions de la imatge de referència) ═══════════════
+            // SWITCHING i panell de tecles de l'ECAM
+            ScP(1295, 48, 673, 243);
+            ScP(802, 300, 1070, 300, 1300, 299, 790, 372, 790, 465);
+            // sobre el throttle i a sota de les rodes del trim
+            ScP(755, 696, 808, 696, 1179, 697, 1236, 696, 755, 793, 808, 793, 1178, 793, 1236, 793);
+            ScP(753, 1668, 1233, 1668, 753, 1766, 1235, 1766);
+            // FLOOD LT / INTEG LT i radar
+            ScP(513, 1622, 120, 1712, 120, 1878, 520, 1713, 520, 1879);
+            // franges de sobre el throttle i "1 2": cargols de ranura grans, sense osca
+            ScL(820, 860, 1165, 860, 820, 1642, 1165, 1642);
+            // SPEED BRAKE
+            ScS(365, 1992, 375, 2297, 767, 2110, 767, 2218);
+            ScP(522, 2070, 522, 2235);
+            // COCKPIT DOOR
+            ScS(335, 2375, 583, 2375, 731, 2525);
+            // RUD TRIM / PARK BRK
+            ScS(975, 1990, 865, 2410, 1075, 2410, 925, 2722);
+            // GRAVITY GEAR: estrelles grans a les quatre cantonades
+            ScX(840, 2780, 1105, 2780, 840, 2945, 1105, 2945);
+            // FLAPS
+            ScP(1183, 2080, 1183, 2220, 1604, 2001, 1603, 2318);
         }
     }
 
     // ═══════════════════════════════ SERIGRAFIA I PECES FIXES ═══════════════════════════════
 
     /// <summary>Posició buida d'una tecla (ECAM): quadrat del color de la planxa amb el cantell marcat.</summary>
+    /// <summary>Safata enfonsada de la MCDU: planxa una mica més fosca, ombra interior a dalt-esquerra i llum a baix-dreta.</summary>
+    internal sealed class OhTray : OhSilk
+    {
+        readonly PointF[] _poly;
+        public OhTray(PointF[] poly, float radius)
+        {
+            _poly = Oh.RoundAll(poly, radius);
+            float l = _poly.Min(p => p.X), t = _poly.Min(p => p.Y), r = _poly.Max(p => p.X), b = _poly.Max(p => p.Y);
+            Bounds = RectangleF.FromLTRB(l - 3, t - 3, r + 3, b + 3);
+        }
+        public override void Draw(Graphics g)
+        {
+            using var p = new GraphicsPath(); p.AddPolygon(_poly);
+            var rc = p.GetBounds();
+            using (var b = new LinearGradientBrush(RectangleF.Inflate(rc, 1, 1), Oh.T(84, 100, 114, 80, 104, 124), Oh.T(96, 112, 126, 92, 116, 136), 90f)) g.FillPath(b, p);
+            // ombra interior (la vora de dalt-esquerra fa ombra dins la safata)
+            var st = g.Save();
+            g.SetClip(p);
+            g.TranslateTransform(1.4f, 1.4f);
+            using (var sp = new Pen(Color.FromArgb(150, 12, 16, 20), 2.6f)) g.DrawPath(sp, p);
+            g.Restore(st);
+            // cantell: llum a baix-dreta (fora) i fil fosc a la vora
+            st = g.Save(); g.TranslateTransform(0.7f, 0.7f);
+            using (var hp = new Pen(Color.FromArgb(150, Oh.PlateHi), 0.9f)) g.DrawPath(hp, p);
+            g.Restore(st);
+            using (var lp = new Pen(Color.FromArgb(200, Oh.PlateLo), 0.8f)) g.DrawPath(lp, p);
+        }
+    }
+
+    /// <summary>Marc gris clar de la pantalla de la MCDU, de cantonades molt arrodonides, aixecat sobre la planxa.</summary>
+    internal sealed class OhMcduBezel : OhSilk
+    {
+        readonly RectangleF _outer, _glass; readonly float _ro, _rg;
+        public OhMcduBezel(RectangleF outer, RectangleF glass, float rOuter, float rGlass)
+        {
+            _outer = outer; _glass = glass; _ro = rOuter; _rg = rGlass;
+            Bounds = RectangleF.Inflate(outer, 6, 6);
+        }
+        public override void Draw(Graphics g)
+        {
+            using (var op = Oh.RoundRect(_outer, _ro))
+            {
+                Oh.SoftShadow(g, op, 1.8f, 2.6f, 4f, 140);
+                using (var ob = new LinearGradientBrush(RectangleF.Inflate(_outer, 1, 1), Oh.T(170, 182, 192, 160, 182, 200), Oh.T(118, 130, 142, 108, 130, 150), 70f)) g.FillPath(ob, op);
+                var st = g.Save(); g.TranslateTransform(-0.6f, -0.6f);
+                using (var hp = new Pen(Color.FromArgb(170, 235, 240, 245), 0.9f)) g.DrawPath(hp, op);
+                g.Restore(st);
+                using var pe = new Pen(Color.FromArgb(40, 48, 56), 0.8f); g.DrawPath(pe, op);
+            }
+            // vora interior que baixa cap al vidre (fosca a dalt, clara a baix)
+            var lip = RectangleF.Inflate(_glass, 3f, 3f);
+            using (var lp = Oh.RoundRect(lip, _rg + 3f))
+            using (var lb = new LinearGradientBrush(RectangleF.Inflate(lip, 1, 1), Oh.T(40, 46, 52, 36, 46, 56), Oh.T(150, 160, 170, 140, 160, 178), 90f)) g.FillPath(lb, lp);
+            using (var gp = Oh.RoundRect(_glass, _rg))
+            {
+                using (var gb = new SolidBrush(Color.FromArgb(6, 7, 8))) g.FillPath(gb, gp);
+                using var rb = new LinearGradientBrush(_glass, Color.FromArgb(22, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 35f);
+                var st = g.Save(); g.SetClip(gp);
+                g.FillRectangle(rb, new RectangleF(_glass.X, _glass.Y, _glass.Width, _glass.Height * 0.45f));
+                g.Restore(st);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Nansa d'extracció de la MCDU de l'esquerra (px de referència × k): frontisses a l'alçada d'AIR PORT, dos braços
+    /// que baixen per les vores, es desvien cap a dins per esquivar els DZUS de baix, i un tram horitzontal per sota
+    /// de la darrera fila de tecles.
+    /// </summary>
+    internal sealed class OhMcduHandle : OhSilk
+    {
+        readonly float _k; readonly PointF[] _line, _face; readonly RectangleF _hl, _hr;
+        public OhMcduHandle(float k)
+        {
+            _k = k;
+            PointF P(float x, float y) => new(x * k, y * k);
+            _line = Oh.RoundAll(new[]
+            {
+                P(72, 560), P(72, 778), P(100, 800), P(100, 848), P(557, 848), P(557, 800), P(585, 778), P(585, 560)
+            }, 10f * k);
+            // RoundAll tanca el polígon: es treuen els punts de l'arrodoniment entre l'últim i el primer (no hi ha tram de dalt)
+            _line = TrimClosing(_line, P(72, 560), P(585, 560));
+            // contorn en relleu de la cara (meitat de dalt): surt de les frontisses, puja per les vores esquivant els
+            // DZUS (es desvia cap a dins al voltant de cada vis) i fa el tram de dalt per sobre dels LED
+            _face = Oh.RoundAll(new[]
+            {
+                P(72, 478), P(72, 474), P(100, 466), P(100, 438), P(72, 428), P(72, 112), P(100, 100), P(100, 36),
+                P(557, 36), P(557, 100), P(585, 112), P(585, 428), P(557, 438), P(557, 466), P(585, 474), P(585, 478)
+            }, 8f * k);
+            _face = TrimClosing(_face, P(72, 478), P(585, 478));
+            _hl = RectangleF.FromLTRB(64 * k, 478 * k, 96 * k, 562 * k);
+            _hr = RectangleF.FromLTRB(561 * k, 478 * k, 593 * k, 562 * k);
+            Bounds = RectangleF.FromLTRB(60 * k, 30 * k, 598 * k, 856 * k);
+        }
+        static PointF[] TrimClosing(PointF[] pts, PointF a, PointF b)
+        {
+            // es queda amb el tram que va d'a (inici del braç esquerre) fins a b (final del braç dret)
+            int ia = Nearest(pts, a), ib = Nearest(pts, b);
+            var o = new List<PointF>();
+            for (int i = ia; ; i = (i + 1) % pts.Length) { o.Add(pts[i]); if (i == ib) break; }
+            o[0] = a; o[^1] = b;
+            return o.ToArray();
+        }
+        static int Nearest(PointF[] pts, PointF p)
+        {
+            int best = 0; float bd = float.MaxValue;
+            for (int i = 0; i < pts.Length; i++) { float dx = pts[i].X - p.X, dy = pts[i].Y - p.Y, d = dx * dx + dy * dy; if (d < bd) { bd = d; best = i; } }
+            return best;
+        }
+        public override void Draw(Graphics g)
+        {
+            float w = 9f * _k;
+            // contorn de la cara: graó prim (fil fosc a la vora i fil de llum a dalt-esquerra)
+            using (var fp = new GraphicsPath())
+            {
+                fp.AddLines(_face);
+                var s0 = g.Save(); g.TranslateTransform(1.0f, 1.3f);
+                using (var sh = new Pen(Color.FromArgb(80, 0, 0, 0), 2.2f) { LineJoin = LineJoin.Round }) g.DrawPath(sh, fp);
+                g.Restore(s0);
+                using (var ed = new Pen(Oh.PlateLo, 1.3f) { LineJoin = LineJoin.Round }) g.DrawPath(ed, fp);
+                s0 = g.Save(); g.TranslateTransform(-0.9f, -0.9f);
+                using (var hi = new Pen(Color.FromArgb(170, Oh.PlateHi), 1.0f) { LineJoin = LineJoin.Round }) g.DrawPath(hi, fp);
+                g.Restore(s0);
+            }
+            using (var path = new GraphicsPath())
+            {
+                path.AddLines(_line);
+                // ombra, vora fosca, cos de la barra i fil de llum a dalt-esquerra
+                var st = g.Save(); g.TranslateTransform(1.6f, 2.2f);
+                using (var sh = new Pen(Color.FromArgb(90, 0, 0, 0), w + 2f) { LineJoin = LineJoin.Round, StartCap = LineCap.Flat, EndCap = LineCap.Flat }) g.DrawPath(sh, path);
+                g.Restore(st);
+                using (var ed = new Pen(Oh.PlateLo, w + 1.4f) { LineJoin = LineJoin.Round }) g.DrawPath(ed, path);
+                using (var body = new Pen(Oh.T(128, 142, 156, 120, 146, 168), w) { LineJoin = LineJoin.Round }) g.DrawPath(body, path);
+                st = g.Save(); g.TranslateTransform(-w * 0.22f, -w * 0.22f);
+                using (var hi = new Pen(Color.FromArgb(150, 225, 232, 240), w * 0.18f) { LineJoin = LineJoin.Round }) g.DrawPath(hi, path);
+                g.Restore(st);
+            }
+            // frontisses (blocs aixecats amb el passador)
+            foreach (var r in new[] { _hl, _hr })
+            {
+                using var p = Oh.RoundRect(r, 3f * _k);
+                Oh.SoftShadow(g, p, 1.4f, 2f, 3f, 130);
+                using (var b = new LinearGradientBrush(RectangleF.Inflate(r, 0.5f, 0.5f), Oh.T(150, 164, 176, 142, 166, 186), Oh.T(100, 114, 128, 94, 118, 140), 0f)) g.FillPath(b, p);
+                using (var pe = new Pen(Oh.PlateLo, 0.8f)) g.DrawPath(pe, p);
+                float py = r.Y + r.Height * 0.3f;
+                using (var pin = new Pen(Color.FromArgb(160, 30, 36, 42), 1f)) g.DrawLine(pin, r.X + 1.5f, py, r.Right - 1.5f, py);
+                using (var pinH = new Pen(Color.FromArgb(120, 230, 236, 242), 0.7f)) g.DrawLine(pinH, r.X + 1.5f, py + 1f, r.Right - 1.5f, py + 1f);
+            }
+        }
+    }
+
     internal sealed class OhBlankCap : OhSilk
     {
         readonly RectangleF _r;
@@ -433,6 +669,106 @@ namespace panelAIR1000
     }
 
     /// <summary>Llumet rodó (verd encès o fosc apagat).</summary>
+    /// <summary>Cargols del pedestal que no són DZUS (imatge de referència): estrella (gran o petit), "+" petit encastat i ranura petit.</summary>
+    internal static class PedScrew
+    {
+        /// <summary>Cargol d'estrella: cap bombat metàl·lic amb una creu en aspa.</summary>
+        public static void Cross(Graphics g, float cx, float cy, float r)
+        {
+            var o = new RectangleF(cx - r, cy - r, r * 2, r * 2);
+            Oh.SoftShadowEllipse(g, o, r * 0.1f, r * 0.14f, r * 0.35f, 150);
+            using (var lg = new LinearGradientBrush(o, Color.Black, Color.Black, 45f)
+            {
+                InterpolationColors = new ColorBlend
+                {
+                    Colors = new[] { Color.FromArgb(0xd6, 0xdb, 0xe0), Color.FromArgb(0x8e, 0x96, 0x9e), Color.FromArgb(0x4a, 0x51, 0x58) },
+                    Positions = new[] { 0f, 0.5f, 1f }
+                }
+            }) g.FillEllipse(lg, o);
+            using (var pe = new Pen(Color.FromArgb(217, 15, 20, 25), Math.Max(0.6f, r * 0.06f))) g.DrawEllipse(pe, o);
+            // creu en aspa (dues ranures a ±45°), fosca amb el cantell de baix il·luminat
+            float L = r * 0.62f, W = Math.Max(0.9f, r * 0.30f);
+            var st = g.Save();
+            g.TranslateTransform(cx, cy);
+            foreach (float a in new[] { 45f, -45f })
+            {
+                var s2 = g.Save();
+                g.RotateTransform(a);
+                using (var hb = new SolidBrush(Color.FromArgb(150, 225, 232, 238))) g.FillRectangle(hb, -L, -W / 2 + W * 0.25f, L * 2, W);
+                g.Restore(s2);
+            }
+            foreach (float a in new[] { 45f, -45f })
+            {
+                var s2 = g.Save();
+                g.RotateTransform(a);
+                using (var db = new SolidBrush(Color.FromArgb(0x26, 0x2b, 0x30))) g.FillRectangle(db, -L, -W / 2, L * 2, W);
+                g.Restore(s2);
+            }
+            g.Restore(st);
+        }
+
+        /// <summary>Cap gris fosc comú als cargols petits interiors (creu i ranura): ombra, cap i cantell.</summary>
+        static void DarkHead(Graphics g, RectangleF o, float r)
+        {
+            Oh.SoftShadowEllipse(g, o, r * 0.08f, r * 0.1f, r * 0.25f, 90);
+            using (var lg = new LinearGradientBrush(o, Color.FromArgb(0x6a, 0x71, 0x78), Color.FromArgb(0x33, 0x38, 0x3d), 45f)) g.FillEllipse(lg, o);
+            using (var eb = new LinearGradientBrush(RectangleF.Inflate(o, 0.5f, 0.5f), Color.FromArgb(220, 20, 24, 28), Color.FromArgb(200, 150, 160, 170), 45f))
+            using (var ep = new Pen(eb, Math.Max(0.6f, r * 0.1f))) g.DrawEllipse(ep, o);
+        }
+
+        /// <summary>Cargol de creu interior, gris fosc (mateixa mida que el de ranura).</summary>
+        public static void Plus(Graphics g, float cx, float cy, float r)
+        {
+            var o = new RectangleF(cx - r, cy - r, r * 2, r * 2);
+            DarkHead(g, o, r);
+            float L = r * 0.62f;
+            using (var hp = new Pen(Color.FromArgb(120, 170, 178, 186), Math.Max(0.6f, r * 0.2f)))
+            {
+                g.DrawLine(hp, cx - L, cy + r * 0.1f, cx + L, cy + r * 0.1f);
+                g.DrawLine(hp, cx + r * 0.1f, cy - L, cx + r * 0.1f, cy + L);
+            }
+            using var pe = new Pen(Color.FromArgb(0x16, 0x19, 0x1c), Math.Max(0.6f, r * 0.22f));
+            g.DrawLine(pe, cx - L, cy, cx + L, cy);
+            g.DrawLine(pe, cx, cy - L, cx, cy + L);
+        }
+
+        /// <summary>Cargol de ranura interior (cap pla), gris fosc, amb la ranura en diagonal.</summary>
+        public static void Slot(Graphics g, float cx, float cy, float r)
+        {
+            var o = new RectangleF(cx - r, cy - r, r * 2, r * 2);
+            DarkHead(g, o, r);
+            float L = r * 0.8f, W = Math.Max(0.8f, r * 0.22f);
+            var st = g.Save();
+            g.TranslateTransform(cx, cy);
+            g.RotateTransform(-45f);
+            using (var hb = new SolidBrush(Color.FromArgb(120, 170, 178, 186))) g.FillRectangle(hb, -L, -W / 2 + W * 0.35f, L * 2, W);
+            using (var db = new SolidBrush(Color.FromArgb(0x16, 0x19, 0x1c))) g.FillRectangle(db, -L, -W / 2, L * 2, W);
+            g.Restore(st);
+        }
+    }
+
+    internal enum PedScrewKind { Cross, Plus, Slot }
+
+    /// <summary>Cargol solt (no DZUS) dibuixat sobre la planxa.</summary>
+    internal sealed class OhScrew : OhSilk
+    {
+        readonly float _cx, _cy, _r; readonly PedScrewKind _kind;
+        public OhScrew(PedScrewKind kind, float cx, float cy, float r)
+        {
+            _kind = kind; _cx = cx; _cy = cy; _r = r;
+            Bounds = new RectangleF(cx - r - 3, cy - r - 3, r * 2 + 7, r * 2 + 7);
+        }
+        public override void Draw(Graphics g)
+        {
+            switch (_kind)
+            {
+                case PedScrewKind.Cross: PedScrew.Cross(g, _cx, _cy, _r); break;
+                case PedScrewKind.Plus: PedScrew.Plus(g, _cx, _cy, _r); break;
+                default: PedScrew.Slot(g, _cx, _cy, _r); break;
+            }
+        }
+    }
+
     internal sealed class OhLed : OhSilk
     {
         readonly float _cx, _cy, _r; readonly bool _lit;

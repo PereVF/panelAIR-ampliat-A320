@@ -340,6 +340,19 @@ namespace panelAIR1000
             return pts.Take(i).Concat(arc).Concat(pts.Skip(i + 1)).ToArray();
         }
 
+        /// <summary>Arrodoneix totes les cantonades d'un polígon tancat amb radi r.</summary>
+        public static PointF[] RoundAll(PointF[] pts, float r)
+        {
+            if (r <= 0.3f) return pts;
+            var o = new List<PointF>();
+            for (int i = 0; i < pts.Length; i++)
+            {
+                var tri = RoundAt(new[] { pts[(i + pts.Length - 1) % pts.Length], pts[i], pts[(i + 1) % pts.Length] }, 1, r);
+                o.AddRange(tri.Skip(1).Take(tri.Length - 2));
+            }
+            return o.ToArray();
+        }
+
         public static bool Boxed(string s) => s is "OFF" or "ON" or "MAN" or "ALTN" or "OVRD" or "ALIGN";
 
         public static Color LegendColor(string s) => s switch
@@ -410,23 +423,43 @@ namespace panelAIR1000
         /// amb una mitja lluna de radi DzR i s'uneix a la vora amb un arrodoniment de radi DzR/2.
         /// </summary>
         /// <param name="shortH">per sota d'aquesta alçada, un sol vis a cada costat (a mitja alçada)</param>
-        public OhPanel(RectangleF r, bool dzusNotch, float shortH = 50f) : this(r)
+        /// <param name="dzScale">mida dels visos DZUS (1 = normal; 1.5 = un 50% més grans)</param>
+        public OhPanel(RectangleF r, bool dzusNotch, float shortH = 50f, float dzScale = 1f, float corner = 5f) : this(r)
         {
             if (!dzusNotch) return;
-            _dzus = true;
+            _dzus = true; _dzS = dzScale; _corner = corner;
             // panell baix (no hi caben dues osques per costat): un sol vis a cada costat, a mitja alçada
             _screws = r.Height < shortH
                 ? new[] { new PointF(r.X + DzIn, r.Y + r.Height / 2f), new PointF(r.Right - DzIn, r.Y + r.Height / 2f) }
                 : new[] { new PointF(r.X + DzIn, r.Y + 20f), new PointF(r.Right - DzIn, r.Y + 20f),
                           new PointF(r.X + DzIn, r.Bottom - 20f), new PointF(r.Right - DzIn, r.Bottom - 20f) };
         }
+        /// <summary>Panell amb visos DZUS només a les alçades indicades de la vora esquerra i de la dreta (pot no tenir-ne cap).</summary>
+        /// <param name="leftX">alçades (vora esquerra) dels cargols d'estrella grans, a la mateixa osca que un DZUS</param>
+        /// <param name="rightX">ídem a la vora dreta</param>
+        public OhPanel(RectangleF r, float[] leftY, float[] rightY, float dzScale, float corner, float[]? leftX = null, float[]? rightX = null) : this(r)
+        {
+            _dzus = true; _dzS = dzScale; _corner = corner;
+            leftX ??= Array.Empty<float>(); rightX ??= Array.Empty<float>();
+            _screws = leftY.Select(y => new PointF(r.X + DzIn, y))
+                .Concat(rightY.Select(y => new PointF(r.Right - DzIn, y)))
+                .Concat(leftX.Select(y => new PointF(r.X + DzIn, y)))
+                .Concat(rightX.Select(y => new PointF(r.Right - DzIn, y))).ToArray();
+            _firstCross = leftY.Length + rightY.Length;
+        }
+        /// <summary>Els visos a partir d'aquest índex són d'estrella (no DZUS).</summary>
+        int _firstCross = int.MaxValue;
         bool _dzus;
-        const float DzScrewR = 5.6f, DzR = DzScrewR * 1.28f, DzIn = DzScrewR;   // la cara exterior del vis queda en línia amb la vora del panell
+        float _dzS = 1f, _corner = 5f;   // _corner: radi de les cantonades del panell
+        float DzScrewR => 5.6f * _dzS;
+        float DzR => DzScrewR * 1.28f;
+        const float DzFillet = 5.6f * 1.28f / 2f;   // arrodoniment osca-vora: fix, no creix amb dzScale
+        float DzIn => DzScrewR - 1.5f;   // 1,5 = gruix del filet de llum/ombra de la vora: la cara exterior del vis queda en línia amb la vora del panell
 
         /// <summary>Contorn: rectangle de cantonades arrodonides amb les osques (sentit horari).</summary>
         GraphicsPath MakeNotchedPath()
         {
-            var r = _rect; float rad = 5f, d = rad * 2, f = DzR / 2f;
+            var r = _rect; float rad = _corner, d = rad * 2, f = DzFillet;
             var p = new GraphicsPath();
             p.AddArc(r.X, r.Y, d, d, 180, 90);
             p.AddArc(r.Right - d, r.Y, d, d, 270, 90);
@@ -453,12 +486,12 @@ namespace panelAIR1000
         }
 
         /// <summary>Panell poligonal (sense arrodonir) amb visos DZUS en osques a les vores verticals.</summary>
-        public OhPanel(PointF[] poly, PointF[] screws, bool dzusNotch) : this(poly, screws) { _dzus = dzusNotch; }
+        public OhPanel(PointF[] poly, PointF[] screws, bool dzusNotch, float dzScale = 1f, float corner = 0f) : this(Oh.RoundAll(poly, corner), screws) { _dzus = dzusNotch; _dzS = dzScale; }
 
         /// <summary>Contorn d'un polígon amb osques a les vores verticals (arcs mostrejats, sentit horari).</summary>
         GraphicsPath MakeNotchedPoly()
         {
-            var poly = _poly!; float f = DzR / 2f;
+            var poly = _poly!; float f = DzFillet;
             var pts = new List<PointF>();
             void Arc(float cx, float cy, float rad, float a0, float a1)
             {
@@ -526,9 +559,13 @@ namespace panelAIR1000
             using (var fill = new LinearGradientBrush(new RectangleF(_rect.X, _rect.Y - 1, _rect.Width, _rect.Height + 2), Oh.PlateA, Oh.PlateB, 90f))
                 g.FillPath(fill, path);
             Oh.Grain(g, path);
-            foreach (var s in _screws)
-                if (_dzus) Oh.DzusRing(g, s.X, s.Y, DzScrewR);
+            for (int i = 0; i < _screws.Length; i++)
+            {
+                var s = _screws[i];
+                if (_dzus && i >= _firstCross) PedScrew.Cross(g, s.X, s.Y, DzScrewR);
+                else if (_dzus) Oh.DzusRing(g, s.X, s.Y, DzScrewR);
                 else Oh.Dzus(g, s.X, s.Y, 5.6f, 20f + (s.X * 7.3f + s.Y * 3.1f) % 50f);
+            }
         }
     }
 
@@ -2628,6 +2665,12 @@ namespace panelAIR1000
         public float MaxText = 7.2f;
         /// <summary>Segona línia del rètol (tecles de dues línies del MCDU: "RAD" / "NAV").</summary>
         public string? Label2;
+        /// <summary>Requadre al voltant de l'etiqueta (lletres E, N, S, W de la MCDU).</summary>
+        public bool BoxLabel;
+        /// <summary>Factor de mida del text d'una sola línia (1 = el de sempre).</summary>
+        public float TextScale = 1f;
+        /// <summary>Fletxa dibuixada en lloc del text: 1 amunt, 2 avall, 3 esquerra, 4 dreta (0 = text).</summary>
+        public int ArrowDir;
 
         public override void Draw(Graphics g)
         {
@@ -2698,11 +2741,30 @@ namespace panelAIR1000
                 Oh.Text(g, Label, f.X + f.Width / 2, f.Y + f.Height * 0.31f, s2, Oh.Silk);
                 Oh.Text(g, Label2, f.X + f.Width / 2, f.Y + f.Height * 0.7f, s2, Oh.Silk);
             }
+            else if (ArrowDir > 0)
+            {
+                // fletxa gruixuda dibuixada com a forma (tija + punta), en lloc del caràcter
+                float cx = f.X + f.Width / 2, cy = f.Y + f.Height / 2;
+                float len = f.Height * 0.62f, sw = f.Height * 0.13f, hw = f.Height * 0.2f, hl = f.Height * 0.24f;
+                var st = g.Save();
+                g.TranslateTransform(cx, cy);
+                g.RotateTransform(ArrowDir switch { 1 => -90f, 2 => 90f, 3 => 180f, _ => 0f });
+                using var ab = new SolidBrush(Oh.Silk);
+                g.FillRectangle(ab, -len / 2, -sw / 2, len - hl + 0.5f, sw);
+                g.FillPolygon(ab, new[] { new PointF(len / 2 - hl, -hw), new PointF(len / 2, 0), new PointF(len / 2 - hl, hw) });
+                g.Restore(st);
+            }
             else if (Label.Length > 0)
             {
                 Color tc = LitText ? Oh.Lerp(Color.FromArgb(96, 100, 104), Oh.Amber, Owner.Level(On ? 1 : 0, false)) : Oh.Silk;
-                float size = Math.Min(f.Height * 0.48f, (f.Width - 4) / (Label.Length * 0.64f + 0.2f));
+                float size = Math.Min(f.Height * 0.48f * TextScale, (f.Width - 4) / (Label.Length * 0.64f + 0.2f));
                 Oh.Text(g, Label, f.X + f.Width / 2, f.Y + f.Height / 2 + (Led ? 1.2f : 0.2f), Math.Min(size, MaxText), tc);
+                if (BoxLabel)
+                {
+                    float bs = Math.Min(size, MaxText) * 1.45f;
+                    using var bp = new Pen(tc, Math.Max(0.8f, bs * 0.08f));
+                    g.DrawRectangle(bp, f.X + f.Width / 2 - bs / 2, f.Y + f.Height / 2 - bs / 2 + 0.2f, bs, bs);
+                }
             }
         }
     }
@@ -4359,8 +4421,10 @@ namespace panelAIR1000
         PointF[]? ScreenFrame()
         {
             if (_bmp == null) return null;
-            // pedestal: la capa és tot el rectangle (fora del contorn, negre: no s'hi veu el panell principal)
-            var fr = _isPed ? new[] { new PointF(0, 0), new PointF(LW, 0), new PointF(LW, CurLH), new PointF(0, CurLH) } : CurFrame;
+            return ToScreen(CurFrame);
+        }
+        PointF[] ToScreen(PointF[] fr)
+        {
             return fr.Select(p => new PointF(_offX + p.X * _s, -_scrollY + (p.Y - CurShift) * _s)).ToArray();
         }
 
@@ -4374,6 +4438,13 @@ namespace panelAIR1000
             using var path = new GraphicsPath();
             path.AddPolygon(frame);
             var rg = new Region(path);
+            // pedestal: el pom de la GRAVITY GEAR sobresurt per sota del marc
+            if (_isPed)
+            {
+                using var kp = new GraphicsPath();
+                kp.AddPolygon(ToScreen(PedGearKnob));
+                rg.Union(kp);
+            }
             rg.Intersect(ClientRectangle);
             if (Parent is A320OverheadControl main)
             {
@@ -5611,7 +5682,8 @@ namespace panelAIR1000
             if (el is OhGuard g) Register(g.Inner);
         }
 
-        void Panel(float x, float y, float w, float h) => _silk.Add(new OhPanel(new RectangleF(x, y, w, h), true));
+        // overhead: visos DZUS un 50% més grans i cantonades de radi 2,5 (la meitat)
+        void Panel(float x, float y, float w, float h) => _silk.Add(new OhPanel(new RectangleF(x, y, w, h), true, 70f, 1.5f, 2.5f));
         // Escala de serigrafia i interruptors. EXT LT i AIR COND ja tenen les mides finals (escala 1);
         // la resta de l'overhead s'iguala proporcionalment amb TextScale.
         const float TextScale = 1.22f;
@@ -5749,7 +5821,7 @@ namespace panelAIR1000
 
             // Panell inferior esquerre (EVAC, EMER ELEC, GPWS, RCDR, OXYGEN, CALLS, WIPER)
             _silk.Add(new OhPanel(new PointF[] { new(26, 562), new(308, 562), new(308, 1248), new(26, 1098) },
-                                  new PointF[] { new(31.6f, 582), new(302.4f, 582), new(31.6f, 1078), new(302.4f, 1228) }, true));
+                                  new PointF[] { new(32.9f, 582), new(301.1f, 582), new(32.9f, 1078), new(301.1f, 1228) }, true, 1.5f, 2.5f));
             L("COMMAND", 131, 573, 6f); L("EVAC", 195, 573, 9f); L("HORN SHUT OFF", 195, 586, 5.5f); L("CAPT & PURS", 262, 581, 6f);
             GrayGuard("EVAC_COMMAND", 131, 586, "EVAC", "ON", 44, 42);
             Round("EVAC_HORN_SHUTOFF", 195, 612, 13);
@@ -6575,7 +6647,7 @@ namespace panelAIR1000
 
             // Panell inferior dret
             _silk.Add(new OhPanel(new PointF[] { new(946, 550), new(1226, 550), new(1226, 1098), new(946, 1248) },
-                                  new PointF[] { new(951.6f, 570), new(1220.4f, 570), new(1220.4f, 1078), new(951.6f, 1228) }, true));
+                                  new PointF[] { new(952.9f, 570), new(1219.1f, 570), new(1219.1f, 1078), new(952.9f, 1228) }, true, 1.5f, 2.5f));
             L("CARGO VENT", 1086, 566, 10f);
             WLn(1066, 578, 1066, 724);
             L("AFT ISOL VALVE", 1008, 581, 5f);
