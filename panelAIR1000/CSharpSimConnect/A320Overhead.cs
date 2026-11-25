@@ -4153,8 +4153,29 @@ namespace panelAIR1000
                     (int)Math.Round(_offX + gl.Right * s), (int)Math.Round(_offY - _scrollY + (gl.Bottom - sh) * s)));
             if (_ov != null && _ov.Visible && _ov.Region != null) rg.Exclude(_ov.Region);
             if (_ped != null && _ped.Visible && _ped.Region != null) rg.Exclude(_ped.Region);
+            // pantalla de la MCDU esquerra del pedestal (només amb el pedestal a la vista i quiet)
+            if (PedMcduClientRect() is Rectangle mr) rg.Union(mr);
             return rg;
         }
+
+        /// <summary>
+        /// Vidre de la MCDU de l'esquerra del pedestal en coordenades de client (el pedestal ocupa el mateix rectangle
+        /// que el panell principal). null si el pedestal no és a la vista, s'està movent, o la pantalla no hi cap sencera.
+        /// </summary>
+        Rectangle? PedMcduClientRect()
+        {
+            var p = _ped;
+            if (_isOverlay || p == null || !p.Visible || p._closing || p._opening || p._anim.Enabled || !p.IsHandleCreated || p._s <= 0) return null;
+            var gl = PedMcdu1Glass;
+            float s = p._s, sh = p.CurShift;
+            var rc = Rectangle.FromLTRB(
+                (int)Math.Round(p._offX + gl.Left * s), (int)Math.Round(-p._scrollY + (gl.Top - sh) * s),
+                (int)Math.Round(p._offX + gl.Right * s), (int)Math.Round(-p._scrollY + (gl.Bottom - sh) * s));
+            return p.ClientRectangle.Contains(rc) ? rc : null;
+        }
+
+        /// <summary>Vidre de la MCDU de l'esquerra del pedestal en coordenades de pantalla de Windows (null: no és a la vista).</summary>
+        public Rectangle? PedMcduScreenRect() => PedMcduClientRect() is Rectangle rc ? _ped!.RectangleToScreen(rc) : null;
 
         /// <summary>Vidre d'una pantalla (0 PFD, 1 ND, 2 ECAM superior, 3 ECAM inferior) en coordenades de pantalla de Windows.</summary>
         public Rectangle? GlassScreenRect(int index)

@@ -430,6 +430,7 @@ namespace SimConnect3
             foreach (var kv in _fxSlots)
                 try
                 {
+                    if (kv.Value == FxMcduSlot) continue;   // la MCDU va al pedestal (PlaceFenixMcdu)
                     if (SimWindowRect(kv.Value, MsfsExtraHeight) is not System.Drawing.Rectangle wr) continue;
                     // ISIS: la finestra un 12,9% més gran que el forat, centrada (el seu marc negre queda amagat darrere l'app)
                     if (kv.Value == 4) wr.Inflate((int)Math.Round(wr.Width * 0.0645), (int)Math.Round(wr.Height * 0.0645));
@@ -439,6 +440,33 @@ namespace SimConnect3
             // (l'avís només compta les 4 pantalles principals; l'ISIS és opcional)
             UpdatePopoutMessage(4 - _fxSlots.Values.Count(s => s < 4), 4, _msfsSince, ref _fxPopoutMsgShown, FenixPopoutText);
         }
+        /// <summary>"Forat" de la MCDU de l'esquerra (pedestal): és fora dels 5 vidres del panell principal.</summary>
+        private const int FxMcduSlot = 5;
+
+        /// <summary>
+        /// MCDU del Fenix (pop-out reconeguda per la imatge, veure ClassifyFenix) al forat de la MCDU de l'esquerra del
+        /// pedestal, només si el pedestal és a la vista. Es col·loca després de les altres pantalles, just darrere de l'app:
+        /// així queda per sobre de totes les altres pop-out si es superposen. Sense pedestal no es toca: queda darrere
+        /// de l'app, on no hi ha cap forat, i no es veu.
+        /// </summary>
+        private void PlaceFenixMcdu()
+        {
+            if (DateTime.UtcNow < _fxPauseUntil) return;
+            IntPtr h = IntPtr.Zero;
+            foreach (var kv in _fxSlots) if (kv.Value == FxMcduSlot) { h = kv.Key; break; }
+            if (h == IntPtr.Zero) return;
+            System.Drawing.Rectangle wr;
+            if (_a320Overhead?.PedMcduScreenRect() is System.Drawing.Rectangle rc) wr = PopoutRect(rc, MsfsExtraHeight);
+            else
+            {
+                // pedestal no visible: la finestra s'aparca fora de totes les pantalles (si es quedés on era, es podria
+                // veure per un altre forat, p.ex. el del MFD)
+                var vs = System.Windows.Forms.SystemInformation.VirtualScreen;
+                wr = new System.Drawing.Rectangle(vs.Right + 200, vs.Top, 400, 350);
+            }
+            try { XPlaneWindows.Place(h, wr, this.Handle); } catch { }
+        }
+
         private DateTime _fxLastClassify = DateTime.MinValue, _fxLastVerify = DateTime.MinValue;
         private DateTime _fxPauseUntil = DateTime.MinValue, _fxStableSince = DateTime.MinValue;
         private bool _fxSettled;               // pantalles ben col·locades 1 minut seguit: ja no es revisen
@@ -453,7 +481,7 @@ namespace SimConnect3
         private const string FenixPopoutText = "In Microsoft Flight Simulator, hold down the right **ALT** key on your keyboard and click the A320 displays one at a time, in this order: PFD, ND, upper ECAM, lower ECAM. panelAIR will place them in the panel.";
 
         /// <summary>
-        /// Quina pantalla del Fenix és (0 PFD, 1 ND, 2 ECAM superior, 3 ECAM inferior, 4 ISIS; -1 si no se sap, p.ex. negra):
+        /// Quina pantalla del Fenix és (0 PFD, 1 ND, 2 ECAM superior, 3 ECAM inferior, 4 ISIS, 5 MCDU; -1 si no se sap, p.ex. negra):
         ///  - PFD: hi ha prou cel blau i terra marró (l'horitzó artificial);
         ///  - ECAM inferior (SD): línia horitzontal clara de gairebé tota l'amplada al 78-95% de l'alçada (franja TAT/SAT/GW);
         ///  - ECAM superior (EWD): línia horitzontal clara llarga al 55-78% (separació entre motors i missatges);
@@ -470,13 +498,16 @@ namespace SimConnect3
             int x0 = (int)(w * 0.06), x1 = (int)(w * 0.94), y0 = (int)(h * 0.04), y1 = (int)(h * 0.96);
             long sky = 0, ground = 0, tot = 0, lit = 0;
             double ewd = 0, sd = 0;
+            // files de text (MCDU): files de la imatge amb algun píxel encès (qualsevol color) i franges fosques entre elles
+            var rowLit = new bool[y1 - y0];
             for (int y = y0; y < y1; y++)
             {
-                int run = 0, maxRun = 0;
+                int run = 0, maxRun = 0, litPx = 0;
                 for (int x = x0; x < x1; x++)
                 {
                     int i = y * stride + x * 4;
                     int bl = px[i], gr = px[i + 1], rd = px[i + 2];
+                    if (Math.Max(rd, Math.Max(gr, bl)) > 150) litPx++;
                     if ((y & 1) == 0 && (x & 1) == 0)
                     {
                         tot++;
@@ -488,6 +519,7 @@ namespace SimConnect3
                     }
                     if ((rd + gr + bl) / 3 > 110) { if (++run > maxRun) maxRun = run; } else run = 0;
                 }
+                rowLit[y - y0] = litPx >= 2;
                 double f = (double)y / h, frac = (double)maxRun / (x1 - x0);
                 if (f > 0.55 && f < 0.78 && frac > ewd) ewd = frac;
                 if (f >= 0.78 && f < 0.95 && frac > sd) sd = frac;
@@ -501,6 +533,22 @@ namespace SimConnect3
             if ((double)(sky + ground) / tot > 0.03 && (double)sky / tot > 0.005 && (double)ground / tot > 0.005) return 0;
             if (sd >= 0.85) return 3;
             if (ewd >= 0.5) return 2;
+            // MCDU: només text, en files separades per franges fosques; cada bloc de files enceses fa com a molt l'alçada
+            // d'una línia de text (mesurat a la pàgina MCDU MENU: 3 blocs, el més alt el 8,7% de l'alçada). El ND té arcs
+            // que travessen moltes files seguides (blocs molt alts). Franja fosca: almenys l'1% de l'alçada.
+            int gap = Math.Max(2, h / 100), dark = 0, blocks = 0, cur = 0, maxBlock = 0;
+            bool inBlock = false;
+            foreach (bool rl in rowLit)
+            {
+                if (rl)
+                {
+                    if (!inBlock) { blocks++; inBlock = true; cur = 0; }
+                    cur += dark + 1; dark = 0;
+                    if (cur > maxBlock) maxBlock = cur;
+                }
+                else if (inBlock && ++dark >= gap) { inBlock = false; dark = 0; }
+            }
+            if (blocks >= 2 && maxBlock <= h * 0.13) return FxMcduSlot;
             return 1;
         }
 

@@ -6000,6 +6000,12 @@ namespace SimConnect3
         private Rectangle? SimWindowRect(int glass, int extraHeight = 0)
         {
             if (_a320Overhead?.GlassScreenRect(glass) is not Rectangle rc) return null;
+            return PopoutRect(rc, extraHeight);
+        }
+
+        /// <summary>Rectangle de la finestra pop-out per a un vidre (en coordenades de pantalla): vegeu SimWindowRect.</summary>
+        private static Rectangle PopoutRect(Rectangle rc, int extraHeight)
+        {
             int dy = (int)Math.Round(rc.Height * XpBezelY);
             int wh = rc.Height + 2 * dy + extraHeight;
             int ww = (int)Math.Round(wh * (double)rc.Width / rc.Height);
@@ -6030,7 +6036,7 @@ namespace SimConnect3
                           && _a320Overhead != null && _a320Overhead.Visible;
             if (!active) { _msfsSince = DateTime.MinValue; _fbwSettle.Title = null; return; }
             if (_msfsSince == DateTime.MinValue) _msfsSince = DateTime.UtcNow;
-            if (IsA320Fenix()) { PlaceFenixScreens(); return; }   // Fenix: finestres sense títol propi (Form1.A320Fenix.cs)
+            if (IsA320Fenix()) { PlaceFenixScreens(); PlaceFenixMcdu(); return; }   // Fenix: finestres sense títol propi (Form1.A320Fenix.cs)
             if (DateTime.UtcNow < _fxPauseUntil) return;   // s'està prement / animant la palanca del tren
             int missing = 0;
             var found = XPlaneWindows.FindEach(MsfsScreens.Select(s => s.title).Concat(FbwIsisTitles), MsfsProcesses);   // una sola passada
