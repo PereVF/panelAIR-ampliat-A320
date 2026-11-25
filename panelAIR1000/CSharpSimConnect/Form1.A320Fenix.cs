@@ -395,6 +395,17 @@ namespace SimConnect3
                     using (var bmp = XPlaneWindows.Capture(h)) kind = bmp == null ? -1 : ClassifyFenix(bmp);
                     if (kind < 0) continue;
                     _fxLastKind[h] = kind;
+                    // MCDU: dos forats (esquerra / dreta). Si ja és en un dels dos, hi continua; si no, va al primer lliure
+                    if (kind == FxMcduSlot)
+                    {
+                        if (placed && (cur == FxMcduSlot || cur == FxMcdu2Slot)) kind = cur;
+                        else
+                        {
+                            bool leftTaken = false;
+                            foreach (var kv in _fxSlots) if (kv.Value == FxMcduSlot && kv.Key != h) leftTaken = true;
+                            if (leftTaken) kind = FxMcdu2Slot;
+                        }
+                    }
                     if (placed && cur == kind) { if (kind != 1) _fxTentative.Remove(h); _fxMismatch.Remove(h); continue; }
                     if (placed && !tentative)
                     {
@@ -430,7 +441,7 @@ namespace SimConnect3
             foreach (var kv in _fxSlots)
                 try
                 {
-                    if (kv.Value == FxMcduSlot) continue;   // la MCDU va al pedestal (PlaceFenixMcdu)
+                    if (kv.Value == FxMcduSlot || kv.Value == FxMcdu2Slot) continue;   // les MCDU van al pedestal (PlaceFenixMcdu)
                     if (SimWindowRect(kv.Value, MsfsExtraHeight) is not System.Drawing.Rectangle wr) continue;
                     // ISIS: la finestra un 12,9% més gran que el forat, centrada (el seu marc negre queda amagat darrere l'app)
                     if (kv.Value == 4) wr.Inflate((int)Math.Round(wr.Width * 0.0645), (int)Math.Round(wr.Height * 0.0645));
@@ -440,31 +451,29 @@ namespace SimConnect3
             // (l'avís només compta les 4 pantalles principals; l'ISIS és opcional)
             UpdatePopoutMessage(4 - _fxSlots.Values.Count(s => s < 4), 4, _msfsSince, ref _fxPopoutMsgShown, FenixPopoutText);
         }
-        /// <summary>"Forat" de la MCDU de l'esquerra (pedestal): és fora dels 5 vidres del panell principal.</summary>
-        private const int FxMcduSlot = 5;
+        /// <summary>"Forats" de les MCDU del pedestal (5 esquerra, 6 dreta): fora dels 5 vidres del panell principal.</summary>
+        private const int FxMcduSlot = 5, FxMcdu2Slot = 6;
 
         /// <summary>
-        /// MCDU del Fenix (pop-out reconeguda per la imatge, veure ClassifyFenix) al forat de la MCDU de l'esquerra del
-        /// pedestal, només si el pedestal és a la vista. Es col·loca després de les altres pantalles, just darrere de l'app:
-        /// així queda per sobre de totes les altres pop-out si es superposen. Sense pedestal no es toca: queda darrere
-        /// de l'app, on no hi ha cap forat, i no es veu.
+        /// MCDU del Fenix (pop-out reconegudes per la imatge, veure ClassifyFenix) als forats de les MCDU del pedestal,
+        /// només si el pedestal és a la vista: la primera que surt va a l'esquerra i la segona a la dreta (les dues tenen el
+        /// mateix aspecte, no es poden distingir pel contingut). Es col·loquen després de les altres pantalles, just
+        /// darrere de l'app: així queden per sobre de totes les altres pop-out si es superposen. Sense pedestal s'aparquen
+        /// fora de les pantalles (no es veuen per cap forat).
         /// </summary>
         private void PlaceFenixMcdu()
         {
             if (DateTime.UtcNow < _fxPauseUntil) return;
-            IntPtr h = IntPtr.Zero;
-            foreach (var kv in _fxSlots) if (kv.Value == FxMcduSlot) { h = kv.Key; break; }
-            if (h == IntPtr.Zero) return;
-            System.Drawing.Rectangle wr;
-            if (_a320Overhead?.PedMcduScreenRect() is System.Drawing.Rectangle rc) wr = PopoutRect(rc, MsfsExtraHeight);
-            else
+            var vs = System.Windows.Forms.SystemInformation.VirtualScreen;
+            foreach (var kv in _fxSlots)
             {
-                // pedestal no visible: la finestra s'aparca fora de totes les pantalles (si es quedés on era, es podria
-                // veure per un altre forat, p.ex. el del MFD)
-                var vs = System.Windows.Forms.SystemInformation.VirtualScreen;
-                wr = new System.Drawing.Rectangle(vs.Right + 200, vs.Top, 400, 350);
+                if (kv.Value != FxMcduSlot && kv.Value != FxMcdu2Slot) continue;
+                int side = kv.Value == FxMcduSlot ? 0 : 1;
+                System.Drawing.Rectangle wr = _a320Overhead?.PedMcduScreenRect(side) is System.Drawing.Rectangle rc
+                    ? PopoutRect(rc, MsfsExtraHeight)
+                    : new System.Drawing.Rectangle(vs.Right + 200 + side * 450, vs.Top, 400, 350);
+                try { XPlaneWindows.Place(kv.Key, wr, this.Handle); } catch { }
             }
-            try { XPlaneWindows.Place(h, wr, this.Handle); } catch { }
         }
 
         private DateTime _fxLastClassify = DateTime.MinValue, _fxLastVerify = DateTime.MinValue;

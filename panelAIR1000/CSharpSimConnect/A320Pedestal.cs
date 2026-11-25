@@ -20,7 +20,14 @@ namespace panelAIR1000
         public const float PedLH = 3216f * PedK;
 
         /// <summary>Vidre de la MCDU de l'esquerra (unitats lògiques): on va la finestra pop-out de la MCDU.</summary>
-        static readonly RectangleF PedMcdu1Glass = RectangleF.FromLTRB(155 * PedK, 65 * PedK, 495 * PedK, 360 * PedK);
+        /// <summary>Desplaçament de la MCDU dreta respecte de l'esquerra (px de referència).</summary>
+        const float PedMcdu2Dx = 1334f;
+        static readonly RectangleF PedMcdu1Glass = RectangleF.FromLTRB(155 * PedK, (65 + McduScrDy) * PedK, 495 * PedK, (360 + McduScrDy) * PedK);
+        /// <summary>
+        /// MCDU esquerra: pantalla i 12 tecles laterals baixades fins que la vora de baix de l'embut queda a 5 de la planxa
+        /// de les tecles de control (aquesta comença a 372 + 3/4 de l'alçada d'una tecla de control, 36 × 0,95 × 0,75).
+        /// </summary>
+        const float McduScrDy = 36f * 0.95f * 0.75f - 5f;
 
         static readonly PointF[] PedFramePoly = MakePedFrame();
         static PointF[] MakePedFrame()
@@ -93,46 +100,74 @@ namespace panelAIR1000
             // ═══════════════ MCDU (capità a l'esquerra, primer oficial a la dreta) ═══════════════
             void Mcdu(string p, float dx)
             {
-                // L = MCDU de l'esquerra, refeta segons la imatge de referència (la de la dreta, de moment, com abans)
-                bool L = dx == 0;
+                // L = MCDU refeta segons la imatge de referència i la captura del Fenix. Ara les dues MCDU són iguals
+                // (la de la dreta, la mateixa desplaçada dx); la branca antiga (!L) es conserva però ja no s'usa.
+                bool L = true;
+                // el conjunt de tecles de control i la seva planxa, un 5% més petit (respecte del seu cantó de dalt a
+                // l'esquerra, 118 / 372)
+                const float CtlK = 0.95f;
+                // i desplaçat 5 cap a la dreta i 3/4 de l'alçada d'una tecla de control cap avall (36 × 0,95 × 0,75)
+                const float CtlDx = 5f, CtlDy = 36f * CtlK * 0.75f;
+                float Cx(float x) => L ? 118 + (x - 118) * CtlK + CtlDx : x;
+                float Cy(float y) => L ? 372 + (y - 372) * CtlK + CtlDy : y;
+                PointF CP(float x, float y) => Pt(Cx(x) + dx, Cy(y));
                 if (L)
                 {
                     // 1) planxa de sota: llisa, sense osques (els DZUS hi queden per sobre)
-                    Pp(62, 30, 595, 856);
+                    Pp(62 + dx, 30, 595 + dx, 856);
                     // 2) planxa de la cara (tecles laterals, lletres i números): osques DZUS a la meitat de dalt; a la
                     //    meitat de baix va per dins de la nansa
-                    _silk.Add(new OhMcduFace(k));
+                    _silk.Add(new OhMcduFace(k, dx));
                     // nansa d'extracció: braços des del capdamunt de les frontisses, desviament als DZUS de baix i tram de baix
-                    _silk.Add(new OhMcduHandle(k));
+                    _silk.Add(new OhMcduHandle(k, dx));
                     // 6 DZUS: 4 a les cantonades i 2 sobre les frontisses
                     foreach (var (sx, sy) in new[] { (83.04f, 75f), (573.96f, 75f), (83.04f, 453f), (573.96f, 453f), (83.04f, 813f), (573.96f, 813f) })
-                        _silk.Add(new OhScrew(PedScrewKind.Dzus, sx * k, sy * k, 8.4f));
-                    // 3) planxa de les tecles de control (DIR…MCDU MENU, AIR PORT, NEXT PAGE, fletxes), aixecada sobre la cara
-                    //    (tecles de 52 × 36 a pas de 64 × 42: fila de DIR…DATA, fila de F-PLN…MCDU MENU i bloc de 2 columnes a sota)
-                    _silk.Add(new OhPanel(Oh.RoundAll(new[] { Pt(118, 372), Pt(438, 372), Pt(438, 419), Pt(502, 419), Pt(502, 461),
-                                                              Pt(246, 461), Pt(246, 592), Pt(118, 592) }, 4f * k), Array.Empty<PointF>()));
+                        _silk.Add(new OhScrew(PedScrewKind.Dzus, (sx + dx) * k, sy * k, 8.4f));
+                    // 3) planxa de les tecles de control (DIR…DATA i una tecla buida, F-PLN…MCDU MENU, AIR PORT i una buida,
+                    //    fletxes), aixecada sobre la cara (tecles de 52 × 36 a pas de 64 × 48: dues files de 6 i bloc de 2
+                    //    columnes a sota)
+                    _silk.Add(new OhPanel(Oh.RoundAll(new[] { CP(118, 372), CP(502, 372), CP(502, 470),
+                                                              CP(246, 470), CP(246, 616), CP(118, 616) }, 4f * k), Array.Empty<PointF>()));
                     // pantalla enfonsada dins la cara: forat (vora exterior = marc de la MCDU dreta), parets còniques i pantalla de sempre al fons
-                    _silk.Add(new OhMcduWell(R(143, 53, 507, 372), PedMcdu1Glass, 12f * k, 6f * k));
+                    var glass = PedMcdu1Glass; glass.Offset(dx * k, 0);
+                    _silk.Add(new OhMcduWell(R(143 + dx, 53 + McduScrDy, 507 + dx, 372 + McduScrDy), glass, 12f * k, 6f * k));
+                    // 5 llums d'avís de la part de dalt (apagats: càpsules negres), entre la vora de la cara i l'embut,
+                    // repartits per igual entre els dos LED i centrats a la MCDU
+                    float ay = (36 + 53 + McduScrDy) / 2f;
+                    for (int a = 0; a < 5; a++)
+                        _silk.Add(new OhAnnPill(R(195.5f + a * 66 - 25 + dx, ay - 7, 195.5f + a * 66 + 25 + dx, ay + 7)));
                 }
                 else
                 {
                     Pp(62 + dx, 30, 595 + dx, 856, Y(75, 215, 455), Y(75, 455));
                     _silk.Add(new OhScreen(R(143 + dx, 53, 507 + dx, 372), R(155 + dx, 65, 495 + dx, 360), 12f * k, false));
                 }
-                _silk.Add(new OhLed((131 + dx) * k, 48 * k, 8f * k));
-                _silk.Add(new OhLed((510 + dx) * k, 46 * k, 8f * k));
+                if (L)
+                {
+                    // dos cercles blancs encastats (com a la captura), a l'alçada dels llums d'avís i simètrics respecte d'ells
+                    float wy = (36 + 53 + McduScrDy) / 2f;
+                    _silk.Add(new OhWhiteDome((131 + dx) * k, wy * k, 15f * k));
+                    _silk.Add(new OhWhiteDome((524 + dx) * k, wy * k, 15f * k));
+                }
+                else
+                {
+                    _silk.Add(new OhLed((131 + dx) * k, 48 * k, 8f * k));
+                    _silk.Add(new OhLed((510 + dx) * k, 46 * k, 8f * k));
+                }
                 for (int i = 0; i < 6; i++)
                 {
-                    float y = 103 + i * 43.4f;
+                    // (MCDU esquerra: + 22,5 perquè la ratlla de la 1a tecla arribi a la pantalla a l'alçada de la part de
+                    //  baix de la 1a línia de dades, mesurat sobre la popout del Fenix i ajustat a ull per en Pere)
+                    float y = 103 + i * 43.4f + (L ? McduScrDy + 22.5f : 0);
                     if (L)
                     {
                         // tecles com les de la MCDU dreta, una mica més cap a la vora del panell; la ratlla travessa
                         // la planxa i baixa per la paret del con fins a la pantalla (convergeix: la pantalla és més petita)
-                        PK(p + "_LSK" + (i + 1) + "L", 111, y, 40, 26, "—");
-                        PK(p + "_LSK" + (i + 1) + "R", 539, y, 40, 26, "—");
-                        float yg = 65 + (y - 53) * (295f / 319f);
-                        Wl(131, y, 143, y, 155, yg);
-                        Wl(519, y, 507, y, 495, yg);
+                        PK(p + "_LSK" + (i + 1) + "L", 111 + dx, y, 40, 26, "—");
+                        PK(p + "_LSK" + (i + 1) + "R", 539 + dx, y, 40, 26, "—");
+                        float yg = 65 + McduScrDy + (y - 53 - McduScrDy) * (295f / 319f);
+                        Wl(131 + dx, y, 143 + dx, y, 155 + dx, yg);
+                        Wl(519 + dx, y, 507 + dx, y, 495 + dx, yg);
                     }
                     else
                     {
@@ -143,8 +178,8 @@ namespace panelAIR1000
                 if (L)
                 {
                     // BRT i DIM: dues tecles a la planxa de la cara, a la dreta de les tecles de control
-                    PK(p + "_BRT", 532, 398, 40, 36, "BRT");
-                    PK(p + "_DIM", 532, 440, 40, 36, "DIM");
+                    PK(p + "_BRT", 522 + dx, Cy(398), 40, 36, "BRT");
+                    PK(p + "_DIM", 522 + dx, Cy(446), 40, 36, "DIM");
                 }
                 else
                 {
@@ -155,11 +190,13 @@ namespace panelAIR1000
                 (string a, string? b, float x, float y, float h)[] fk = L
                     ? new (string, string?, float, float, float)[]
                     {
-                        // més petites i repartides per igual (cap fila no toca la del costat)
-                        ("DIR", null, 148, 398, 36), ("PROG", null, 212, 398, 36), ("PERF", null, 276, 398, 36), ("INIT", null, 340, 398, 36), ("DATA", null, 404, 398, 36),
-                        ("F-PLN", null, 148, 440, 36), ("RAD", "NAV", 212, 440, 36), ("FUEL", "PRED", 276, 440, 36), ("SEC", "F-PLN", 340, 440, 36), ("ATC", "COMM", 404, 440, 36), ("MCDU", "MENU", 468, 440, 36),
-                        ("AIR", "PORT", 148, 482, 36), ("↑", null, 212, 482, 36), ("NEXT", "PAGE", 148, 524, 36), ("↓", null, 212, 524, 36),
-                        ("←", null, 148, 566, 36), ("→", null, 212, 566, 36)
+                        // més petites i repartides per igual; separació vertical entre files ×2 (pas de 48). Etiquetes i
+                        // ordre com al Fenix: tecla buida a la dreta de DATA i a la dreta d'AIR PORT; fletxes ← ↑ i → ↓
+                        ("DIR", null, 148, 398, 36), ("PROG", null, 212, 398, 36), ("PERF", null, 276, 398, 36), ("INIT", null, 340, 398, 36), ("DATA", null, 404, 398, 36), ("", null, 468, 398, 36),
+                        ("F-PLN", null, 148, 446, 36), ("RAD", "NAV", 212, 446, 36), ("FUEL", "PRED", 276, 446, 36), ("SEC", "F-PLN", 340, 446, 36), ("ATC", "COMM", 404, 446, 36), ("MCDU", "MENU", 468, 446, 36),
+                        ("AIR", "PORT", 148, 494, 36), ("", null, 212, 494, 36),
+                        ("←", null, 148, 542, 36), ("↑", null, 212, 542, 36),
+                        ("→", null, 148, 590, 36), ("↓", null, 212, 590, 36)
                     }
                     : new (string, string?, float, float, float)[]
                     {
@@ -170,15 +207,17 @@ namespace panelAIR1000
                     };
                 foreach (var f in fk)
                 {
-                    string id = p + "_" + (f.a + (f.b ?? "")).Replace("-", "").Replace("↑", "UP").Replace("↓", "DOWN").Replace("←", "PREV").Replace("→", "NEXT");
+                    string id = f.a.Length == 0 ? p + "_BLANK" + (f.y < 420 ? "1" : "2")
+                              : p + "_" + (f.a + (f.b ?? "")).Replace("-", "").Replace("↑", "UP").Replace("↓", "DOWN").Replace("←", "PREV").Replace("→", "NEXT");
                     bool arrow = f.a is "↑" or "↓" or "←" or "→";
-                    var fkey = PK(id, f.x + dx, f.y, L ? 52 : 60, f.h, f.a, f.b, L && arrow ? 30f : 12f);
+                    var fkey = PK(id, Cx(f.x) + dx, Cy(f.y), L ? 52 * CtlK : 60, L ? f.h * CtlK : f.h, f.a, f.b, L && arrow ? 30f : 12f);
                     if (L && arrow) fkey.ArrowDir = f.a switch { "↑" => 1, "↓" => 2, "←" => 3, _ => 4 };
                 }
                 // lletres
                 string[] rows = { "ABCDE", "FGHIJ", "KLMNO", "PQRST", "UVWXY" };
                 float[] lx = { 296, 349, 401, 453, 505 };
-                float[] ly = { 536, 589, 643, 697, 750 };
+                // (MCDU esquerra: les 6 files, de la A…E a la Z…CLR, repartides per igual entre 536 i 809)
+                float[] ly = L ? new float[] { 536, 590.6f, 645.2f, 699.8f, 754.4f } : new float[] { 536, 589, 643, 697, 750 };
                 for (int r = 0; r < 5; r++)
                     for (int c = 0; c < 5; c++)
                     {
@@ -187,30 +226,41 @@ namespace panelAIR1000
                         if (L && "ENSW".Contains(rows[r][c])) { key.BoxLabel = true; key.TextScale = 1.05f; }
                     }
                 PK(p + "_KEY_Z", lx[0] + dx, 809, 42, 40, "Z", null, L ? 18f : 15f).TextScale = L ? 1.3f : 1f;
-                PK(p + "_KEY_SLASH2", lx[1] + dx, 809, 42, 40, "-", null, L ? 18f : 15f).TextScale = L ? 1.3f : 1f;   // − (signe)
-                PK(p + "_KEY_PLUS", lx[2] + dx, 809, 42, 40, "+", null, L ? 18f : 15f).TextScale = L ? 1.3f : 1f;
+                if (L)
+                {
+                    // com al Fenix: barra de dividir i SP (espai)
+                    PK(p + "_KEY_DIV", lx[1] + dx, 809, 42, 40, "/", null, 18f).TextScale = 1.3f;
+                    PK(p + "_KEY_SP", lx[2] + dx, 809, 42, 40, "SP", null, 14f).TextScale = 1.1f;
+                }
+                else
+                {
+                    PK(p + "_KEY_SLASH2", lx[1] + dx, 809, 42, 40, "-", null, 15f);   // − (signe)
+                    PK(p + "_KEY_PLUS", lx[2] + dx, 809, 42, 40, "+", null, 15f);
+                }
                 PK(p + "_KEY_OVFY", lx[3] + dx, 809, 42, 40, "OVFY", "Δ", 10f);
                 PK(p + "_KEY_CLR", lx[4] + dx, 809, 42, 40, "CLR", null, 11f);
                 // xifres (tecles rodones)
-                string[] num = { "1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", "/" };
+                // (MCDU esquerra, com al Fenix: l'última és +/-)
+                string[] num = { "1", "2", "3", "4", "5", "6", "7", "8", "9", ".", "0", L ? "+/-" : "/" };
                 // (MCDU esquerra: més petites, i pujades fins que la fila de baix acaba on acaben les lletres, a 829)
                 float[] nx = L ? new float[] { 145, 195, 245 } : new float[] { 142, 195, 247 };
                 float[] ny = L ? new float[] { 661, 711, 761, 811 } : new float[] { 659, 713, 765, 818 };
                 for (int i = 0; i < 12; i++)
                 {
-                    string id = num[i] == "." ? "DOT" : num[i] == "/" ? "SLASH" : num[i];
+                    string id = num[i] == "." ? "DOT" : num[i] == "/" ? "SLASH" : num[i] == "+/-" ? "PLUSMINUS" : num[i];
                     RK(p + "_KEY_" + id, nx[i % 3] + dx, ny[i / 3], L ? 18 : 21, num[i]);
                 }
                 // llums FAIL / FMGC i MCDU MENU (franges verticals fosques); a la MCDU esquerra, simètriques respecte del
                 // centre de la cara (FAIL/FMGC més a la dreta i MCDU MENU una mica més a la dreta)
-                float fx0 = L ? 91 : 80 + dx, mx0 = L ? 540 : 536 + dx;
+                // (MCDU esquerra: gairebé a tocar del braç de la nansa)
+                // (i 5 cap endins cadascuna, simètriques: FAIL/FMGC a la dreta amb les tecles de control, MCDU MENU a l'esquerra)
+                // (sense text: només la part negra)
+                float fx0 = (L ? 84 : 80) + dx, mx0 = (L ? 547 : 536) + dx;
                 _silk.Add(new OhBlock(R(fx0, 578, fx0 + 26, 724), Color.FromArgb(44, 48, 53), Color.FromArgb(22, 24, 27), 3f));
-                Vt("FAIL", fx0 + 13, 612, 8.2f); Vt("FMGC", fx0 + 13, 688, 8.2f);
                 _silk.Add(new OhBlock(R(mx0, 578, mx0 + 26, 724), Color.FromArgb(44, 48, 53), Color.FromArgb(22, 24, 27), 3f));
-                Vt("MCDU", mx0 + 13, 617, 8.2f); Vt("MENU", mx0 + 13, 690, 8.2f);
             }
             Mcdu("PED_MCDU1", 0);
-            Mcdu("PED_MCDU2", 1334);
+            Mcdu("PED_MCDU2", PedMcdu2Dx);
 
             // ═══════════════ RMP ═══════════════
             void Rmp(string p, float dx, string act, string stby)
@@ -541,11 +591,12 @@ namespace panelAIR1000
     {
         // vores de la cara i DZUS (mateixa mida i osca que a l'overhead: radi del vis 8,4, osca ×1,28, arrodoniment fix)
         const float X0 = 72f, X1 = 585f, Top = 36f, Rc = 4f;
-        readonly float _k; readonly RectangleF _rect;
-        public OhMcduFace(float k)
+        readonly float _k, _dx; readonly RectangleF _rect;
+        /// <param name="dx">desplaçament horitzontal en px de referència (0 la MCDU esquerra, 1334 la dreta)</param>
+        public OhMcduFace(float k, float dx = 0)
         {
-            _k = k;
-            _rect = RectangleF.FromLTRB(X0 * k, Top * k, X1 * k, 842 * k);
+            _k = k; _dx = dx;
+            _rect = RectangleF.FromLTRB((X0 + dx) * k, Top * k, (X1 + dx) * k, 842 * k);
             Bounds = RectangleF.Inflate(_rect, 6, 6);
         }
         GraphicsPath MakePath()
@@ -587,7 +638,7 @@ namespace panelAIR1000
             p.AddArc(xL - R, yT - R, 2 * R, 2 * R, 90, -180);
             p.AddArc(X0, yT - R - 2 * f, 2 * f, 2 * f, 90, 90);
             p.CloseFigure();
-            using var m = new Matrix(k, 0, 0, k, 0, 0);
+            using var m = new Matrix(k, 0, 0, k, _dx * k, 0);
             p.Transform(m);
             return p;
         }
@@ -673,10 +724,11 @@ namespace panelAIR1000
     internal sealed class OhMcduHandle : OhSilk
     {
         readonly float _k; readonly PointF[] _line; readonly RectangleF _hl, _hr;
-        public OhMcduHandle(float k)
+        /// <param name="dx">desplaçament horitzontal en px de referència (0 la MCDU esquerra, 1334 la dreta)</param>
+        public OhMcduHandle(float k, float dx = 0)
         {
             _k = k;
-            PointF P(float x, float y) => new(x * k, y * k);
+            PointF P(float x, float y) => new((x + dx) * k, y * k);
             _line = Oh.RoundAll(new[]
             {
                 P(72, 478), P(72, 776), P(104, 800), P(104, 848), P(553, 848), P(553, 800), P(585, 776), P(585, 478)
@@ -685,9 +737,9 @@ namespace panelAIR1000
             // (els braços pugen fins al capdamunt de les frontisses)
             _line = TrimClosing(_line, P(72, 478), P(585, 478));
             // frontisses estretes, entre el braç i la vora vertical de la planxa de la cara
-            _hl = RectangleF.FromLTRB(77 * k, 478 * k, 91 * k, 562 * k);
-            _hr = RectangleF.FromLTRB(566 * k, 478 * k, 580 * k, 562 * k);
-            Bounds = RectangleF.FromLTRB(60 * k, 470 * k, 598 * k, 856 * k);
+            _hl = RectangleF.FromLTRB((77 + dx) * k, 478 * k, (91 + dx) * k, 562 * k);
+            _hr = RectangleF.FromLTRB((566 + dx) * k, 478 * k, (580 + dx) * k, 562 * k);
+            Bounds = RectangleF.FromLTRB((60 + dx) * k, 470 * k, (598 + dx) * k, 856 * k);
         }
         static PointF[] TrimClosing(PointF[] pts, PointF a, PointF b)
         {
@@ -731,6 +783,50 @@ namespace panelAIR1000
                 using (var pin = new Pen(Color.FromArgb(160, 30, 36, 42), 1f)) g.DrawLine(pin, r.X + 1.5f, py, r.Right - 1.5f, py);
                 using (var pinH = new Pen(Color.FromArgb(120, 230, 236, 242), 0.7f)) g.DrawLine(pinH, r.X + 1.5f, py + 1f, r.Right - 1.5f, py + 1f);
             }
+        }
+    }
+
+    /// <summary>Llum d'avís de la MCDU apagat: càpsula negra (vidre fosc) encastada, amb un reflex suau a dalt.</summary>
+    internal sealed class OhAnnPill : OhSilk
+    {
+        readonly RectangleF _r;
+        public OhAnnPill(RectangleF r) { _r = r; Bounds = RectangleF.Inflate(r, 3, 3); }
+        public override void Draw(Graphics g)
+        {
+            using var p = Oh.RoundRect(_r, _r.Height / 2f);
+            // cantell: fosc a dalt-esquerra (encastat), llum a baix-dreta
+            var st = g.Save(); g.TranslateTransform(0.6f, 0.7f);
+            using (var hp = new Pen(Color.FromArgb(140, Oh.PlateHi), 1.0f)) g.DrawPath(hp, p);
+            g.Restore(st);
+            using (var b = new LinearGradientBrush(RectangleF.Inflate(_r, 0.5f, 0.5f), Color.FromArgb(10, 11, 13), Color.FromArgb(34, 37, 41), 90f)) g.FillPath(b, p);
+            using (var pe = new Pen(Color.FromArgb(220, 8, 9, 10), 0.8f)) g.DrawPath(pe, p);
+            // reflex del vidre
+            var hl = new RectangleF(_r.X + _r.Height * 0.4f, _r.Y + _r.Height * 0.16f, _r.Width - _r.Height * 0.8f, _r.Height * 0.3f);
+            using (var hb = new LinearGradientBrush(RectangleF.Inflate(hl, 0.5f, 0.5f), Color.FromArgb(55, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 90f))
+            using (var hpth = Oh.RoundRect(hl, hl.Height / 2f)) g.FillPath(hb, hpth);
+        }
+    }
+
+    /// <summary>
+    /// Cercle blanc de la part de dalt de la MCDU: encastat a la planxa (no sobresurt, com els llums d'avís): disc
+    /// blanc-gris pla amb el cantell fosc a dalt-esquerra i llum a baix-dreta, sense ombra.
+    /// </summary>
+    internal sealed class OhWhiteDome : OhSilk
+    {
+        readonly float _cx, _cy, _r;
+        public OhWhiteDome(float cx, float cy, float r) { _cx = cx; _cy = cy; _r = r; Bounds = new RectangleF(cx - r - 3, cy - r - 3, r * 2 + 6, r * 2 + 6); }
+        public override void Draw(Graphics g)
+        {
+            var o = new RectangleF(_cx - _r, _cy - _r, _r * 2, _r * 2);
+            // cantell: llum a baix-dreta (fora), disc, i fil fosc a la vora
+            using (var hp = new Pen(Color.FromArgb(140, Oh.PlateHi), 1.0f)) g.DrawEllipse(hp, o.X + 0.6f, o.Y + 0.7f, o.Width, o.Height);
+            using (var b = new LinearGradientBrush(RectangleF.Inflate(o, 0.5f, 0.5f), Color.FromArgb(196, 200, 204), Color.FromArgb(236, 238, 240), 70f)) g.FillEllipse(b, o);
+            // ombra interior a dalt-esquerra (el disc és enfonsat respecte de la planxa)
+            var st = g.Save();
+            using (var cp = new GraphicsPath()) { cp.AddEllipse(o); g.SetClip(cp); }
+            using (var sp = new Pen(Color.FromArgb(90, 20, 24, 28), _r * 0.18f)) g.DrawEllipse(sp, o.X + _r * 0.08f, o.Y + _r * 0.1f, o.Width, o.Height);
+            g.Restore(st);
+            using (var pe = new Pen(Color.FromArgb(200, 30, 34, 38), 0.8f)) g.DrawEllipse(pe, o);
         }
     }
 
