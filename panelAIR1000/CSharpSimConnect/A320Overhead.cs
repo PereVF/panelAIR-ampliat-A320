@@ -409,12 +409,16 @@ namespace panelAIR1000
         /// Panell amb visos DZUS dins osques en U a les vores laterals (maqueta "Visos DZUS" v3). L'osca envolta el vis
         /// amb una mitja lluna de radi DzR i s'uneix a la vora amb un arrodoniment de radi DzR/2.
         /// </summary>
-        public OhPanel(RectangleF r, bool dzusNotch) : this(r)
+        /// <param name="shortH">per sota d'aquesta alçada, un sol vis a cada costat (a mitja alçada)</param>
+        public OhPanel(RectangleF r, bool dzusNotch, float shortH = 50f) : this(r)
         {
             if (!dzusNotch) return;
             _dzus = true;
-            _screws = new[] { new PointF(r.X + DzIn, r.Y + 20f), new PointF(r.Right - DzIn, r.Y + 20f),
-                              new PointF(r.X + DzIn, r.Bottom - 20f), new PointF(r.Right - DzIn, r.Bottom - 20f) };
+            // panell baix (no hi caben dues osques per costat): un sol vis a cada costat, a mitja alçada
+            _screws = r.Height < shortH
+                ? new[] { new PointF(r.X + DzIn, r.Y + r.Height / 2f), new PointF(r.Right - DzIn, r.Y + r.Height / 2f) }
+                : new[] { new PointF(r.X + DzIn, r.Y + 20f), new PointF(r.Right - DzIn, r.Y + 20f),
+                          new PointF(r.X + DzIn, r.Bottom - 20f), new PointF(r.Right - DzIn, r.Bottom - 20f) };
         }
         bool _dzus;
         const float DzScrewR = 5.6f, DzR = DzScrewR * 1.28f, DzIn = DzScrewR;   // la cara exterior del vis queda en línia amb la vora del panell
@@ -1047,7 +1051,7 @@ namespace panelAIR1000
     /// REV / FULL i les dues palanques (pom cilíndric + base plana amb la mosca). Coordenades internes: 451 x 830
     /// unitats (de y = -110 a 720), escalades al rectangle de l'element.
     /// </summary>
-    internal sealed class OhThrottle : OhElement
+    internal sealed class OhThrottle : OhElement, IOhDraggable
     {
         public bool Shown;
         /// <summary>Posició de cada palanca: -1 REV FULL … 0 ralentí … 1 TO GA.</summary>
@@ -1765,13 +1769,15 @@ namespace panelAIR1000
         public override int State => Index;
         /// <summary>Posició amb molla (p.ex. RST del rellotge): en arribar-hi, torna sola a MomentaryReturn al cap d'un moment.</summary>
         public int MomentaryIndex = -1, MomentaryReturn = -1;
+        /// <summary>Molla als dos costats (p.ex. RUD TRIM): qualsevol posició que no sigui MomentaryReturn hi torna sola.</summary>
+        public bool SpringCenter;
         float _momT;
         public override bool Animating => Math.Abs(_ang - _angles[Index]) > 0.05f || _momT > 0 || _pushT > 0;
         public override void Tick(float dt)
         {
             _ang = Approach(_ang, _angles[Index], dt * 600f);
             if (_pushT > 0) _pushT = Math.Max(0, _pushT - dt);
-            if (_momT > 0 && (_momT -= dt) <= 0 && Index == MomentaryIndex && MomentaryReturn >= 0)
+            if (_momT > 0 && (_momT -= dt) <= 0 && (Index == MomentaryIndex || (SpringCenter && Index != MomentaryReturn)) && MomentaryReturn >= 0)
             {
                 Index = MomentaryReturn;
                 Owner.RaiseCommand(Id, "POS:" + Index);
@@ -1795,7 +1801,7 @@ namespace panelAIR1000
             if (ni == Index) return;
             if (Wrap && Math.Abs(_angles[ni] - _ang) > 180) _ang += _angles[ni] > _ang ? 360 : -360;
             Index = ni;
-            if (ni == MomentaryIndex) _momT = 0.5f;   // posició amb molla: hi és mig segon i torna sola
+            if (ni == MomentaryIndex || (SpringCenter && ni != MomentaryReturn)) _momT = 0.5f;   // posició amb molla: hi és mig segon i torna sola
             if (!SendSteps) Owner.RaiseCommand(Id, "POS:" + ni);   // posició nova cap a l'avió
             Changed();
         }
@@ -2534,7 +2540,7 @@ namespace panelAIR1000
         {
             ['0'] = "abcdef", ['1'] = "bc", ['2'] = "abged", ['3'] = "abgcd", ['4'] = "fgbc", ['5'] = "afgcd",
             ['6'] = "afgedc", ['7'] = "abc", ['8'] = "abcdefg", ['9'] = "abcdfg", ['-'] = "g", [' '] = "",
-            ['S'] = "afgcd", ['t'] = "fged", ['d'] = "bcdeg", ['o'] = "cdeg"
+            ['S'] = "afgcd", ['t'] = "fged", ['d'] = "bcdeg", ['o'] = "cdeg", ['L'] = "fed", ['r'] = "eg"
         };
         public OhSeg7(string id, RectangleF r, string text, int cells, string suffix)
         {
@@ -2618,6 +2624,10 @@ namespace panelAIR1000
         public bool Mip;
         /// <summary>Text gran (p.ex. tecles del DCDU): ocupa més alçada de la tecla, sempre sense sortir de l'amplada.</summary>
         public bool BigText;
+        /// <summary>Mida màxima del text a l'estil de l'overhead (el pedestal té les tecles més grans).</summary>
+        public float MaxText = 7.2f;
+        /// <summary>Segona línia del rètol (tecles de dues línies del MCDU: "RAD" / "NAV").</summary>
+        public string? Label2;
 
         public override void Draw(Graphics g)
         {
@@ -2641,7 +2651,14 @@ namespace panelAIR1000
                     else using (var lb = new SolidBrush(Color.FromArgb(42, 51, 45))) g.FillRectangle(lb, bar);
                     ty = mf.Y + mf.Height * 0.62f;
                 }
-                if (Label.Length > 0)
+                if (Label2 != null)
+                {
+                    int n = Math.Max(Label.Length, Label2.Length);
+                    float s2 = Math.Min(mf.Height * 0.36f, mf.Width / (n * 0.6f + 0.4f));
+                    Oh.Text(g, Label, mf.X + mf.Width / 2, mf.Y + mf.Height * 0.31f, s2, Color.FromArgb(240, 242, 244));
+                    Oh.Text(g, Label2, mf.X + mf.Width / 2, mf.Y + mf.Height * 0.71f, s2, Color.FromArgb(240, 242, 244));
+                }
+                else if (Label.Length > 0)
                 {
                     float avail = Led ? mf.Height * 0.5f : mf.Height * (BigText ? 0.98f : 0.62f);
                     float size = Math.Min(avail, mf.Width / (Label.Length * 0.6f + (BigText ? 0.15f : 0.4f))) * (BigText ? 1.0f : 0.85f);
@@ -2674,11 +2691,18 @@ namespace panelAIR1000
                 g.DrawLine(ap, cx - hw, cy - 3, cx + hw, cy - 3);
                 g.DrawLine(ap, cx + hw, cy + 3, cx - hw, cy + 3);
             }
-            if (Label.Length > 0)
+            if (Label2 != null)
+            {
+                int n = Math.Max(Label.Length, Label2.Length);
+                float s2 = Math.Min(Math.Min(f.Height * 0.34f, (f.Width - 4) / (n * 0.6f + 0.2f)), MaxText);
+                Oh.Text(g, Label, f.X + f.Width / 2, f.Y + f.Height * 0.31f, s2, Oh.Silk);
+                Oh.Text(g, Label2, f.X + f.Width / 2, f.Y + f.Height * 0.7f, s2, Oh.Silk);
+            }
+            else if (Label.Length > 0)
             {
                 Color tc = LitText ? Oh.Lerp(Color.FromArgb(96, 100, 104), Oh.Amber, Owner.Level(On ? 1 : 0, false)) : Oh.Silk;
                 float size = Math.Min(f.Height * 0.48f, (f.Width - 4) / (Label.Length * 0.64f + 0.2f));
-                Oh.Text(g, Label, f.X + f.Width / 2, f.Y + f.Height / 2 + (Led ? 1.2f : 0.2f), Math.Min(size, 7.2f), tc);
+                Oh.Text(g, Label, f.X + f.Width / 2, f.Y + f.Height / 2 + (Led ? 1.2f : 0.2f), Math.Min(size, MaxText), tc);
             }
         }
     }
@@ -3930,7 +3954,7 @@ namespace panelAIR1000
 
     // ═════════════════════════════════════ EL CONTROL ════════════════════════════════════════
 
-    public sealed class A320OverheadControl : Control
+    public sealed partial class A320OverheadControl : Control
     {
         public const float LW = 1250f, LH = 1275f;
         /// <summary>Alçada lògica del panell principal (proporció de la imatge de referència 2286×1362).</summary>
@@ -3952,7 +3976,8 @@ namespace panelAIR1000
             // superfície guardada mentre la pàgina no és la visible (canvi de pàgina instantani)
             public Bitmap? Bmp; public IntPtr HDib, MemDC, OldObj; public int ContentH; public float S; public int Zoom;
         }
-        readonly PageData[] _pages = { new(), new() };
+        // 2 = pedestal (només a la seva capa)
+        readonly PageData[] _pages = { new(), new(), new() };
         int _page;
         List<OhSilk> _silk => _pages[_page].Silk;
         List<OhElement> _els { get => _pages[_page].Els; set => _pages[_page].Els = value; }
@@ -4043,7 +4068,7 @@ namespace panelAIR1000
         /// true = hi ha un simulador connectat que governa els llums: les tecles i polsadors no canvien d'estat
         /// en tocar-los (només envien l'ordre i fan l'efecte de prémer); el llum arriba amb SetLight.
         /// </summary>
-        public bool SimDriven { get => _simDriven; set { _simDriven = value; if (_ov != null) _ov.SimDriven = value; } }
+        public bool SimDriven { get => _simDriven; set { _simDriven = value; if (_ov != null) _ov.SimDriven = value; if (_ped != null) _ped.SimDriven = value; } }
 
         // vidres de les pantalles del panell principal (coordenades del panell): forats de la finestra
         readonly List<RectangleF> _screenGlass = new();
@@ -4065,6 +4090,7 @@ namespace panelAIR1000
                     (int)Math.Round(_offX + gl.Left * s), (int)Math.Round(_offY - _scrollY + (gl.Top - sh) * s),
                     (int)Math.Round(_offX + gl.Right * s), (int)Math.Round(_offY - _scrollY + (gl.Bottom - sh) * s)));
             if (_ov != null && _ov.Visible && _ov.Region != null) rg.Exclude(_ov.Region);
+            if (_ped != null && _ped.Visible && _ped.Region != null) rg.Exclude(_ped.Region);
             return rg;
         }
 
@@ -4093,6 +4119,7 @@ namespace panelAIR1000
                 }
             }
             _ov?.SetPosition(id, index);
+            _ped?.SetPosition(id, index);
         }
 
         /// <summary>Llum d'una tecla o polsador llegit del simulador.</summary>
@@ -4114,6 +4141,7 @@ namespace panelAIR1000
                 }
             }
             _ov?.SetLight(id, on);
+            _ped?.SetLight(id, on);
         }
 
         /// <summary>Pantalles del rellotge del panell principal ("" = apagada).</summary>
@@ -4181,12 +4209,13 @@ namespace panelAIR1000
         /// </summary>
         public A320OverheadControl() : this(false) { }
 
-        A320OverheadControl(bool overlay)
+        A320OverheadControl(bool overlay, bool pedestal = false)
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.Opaque, true);
             SetStyle(ControlStyles.OptimizedDoubleBuffer, false); // ja tenim el nostre propi Bitmap
             BackColor = Color.Black;
             _isOverlay = overlay;
+            _isPed = pedestal;
             _anim.Tick += (s, e) => AnimTick();
             Build();
             if (!overlay) { _page = 1; _pages[1].Visited = true; }
@@ -4223,7 +4252,46 @@ namespace panelAIR1000
             CreateOverlay();
             if (_ov == null) return;
             if (OverlayOpen) _ov.BeginClose();
-            else _ov.OpenAtCut();
+            else { if (PedOpen) _ped!.BeginClose(); _ov.OpenAtCut(); }   // no poden estar oberts tots dos
+            InvalidateButtons();
+        }
+
+        // ─────────────── Capa pedestal (puja des de baix, independent de l'overhead) ───────────────
+        readonly bool _isPed;               // true: aquesta instància és la capa pedestal
+        A320OverheadControl? _ped;          // (panell principal) la capa pedestal
+        bool PedOpen => _ped != null && _ped.Visible && !_ped._closing;
+        bool AnyOverlayOpen => OverlayOpen || PedOpen;
+        /// <summary>Capa oberta que governen els botons + / − (el zoom és independent per a cada capa).</summary>
+        A320OverheadControl? ZoomTarget => PedOpen ? _ped : _ov;
+
+        void CreatePed()
+        {
+            if (_ped != null || _isOverlay || IsDisposed) return;
+            _ped = new A320OverheadControl(true, true) { Visible = false, Bounds = ClientRectangle, SimDriven = _simDriven };
+            _ped.ElementChanged += (id, st) => ElementChanged?.Invoke(id, st);
+            _ped.Command += (id, c) => Command?.Invoke(id, c);
+            _ped.OverlayMoved += () => HolesChanged?.Invoke();
+            _ped.OverlayClosed += () => { InvalidateButtons(); HolesChanged?.Invoke(); };
+            Controls.Add(_ped);
+            BeginInvoke(new Action(() => { if (_ped != null && !_ped.IsDisposed) _ped.EnsureBitmap(); }));
+        }
+
+        void TogglePed()
+        {
+            CreatePed();
+            if (_ped == null) return;
+            if (PedOpen) _ped.BeginClose();
+            else { if (OverlayOpen) _ov!.BeginClose(); _ped.OpenAtCut(); }
+            InvalidateButtons();
+        }
+
+        /// <summary>(panell principal) Obre el pedestal amb l'animació de pujada (lliscament des de baix).</summary>
+        void OpenPedAnimated()
+        {
+            CreatePed();
+            if (_ped == null || PedOpen) return;
+            if (OverlayOpen) _ov!.BeginClose();
+            _ped.OpenAnimated();
             InvalidateButtons();
         }
 
@@ -4234,7 +4302,7 @@ namespace panelAIR1000
         {
             _closing = false;
             if (!EnsureBitmap()) return;
-            _scrollY = MaxScroll;
+            _scrollY = _isPed ? 0 : MaxScroll;   // pedestal: la vora de dalt (MCDU) a dalt de la pantalla
             UpdateOverlayRegion();
             Visible = true;
             BringToFront();
@@ -4253,7 +4321,8 @@ namespace panelAIR1000
             _closing = false;
             _opening = true;
             _flingV = 0; _hasPendingScroll = false; _down = false; _dragging = false;
-            _scrollY = (int)Math.Ceiling(LH * _s);    // tot l'overhead per sobre de la pantalla
+            // overhead: tot per sobre de la pantalla; pedestal: tot per sota
+            _scrollY = _isPed ? -Height : (int)Math.Ceiling(LH * _s);
             UpdateOverlayRegion();
             Visible = true;
             BringToFront();
@@ -4290,7 +4359,9 @@ namespace panelAIR1000
         PointF[]? ScreenFrame()
         {
             if (_bmp == null) return null;
-            return FramePoly.Select(p => new PointF(_offX + p.X * _s, -_scrollY + p.Y * _s)).ToArray();
+            // pedestal: la capa és tot el rectangle (fora del contorn, negre: no s'hi veu el panell principal)
+            var fr = _isPed ? new[] { new PointF(0, 0), new PointF(LW, 0), new PointF(LW, CurLH), new PointF(0, CurLH) } : CurFrame;
+            return fr.Select(p => new PointF(_offX + p.X * _s, -_scrollY + (p.Y - CurShift) * _s)).ToArray();
         }
 
         int OverlayBottom => (int)Math.Ceiling(-_scrollY + LH * _s);
@@ -4326,7 +4397,7 @@ namespace panelAIR1000
         PointF[][]? BottomEdges()
         {
             var f = ScreenFrame();
-            if (f == null) return null;
+            if (f == null || _isPed) return null;
             // FramePoly: 0..1 dalt, 2 dreta-diagonal, 3-4 base, 5 esquerra-diagonal
             return new[] { new[] { f[2], f[3] }, new[] { f[3], f[4] }, new[] { f[4], f[5] } };
         }
@@ -4695,6 +4766,7 @@ namespace panelAIR1000
             var g = e.Graphics;
             if (!EnsureBitmap()) { g.Clear(Color.Black); return; }
             if (!_isOverlay && _ov == null) BeginInvoke(new Action(CreateOverlay));
+            else if (!_isOverlay && _ped == null) BeginInvoke(new Action(CreatePed));
             var clip = e.ClipRectangle;
 
             // La zona dels botons es compon fora de pantalla (panell + botons) i es copia d'un sol cop:
@@ -4773,17 +4845,24 @@ namespace panelAIR1000
         // ─────────────────────────── Zoom i botons + / − ───────────────────────────
 
         // panell principal: no es desplaça; capa overhead: de "tot desplegat" (0) fins al topall de la línia de tall
-        int MaxScroll => _page == 1 ? 0 : _isOverlay ? (int)Math.Round(OverheadCutY * _s) : Math.Max(0, _contentH - Height);
+        // capa pedestal: de "vora de dalt a dalt de la pantalla" (0) fins a veure'n la part de baix
+        int MaxScroll => _page == 1 ? 0 : _isPed ? Math.Max(0, _contentH - Height) : _isOverlay ? (int)Math.Round(OverheadCutY * _s) : Math.Max(0, _contentH - Height);
         int ZoomBtnSize => Math.Max(40, (int)(80 * Width / 3840f));
         // columna de botons sota l'indicador de pressió de frens (panell principal 4K)
         Point BtnPos(float x, float y) => new((int)(x * Width / 3840f), (int)(y * Width / 3840f));
-        Point DefaultMinusPos => BtnPos(3646, 2070);
-        Point DefaultPlusPos => BtnPos(3646, 1980);
+        // − i + un al costat de l'altre, a sota de PED
+        Point DefaultMinusPos => BtnPos(3600, 2070);
+        Point DefaultPlusPos => BtnPos(3692, 2070);
         // botó TH (quadrant de gas), just a sota d'OVHD
         Point DefaultThPos => BtnPos(3646, 1890);
         Rectangle ThRect => new(ThLocation ?? DefaultThPos, new Size(ZoomBtnSize, ZoomBtnSize));
         /// <summary>Posició del botó TH (null = sota d'OVHD).</summary>
         public Point? ThLocation { get; set; }
+        // botó PED (pedestal), just a sota de TH
+        Point DefaultPedPos => BtnPos(3646, 1980);
+        Rectangle PedRect => new(PedLocation ?? DefaultPedPos, new Size(ZoomBtnSize, ZoomBtnSize));
+        /// <summary>Posició del botó PED (null = sota de TH).</summary>
+        public Point? PedLocation { get; set; }
         OhThrottle? _throttle;
         bool _throttleShown;
         /// <summary>Si es mostra el quadrant de gas al panell principal (opció de l'usuari, per defecte no).</summary>
@@ -4801,6 +4880,7 @@ namespace panelAIR1000
         /// <summary>Posició de les palanques de gas llegida del simulador (-1 REV FULL … 0 ralentí … 1 TO GA).</summary>
         public void SetThrottle(float left, float right)
         {
+            _ped?.SetThrottle(left, right);   // el quadrant del pedestal és el mateix element (MIP_THROTTLE)
             if (_throttle == null) return;
             // el simulador pot enviar posicions desenes de cops per segon: es guarda només l'última i es dibuixa
             // com a molt cada 30 ms, i només la franja de cada palanca que es mou (no tot el quadrant)
@@ -4862,8 +4942,8 @@ namespace panelAIR1000
         static bool s_showAreas;
         /// <summary>Color del botó "mostrar àrees": taronja, dibuixat molt subtil (poca opacitat) (a joc amb el panell A320).</summary>
         static readonly Color AreasColor = Color.Orange;
-        Rectangle BtnRect(int b) => b == 1 ? PlusRect : b == 2 ? MinusRect : b == 4 ? AreasRect : b == 5 ? ThRect : PageRect;
-        Rectangle AllBtnsRect => Rectangle.Union(Rectangle.Union(Rectangle.Union(PlusRect, MinusRect), PageRect), ThRect);
+        Rectangle BtnRect(int b) => b == 1 ? PlusRect : b == 2 ? MinusRect : b == 4 ? AreasRect : b == 5 ? ThRect : b == 6 ? PedRect : PageRect;
+        Rectangle AllBtnsRect => Rectangle.Union(Rectangle.Union(Rectangle.Union(Rectangle.Union(PlusRect, MinusRect), PageRect), ThRect), PedRect);
 
         /// <summary>Posició dels botons de zoom (null = posició per defecte a baix a la dreta).</summary>
         public Point? PlusLocation { get; set; }
@@ -5009,6 +5089,7 @@ namespace panelAIR1000
             if (!_isOverlay && _page == 1)
             {
                 if (_ov != null && _ov.Visible) { _ov._closing = false; _ov.Visible = false; }
+                if (_ped != null && _ped.Visible) { _ped._closing = false; _ped.Visible = false; }
                 InvalidateButtons();
                 return;
             }
@@ -5021,9 +5102,9 @@ namespace panelAIR1000
             if (_isOverlay) return;
             var oldMode = g.SmoothingMode;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            bool open = OverlayOpen;
-            int z = _ov?._zoom ?? 100;
-            // amb l'overhead obert, OVHD, + i − van dins un mateix marc: el zoom és només de l'overhead
+            bool open = AnyOverlayOpen;
+            int z = ZoomTarget?._zoom ?? 100;
+            // amb l'overhead (o el pedestal) obert, els botons i + / − van dins un mateix marc: el zoom és només de la capa oberta
             if (open)
             {
                 var grp = Rectangle.Inflate(AllBtnsRect, 9, 9);
@@ -5086,10 +5167,29 @@ namespace panelAIR1000
                 g.DrawString("TH", f2, tb2, th.X + th.Width / 2f, th.Y + th.Height / 2f, Oh.Center);
                 g.TextRenderingHint = oldHint2;
             }
+            // botó PED: igual que TH; amb el pedestal obert, el fons és més clar
+            var pd = PedRect;
+            if (pd.IntersectsWith(clip))
+            {
+                bool pressed = _btnPressed == 6;
+                using (var path = Oh.RoundRect(pd, pd.Width * 0.18f))
+                {
+                    var fill = PedOpen ? Color.FromArgb(pressed ? 200 : 160, 95, 108, 122) : Color.FromArgb(pressed ? 170 : 110, 0, 0, 0);
+                    using (var b = new SolidBrush(fill)) g.FillPath(b, path);
+                    using var p = new Pen(CalibrationMode ? Color.FromArgb(220, 255, 140, 0) : Color.FromArgb(150, 255, 255, 255), Math.Max(2f, pd.Width / 30f));
+                    g.DrawPath(p, path);
+                }
+                using var f3 = new Font("Segoe UI", Math.Max(9f, pd.Width * 0.27f), FontStyle.Bold, GraphicsUnit.Pixel);
+                using var tb3 = new SolidBrush(Color.FromArgb(230, 255, 255, 255));
+                var oldHint3 = g.TextRenderingHint;
+                g.TextRenderingHint = TextRenderingHint.AntiAlias;
+                g.DrawString("PED", f3, tb3, pd.X + pd.Width / 2f, pd.Y + pd.Height / 2f, Oh.Center);
+                g.TextRenderingHint = oldHint3;
+            }
             g.SmoothingMode = oldMode;
         }
 
-        int ZoomButtonAt(Point p) => _isOverlay ? 0 : Rectangle.Inflate(AreasRect, 8, 8).Contains(p) ? 4 : PageRect.Contains(p) ? 3 : ThRect.Contains(p) ? 5 : !OverlayOpen ? 0 : PlusRect.Contains(p) ? 1 : MinusRect.Contains(p) ? 2 : 0;
+        int ZoomButtonAt(Point p) => _isOverlay ? 0 : Rectangle.Inflate(AreasRect, 8, 8).Contains(p) ? 4 : PageRect.Contains(p) ? 3 : ThRect.Contains(p) ? 5 : PedRect.Contains(p) ? 6 : !AnyOverlayOpen ? 0 : PlusRect.Contains(p) ? 1 : MinusRect.Contains(p) ? 2 : 0;
 
         void ToggleShowAreas()
         {
@@ -5179,7 +5279,23 @@ namespace panelAIR1000
             if (_hasPendingScroll) { _hasPendingScroll = false; ScrollTo(_pendingScroll); }
 
             // (capa overhead) obertura: baixa des de dalt fins que la línia de tall arriba a la vora superior
-            if (_opening)
+            // (capa pedestal) obertura: puja des de baix fins que la vora de dalt arriba a dalt de la pantalla
+            if (_opening && _isPed)
+            {
+                int step = Math.Max(4, (int)(dt * Math.Max(Height * 1.0f, -_scrollY / 0.30f)));
+                int ny = Math.Min(0, _scrollY + step);
+                ScrollTo(ny);
+                if (ny >= 0) { _opening = false; ClampScroll(); }
+            }
+            // (capa pedestal) tancament: baixa accelerant fins que surt per baix i s'amaga
+            if (_closing && _isPed)
+            {
+                int step = Math.Max(4, (int)(dt * Math.Max(Height * 1.0f, (Height + _scrollY) / 0.35f)));
+                ScrollTo(_scrollY - step);
+                if (_scrollY <= -Height) FinishClose();
+            }
+
+            if (_opening && !_isPed)
             {
                 int target = MaxScroll;
                 int step = Math.Max(4, (int)(dt * Math.Max(Height * 1.0f, (_scrollY - target) / 0.30f)));
@@ -5189,7 +5305,7 @@ namespace panelAIR1000
             }
 
             // (capa overhead) tancament: puja accelerant fins que surt per dalt i s'amaga
-            if (_closing)
+            if (_closing && !_isPed)
             {
                 // velocitat: des del topall surt en ~0,3 s; si estava desplegat, una mica més
                 int step = Math.Max(4, (int)(dt * Math.Max(Height * 1.0f, OverlayBottom / 0.35f)));
@@ -5261,7 +5377,7 @@ namespace panelAIR1000
                 // Es repinta tota la franja vertical de cada botó (de dalt a baix): qualsevol còpia
                 // desplaçada, d'aquest pas o d'un d'anterior, queda esborrada.
                 if (!_isOverlay)
-                    foreach (var zr in new[] { PlusRect, MinusRect, PageRect })
+                    foreach (var zr in new[] { PlusRect, MinusRect, PageRect, ThRect, PedRect })
                         Invalidate(new Rectangle(zr.X - 3, 0, zr.Width + 6, Height));
             }
             else Invalidate();
@@ -5303,14 +5419,17 @@ namespace panelAIR1000
             }
             if (_closing || _opening) return;
             // (panell principal) gest des de la vora de dalt amb l'overhead tancat: obrirà l'overhead
-            _edgeStart = !_isOverlay && !OverlayOpen && e.Y <= EdgePx;
+            _edgeStart = !_isOverlay && !AnyOverlayOpen && e.Y <= EdgePx;
+            // (panell principal) gest des de la vora de baix: obrirà el pedestal
+            _edgeStartBottom = !_isOverlay && !AnyOverlayOpen && e.Y >= Height - EdgePx;
             _down = true; _dragging = false; _flingV = 0; _velY = 0;
             _downPt = e.Location; _downScroll = _scrollY;
-            // (capa) si el gest comença amb l'overhead al topall, arrossegar amunt el tanca
-            _startAtCut = _isOverlay && _scrollY >= MaxScroll - 1;
+            // (capa) si el gest comença amb l'overhead al topall, arrossegar amunt el tanca;
+            // amb el pedestal a dalt de tot, arrossegar avall el tanca
+            _startAtCut = _isOverlay && (_isPed ? _scrollY <= 1 : _scrollY >= MaxScroll - 1);
             _lastMoveY = e.Y; _lastMoveT = _clock.Elapsed.TotalSeconds;
             // acció mantinguda (p.ex. gir continu del rotatiu PULL STD); amb el dit ja s'ha començat a WM_POINTERDOWN
-            if (!_touchPress && !_edgeStart) BeginPress(e.Location);
+            if (!_touchPress && !_edgeStart && !_edgeStartBottom) BeginPress(e.Location);
         }
 
         void BeginPress(Point pt)
@@ -5327,11 +5446,12 @@ namespace panelAIR1000
         const int WM_POINTERDOWN = 0x0246, WM_POINTERUP = 0x0247, WM_POINTERUPDATE = 0x0245;
         [DllImport("user32.dll")] static extern bool GetPointerType(uint pointerId, out int pointerType);
         bool _touchPress;   // el toc actual l'ha començat un WM_POINTERDOWN tàctil (fins al OnMouseUp següent)
+        bool _edgeStartBottom;   // (panell principal) el gest ha començat a la vora de baix
 
         protected override void WndProc(ref Message m)
         {
             // palanques de gas: segueixen el dit des del primer moviment (sense esperar el WM_MOUSEMOVE)
-            if (m.Msg == WM_POINTERUPDATE && _pressEl is OhThrottle th && th.Grabbing)
+            if (m.Msg == WM_POINTERUPDATE && _pressEl is IOhDraggable th && th.Grabbing)
             {
                 long lp = (long)m.LParam;
                 th.DragTo(ToPanel(PointToClient(new Point((short)(lp & 0xFFFF), (short)((lp >> 16) & 0xFFFF)))));
@@ -5347,7 +5467,7 @@ namespace panelAIR1000
                     {
                         EndPress();
                         _touchPress = true;
-                        if (ZoomButtonAt(pt) == 0 && !_closing && !_opening && !(!_isOverlay && !OverlayOpen && pt.Y <= EdgePx))
+                        if (ZoomButtonAt(pt) == 0 && !_closing && !_opening && !(!_isOverlay && !AnyOverlayOpen && (pt.Y <= EdgePx || pt.Y >= Height - EdgePx)))
                             BeginPress(pt);
                     }
                     else EndPress();
@@ -5363,19 +5483,21 @@ namespace panelAIR1000
             {
                 var old = BtnRect(_btnDrag);
                 var np = new Point(Math.Clamp(e.X - _btnDragOff.X, 0, Width - old.Width), Math.Clamp(e.Y - _btnDragOff.Y, 0, Height - old.Height));
-                if (_btnDrag == 1) PlusLocation = np; else if (_btnDrag == 2) MinusLocation = np; else if (_btnDrag == 4) AreasLocation = np; else if (_btnDrag == 5) ThLocation = np; else PageLocation = np;
+                if (_btnDrag == 1) PlusLocation = np; else if (_btnDrag == 2) MinusLocation = np; else if (_btnDrag == 4) AreasLocation = np; else if (_btnDrag == 5) ThLocation = np; else if (_btnDrag == 6) PedLocation = np; else PageLocation = np;
                 Invalidate(Rectangle.Inflate(old, 6, 6)); Invalidate(Rectangle.Inflate(BtnRect(_btnDrag), 6, 6));
                 if (_ov != null && _ov.Visible) _ov.UpdateOverlayRegion();
+                if (_ped != null && _ped.Visible) _ped.UpdateOverlayRegion();
                 return;
             }
             // arrossegant una palanca de gas: no es desplaça el panell
-            if (_pressEl is OhThrottle th && th.Grabbing) { th.DragTo(ToPanel(e.Location)); return; }
+            if (_pressEl is IOhDraggable th && th.Grabbing) { th.DragTo(ToPanel(e.Location)); return; }
             if (!_down) return;
             int dy = e.Y - _downPt.Y;
             if (!_dragging && Math.Abs(dy) > Math.Max(10, Width / 200)) { _dragging = true; EndPress(); }
             if (!_dragging) return;
-            if (_isOverlay && _startAtCut && dy < 0) { BeginClose(); return; }
+            if (_isOverlay && _startAtCut && (_isPed ? dy > 0 : dy < 0)) { BeginClose(); return; }
             if (_edgeStart && dy > 0) { _edgeStart = false; _down = false; _dragging = false; OpenOverlayAnimated(); return; }
+            if (_edgeStartBottom && dy < 0) { _edgeStartBottom = false; _down = false; _dragging = false; OpenPedAnimated(); return; }
             double t = _clock.Elapsed.TotalSeconds;
             double ddt = t - _lastMoveT;
             if (ddt > 0.001)
@@ -5397,13 +5519,14 @@ namespace panelAIR1000
             {
                 int b = _btnPressed;
                 _btnPressed = 0;
-                Invalidate(PlusRect); Invalidate(MinusRect); Invalidate(PageRect); Invalidate(Rectangle.Inflate(AreasRect, 6, 6));
+                Invalidate(PlusRect); Invalidate(MinusRect); Invalidate(PageRect); Invalidate(PedRect); Invalidate(Rectangle.Inflate(AreasRect, 6, 6));
                 if (ZoomButtonAt(e.Location) == b)
                 {
                     if (b == 4) ToggleShowAreas();
                     else if (b == 5) { ThrottleVisible = !ThrottleVisible; ThrottleVisibleChanged?.Invoke(ThrottleVisible); }
                     else if (b == 3) ToggleOverlay();
-                    else if (_ov != null) { _ov.SetZoom(_ov._zoom + (b == 1 ? 10 : -10)); InvalidateButtons(); }
+                    else if (b == 6) TogglePed();
+                    else if (ZoomTarget is A320OverheadControl zt) { zt.SetZoom(zt._zoom + (b == 1 ? 10 : -10)); InvalidateButtons(); }
                 }
                 return;
             }
@@ -5446,6 +5569,7 @@ namespace panelAIR1000
         {
             base.OnResize(e);
             if (_ov != null) _ov.Bounds = ClientRectangle;
+            if (_ped != null) _ped.Bounds = ClientRectangle;
             if (_bmp != null && _bmp.Width != ContentWidth) ReleaseCache();
             _offY = _isOverlay ? 0 : Math.Max(0, Height - _contentH);
             ClampScroll();
@@ -5458,7 +5582,7 @@ namespace panelAIR1000
             base.OnVisibleChanged(e);
             // la capa overhead conserva el dibuix en amagar-se (tornar-la a obrir és immediat); el panell principal,
             // en sortir del mode A320, allibera el seu i el de la capa
-            if (!Visible && !_isOverlay) { ReleaseCache(); _ov?.ReleaseCache(); }
+            if (!Visible && !_isOverlay) { ReleaseCache(); _ov?.ReleaseCache(); _ped?.ReleaseCache(); }
             if (_isOverlay && Visible) UpdateOverlayRegion();
         }
 
@@ -5554,6 +5678,18 @@ namespace panelAIR1000
 
         void Build()
         {
+            // capa pedestal: només la pàgina 2
+            if (_isPed)
+            {
+                _page = 2;
+                _pages[2].LH = PedLH;
+                _pages[2].Frame = PedFramePoly;
+                _ls = 1f;
+                BuildPedestal();
+                _els = _els.OrderBy(e => e.Z).ToList();
+                _pages[2].Visited = true;
+                return;
+            }
             // pàgina 0: overhead
             _page = 0;
             _pages[0].LH = LH;

@@ -1825,7 +1825,7 @@ namespace SimConnect3
         private bool  _a320Active = false;
         private panelAIR1000.A320OverheadControl? _a320Overhead;
         // Posició (calibració F12) dels botons de zoom + / − de l'overhead; null = per defecte a baix a la dreta.
-        private Point? _a320ZoomPlusPos, _a320ZoomMinusPos, _a320PageBtnPos, _a320AreasBtnPos, _a320ThBtnPos;
+        private Point? _a320ZoomPlusPos, _a320ZoomMinusPos, _a320PageBtnPos, _a320AreasBtnPos, _a320ThBtnPos, _a320PedBtnPos;
 
         private bool  _tb21Dragging;
         private Point _tb21DragOffset;
@@ -6312,6 +6312,7 @@ namespace SimConnect3
                         PageLocation = _a320PageBtnPos,
                         AreasLocation = _a320AreasBtnPos,
                         ThLocation = _a320ThBtnPos,
+                        PedLocation = _a320PedBtnPos,
                         ThrottleVisible = AppSettings.Instance.A320ThrottleVisible   // opció de l'usuari (per defecte no)
                     };
                     _a320Overhead.ThrottleVisibleChanged += on =>
@@ -6351,6 +6352,7 @@ namespace SimConnect3
                         _a320PageBtnPos = _a320Overhead.PageLocation;
                         _a320AreasBtnPos = _a320Overhead.AreasLocation;
                         _a320ThBtnPos = _a320Overhead.ThLocation;
+                        _a320PedBtnPos = _a320Overhead.PedLocation;
                         PlaceGearForA320();   // el ⚙ segueix el botó del dit
                         try { ExportCalibrationPositions(silent: true); } catch { }
                     };
@@ -13193,6 +13195,7 @@ namespace SimConnect3
             if (_a320PageBtnPos is Point pgp) sb.AppendLine($"A320PAGEBTN:a320page:{pgp.X}:{pgp.Y}");
             if (_a320AreasBtnPos is Point arp) sb.AppendLine($"A320AREASBTN:a320areas:{arp.X}:{arp.Y}");
             if (_a320ThBtnPos is Point thp) sb.AppendLine($"A320THBTN:a320th:{thp.X}:{thp.Y}");
+            if (_a320PedBtnPos is Point pdp) sb.AppendLine($"A320PEDBTN:a320ped:{pdp.X}:{pdp.Y}");
             sb.AppendLine($"THRQBTN:tq:{_thrQuadrantBtn.Location.X}:{_thrQuadrantBtn.Location.Y}:0:0");
             if (_fsConnPanel != null) sb.AppendLine($"FSCONN:fsc:{_fsConnPanel.Location.X}:{_fsConnPanel.Location.Y}");
             if (_appVersionPanel != null) sb.AppendLine($"APPVER:apv:{_appVersionPanel.Location.X}:{_appVersionPanel.Location.Y}");
@@ -13408,6 +13411,11 @@ namespace SimConnect3
                 {
                     _a320ThBtnPos = new Point(x, y);
                     if (_a320Overhead != null) _a320Overhead.ThLocation = _a320ThBtnPos;
+                }
+                else if (type == "A320PEDBTN")
+                {
+                    _a320PedBtnPos = new Point(x, y);
+                    if (_a320Overhead != null) _a320Overhead.PedLocation = _a320PedBtnPos;
                 }
                 else if (type == "A320AREASBTN")
                 {
