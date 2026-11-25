@@ -502,32 +502,81 @@ namespace panelAIR1000
     // ═══════════════════════════════ SERIGRAFIA I PECES FIXES ═══════════════════════════════
 
     /// <summary>Posició buida d'una tecla (ECAM): quadrat del color de la planxa amb el cantell marcat.</summary>
-    /// <summary>Safata enfonsada de la MCDU: planxa una mica més fosca, ombra interior a dalt-esquerra i llum a baix-dreta.</summary>
-    internal sealed class OhTray : OhSilk
+    /// <summary>
+    /// Planxa de la cara de la MCDU de l'esquerra (px de referència × k). Meitat de dalt: vores amb les osques DZUS
+    /// (completa a la de dalt; a la del mig només la meitat de dalt de l'arc, i des del punt més endins baixa recte per
+    /// esquivar la frontissa). Un cop passada la frontissa fa un tomb cap enfora per incloure les tires FAIL/FMGC i
+    /// MCDU MENU, i després ressegueix per dins la nansa fins al tram de baix.
+    /// </summary>
+    internal sealed class OhMcduFace : OhSilk
     {
-        readonly PointF[] _poly;
-        public OhTray(PointF[] poly, float radius)
+        // vores de la cara i DZUS (mateixa mida i osca que a l'overhead: radi del vis 8,4, osca ×1,28, arrodoniment fix)
+        const float X0 = 72f, X1 = 585f, Top = 36f, Rc = 4f;
+        readonly float _k; readonly RectangleF _rect;
+        public OhMcduFace(float k)
         {
-            _poly = Oh.RoundAll(poly, radius);
-            float l = _poly.Min(p => p.X), t = _poly.Min(p => p.Y), r = _poly.Max(p => p.X), b = _poly.Max(p => p.Y);
-            Bounds = RectangleF.FromLTRB(l - 3, t - 3, r + 3, b + 3);
+            _k = k;
+            _rect = RectangleF.FromLTRB(X0 * k, Top * k, X1 * k, 842 * k);
+            Bounds = RectangleF.Inflate(_rect, 6, 6);
+        }
+        GraphicsPath MakePath()
+        {
+            float k = _k;
+            float R = 8.4f * 1.28f / k, f = 5.6f * 1.28f / 2f / k, din = (8.4f - 1.5f) / k;   // en px de referència
+            float xL = X0 + din, xR = X1 - din, ixL = xL + R, ixR = xR - R;
+            const float yT = 75f, yM = 453f;
+            var p = new GraphicsPath();
+            p.AddArc(X0, Top, 2 * Rc, 2 * Rc, 180, 90);
+            p.AddArc(X1 - 2 * Rc, Top, 2 * Rc, 2 * Rc, 270, 90);
+            // dreta: osca completa del DZUS de dalt
+            p.AddArc(X1 - 2 * f, yT - R - 2 * f, 2 * f, 2 * f, 0, 90);
+            p.AddArc(xR - R, yT - R, 2 * R, 2 * R, 270, -180);
+            p.AddArc(X1 - 2 * f, yT + R, 2 * f, 2 * f, 270, 90);
+            // dreta: DZUS del mig, només la meitat de dalt de l'arc; després recte avall per dins de la frontissa
+            p.AddArc(X1 - 2 * f, yM - R - 2 * f, 2 * f, 2 * f, 0, 90);
+            p.AddArc(xR - R, yM - R, 2 * R, 2 * R, 270, -90);
+            p.AddLine(ixR, yM, ixR, 564f);
+            // tomb cap enfora (la tira MCDU MENU queda a dins) i per dins del braç de la nansa
+            p.AddLine(ixR, 564f, 578.5f, 572f);
+            p.AddLine(578.5f, 572f, 578.5f, 771f);
+            p.AddLine(578.5f, 771f, 546.5f, 795f);
+            p.AddLine(546.5f, 795f, 546.5f, 834f);
+            p.AddArc(546.5f - 2 * Rc, 834f - Rc, 2 * Rc, 2 * Rc, 0, 90);
+            // tram de baix (per dins del tram horitzontal de la nansa)
+            p.AddArc(110.5f, 834f - Rc, 2 * Rc, 2 * Rc, 90, 90);
+            p.AddLine(110.5f, 834f, 110.5f, 795f);
+            p.AddLine(110.5f, 795f, 78.5f, 771f);
+            p.AddLine(78.5f, 771f, 78.5f, 572f);
+            // tomb cap endins (la tira FAIL/FMGC queda a dins) i recte amunt per dins de la frontissa
+            p.AddLine(78.5f, 572f, ixL, 564f);
+            p.AddLine(ixL, 564f, ixL, yM);
+            // esquerra: DZUS del mig, meitat de dalt de l'arc
+            p.AddArc(xL - R, yM - R, 2 * R, 2 * R, 0, -90);
+            p.AddArc(X0, yM - R - 2 * f, 2 * f, 2 * f, 90, 90);
+            // esquerra: osca completa del DZUS de dalt
+            p.AddArc(X0, yT + R, 2 * f, 2 * f, 180, 90);
+            p.AddArc(xL - R, yT - R, 2 * R, 2 * R, 90, -180);
+            p.AddArc(X0, yT - R - 2 * f, 2 * f, 2 * f, 90, 90);
+            p.CloseFigure();
+            using var m = new Matrix(k, 0, 0, k, 0, 0);
+            p.Transform(m);
+            return p;
         }
         public override void Draw(Graphics g)
         {
-            using var p = new GraphicsPath(); p.AddPolygon(_poly);
-            var rc = p.GetBounds();
-            using (var b = new LinearGradientBrush(RectangleF.Inflate(rc, 1, 1), Oh.T(84, 100, 114, 80, 104, 124), Oh.T(96, 112, 126, 92, 116, 136), 90f)) g.FillPath(b, p);
-            // ombra interior (la vora de dalt-esquerra fa ombra dins la safata)
+            // el mateix relleu que les planxes: ombra, filet fosc i de llum, degradat i gra
+            using var path = MakePath();
+            Oh.SoftShadow(g, path, 1.8f, 2.6f, 4f, 140);
             var st = g.Save();
-            g.SetClip(p);
-            g.TranslateTransform(1.4f, 1.4f);
-            using (var sp = new Pen(Color.FromArgb(150, 12, 16, 20), 2.6f)) g.DrawPath(sp, p);
+            g.TranslateTransform(1.0f, 1.0f);
+            using (var lo = new Pen(Oh.PlateLo, 1.4f)) g.DrawPath(lo, path);
+            g.Restore(st); st = g.Save();
+            g.TranslateTransform(-0.8f, -0.8f);
+            using (var hi = new Pen(Oh.PlateHi, 1.4f)) g.DrawPath(hi, path);
             g.Restore(st);
-            // cantell: llum a baix-dreta (fora) i fil fosc a la vora
-            st = g.Save(); g.TranslateTransform(0.7f, 0.7f);
-            using (var hp = new Pen(Color.FromArgb(150, Oh.PlateHi), 0.9f)) g.DrawPath(hp, p);
-            g.Restore(st);
-            using (var lp = new Pen(Color.FromArgb(200, Oh.PlateLo), 0.8f)) g.DrawPath(lp, p);
+            using (var fill = new LinearGradientBrush(new RectangleF(_rect.X, _rect.Y - 1, _rect.Width, _rect.Height + 2), Oh.PlateA, Oh.PlateB, 90f))
+                g.FillPath(fill, path);
+            Oh.Grain(g, path);
         }
     }
 
@@ -573,28 +622,22 @@ namespace panelAIR1000
     /// </summary>
     internal sealed class OhMcduHandle : OhSilk
     {
-        readonly float _k; readonly PointF[] _line, _face; readonly RectangleF _hl, _hr;
+        readonly float _k; readonly PointF[] _line; readonly RectangleF _hl, _hr;
         public OhMcduHandle(float k)
         {
             _k = k;
             PointF P(float x, float y) => new(x * k, y * k);
             _line = Oh.RoundAll(new[]
             {
-                P(72, 560), P(72, 778), P(100, 800), P(100, 848), P(557, 848), P(557, 800), P(585, 778), P(585, 560)
+                P(72, 478), P(72, 776), P(104, 800), P(104, 848), P(553, 848), P(553, 800), P(585, 776), P(585, 478)
             }, 10f * k);
             // RoundAll tanca el polígon: es treuen els punts de l'arrodoniment entre l'últim i el primer (no hi ha tram de dalt)
-            _line = TrimClosing(_line, P(72, 560), P(585, 560));
-            // contorn en relleu de la cara (meitat de dalt): surt de les frontisses, puja per les vores esquivant els
-            // DZUS (es desvia cap a dins al voltant de cada vis) i fa el tram de dalt per sobre dels LED
-            _face = Oh.RoundAll(new[]
-            {
-                P(72, 478), P(72, 474), P(100, 466), P(100, 438), P(72, 428), P(72, 112), P(100, 100), P(100, 36),
-                P(557, 36), P(557, 100), P(585, 112), P(585, 428), P(557, 438), P(557, 466), P(585, 474), P(585, 478)
-            }, 8f * k);
-            _face = TrimClosing(_face, P(72, 478), P(585, 478));
-            _hl = RectangleF.FromLTRB(64 * k, 478 * k, 96 * k, 562 * k);
-            _hr = RectangleF.FromLTRB(561 * k, 478 * k, 593 * k, 562 * k);
-            Bounds = RectangleF.FromLTRB(60 * k, 30 * k, 598 * k, 856 * k);
+            // (els braços pugen fins al capdamunt de les frontisses)
+            _line = TrimClosing(_line, P(72, 478), P(585, 478));
+            // frontisses estretes, entre el braç i la vora vertical de la planxa de la cara
+            _hl = RectangleF.FromLTRB(77 * k, 478 * k, 91 * k, 562 * k);
+            _hr = RectangleF.FromLTRB(566 * k, 478 * k, 580 * k, 562 * k);
+            Bounds = RectangleF.FromLTRB(60 * k, 470 * k, 598 * k, 856 * k);
         }
         static PointF[] TrimClosing(PointF[] pts, PointF a, PointF b)
         {
@@ -614,18 +657,6 @@ namespace panelAIR1000
         public override void Draw(Graphics g)
         {
             float w = 9f * _k;
-            // contorn de la cara: graó prim (fil fosc a la vora i fil de llum a dalt-esquerra)
-            using (var fp = new GraphicsPath())
-            {
-                fp.AddLines(_face);
-                var s0 = g.Save(); g.TranslateTransform(1.0f, 1.3f);
-                using (var sh = new Pen(Color.FromArgb(80, 0, 0, 0), 2.2f) { LineJoin = LineJoin.Round }) g.DrawPath(sh, fp);
-                g.Restore(s0);
-                using (var ed = new Pen(Oh.PlateLo, 1.3f) { LineJoin = LineJoin.Round }) g.DrawPath(ed, fp);
-                s0 = g.Save(); g.TranslateTransform(-0.9f, -0.9f);
-                using (var hi = new Pen(Color.FromArgb(170, Oh.PlateHi), 1.0f) { LineJoin = LineJoin.Round }) g.DrawPath(hi, fp);
-                g.Restore(s0);
-            }
             using (var path = new GraphicsPath())
             {
                 path.AddLines(_line);
@@ -747,7 +778,7 @@ namespace panelAIR1000
         }
     }
 
-    internal enum PedScrewKind { Cross, Plus, Slot }
+    internal enum PedScrewKind { Cross, Plus, Slot, Dzus }
 
     /// <summary>Cargol solt (no DZUS) dibuixat sobre la planxa.</summary>
     internal sealed class OhScrew : OhSilk
@@ -764,6 +795,7 @@ namespace panelAIR1000
             {
                 case PedScrewKind.Cross: PedScrew.Cross(g, _cx, _cy, _r); break;
                 case PedScrewKind.Plus: PedScrew.Plus(g, _cx, _cy, _r); break;
+                case PedScrewKind.Dzus: Oh.DzusRing(g, _cx, _cy, _r); break;
                 default: PedScrew.Slot(g, _cx, _cy, _r); break;
             }
         }
