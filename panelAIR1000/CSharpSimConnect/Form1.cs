@@ -932,6 +932,9 @@ namespace SimConnect3
         private bool? _xpGear;                                          // palanca del tren des d'X-Plane
         private (float a, float l, float r)? _xpBrakes;                  // indicador ACCU / BRAKES des d'X-Plane
         private readonly panelAIR1000.McduScreen?[] _xpMcdu = new panelAIR1000.McduScreen?[2];   // pantalles de les MCDU des d'X-Plane
+        private panelAIR1000.FenixMcduLink? _fxMcdu;                       // MCDU del Fenix (servidor GraphQL, port 8083)
+        private DateTime _fxMcduSince;                                     // quan s'ha engegat (marge per connectar-se)
+        private panelAIR1000.FbwMcduLink? _fbwMcdu;                        // MCDU del FlyByWire (SimBridge, port 8380)
         private string? _xpReg;                                          // matrícula des d'X-Plane
         private void ApplyXpLegend(string id, bool upper, bool on) =>
             _a320Overhead?.SetLegend(id, upper ? (on ? 1f : 0f) : null, upper ? null : (on ? 1f : 0f));
@@ -5924,9 +5927,37 @@ namespace SimConnect3
         private void PlaceXPlanePfd()
         {
             // els forats de les pantalles de l'A320 es revisen cada segon (només es tornen a aplicar si han canviat)
-            // forats de les MCDU del pedestal: només amb el Fenix (pop-out); amb el ToLiss la pantalla la dibuixa l'app
+            // Fenix: pantalles i tecles de les MCDU pel seu servidor GraphQL (port 8083); mentre no hi ha connexió, pop-out
+            bool fenix = simconnect != null && IsA320Fenix() && (_xp == null || !_xp.A320Loaded);
+            if (fenix && _fxMcdu == null)
+            {
+                _fxMcdu = new panelAIR1000.FenixMcduLink();
+                _fxMcduSince = DateTime.UtcNow;
+                _fxMcdu.McduChanged += (u, s) => _a320Overhead?.SetMcdu(u, s);
+                _fxMcdu.Start();
+            }
+            else if (!fenix && _fxMcdu != null)
+            {
+                _fxMcdu.Dispose(); _fxMcdu = null;
+                if (_xp == null || !_xp.A320Loaded) { _a320Overhead?.SetMcdu(1, new panelAIR1000.McduScreen()); _a320Overhead?.SetMcdu(2, new panelAIR1000.McduScreen()); }
+            }
+            // FlyByWire: pantalles i tecles de les MCDU pel servidor MCDU del SimBridge (port 8380)
+            bool fbw = simconnect != null && IsA320FBW() && !IsA320Fenix() && (_xp == null || !_xp.A320Loaded);
+            if (fbw && _fbwMcdu == null)
+            {
+                _fbwMcdu = new panelAIR1000.FbwMcduLink();
+                _fbwMcdu.McduChanged += (u, s) => _a320Overhead?.SetMcdu(u, s);
+                _fbwMcdu.Start();
+            }
+            else if (!fbw && _fbwMcdu != null)
+            {
+                _fbwMcdu.Dispose(); _fbwMcdu = null;
+                if (_xp == null || !_xp.A320Loaded) { _a320Overhead?.SetMcdu(1, new panelAIR1000.McduScreen()); _a320Overhead?.SetMcdu(2, new panelAIR1000.McduScreen()); }
+            }
+            // forats de les MCDU del pedestal: només amb el Fenix sense connexió GraphQL (pop-out); si no, la pantalla
+            // la dibuixa l'app
             if (_a320Overhead != null)
-                _a320Overhead.PedMcduPopouts = simconnect != null && IsA320Fenix() && (_xp == null || !_xp.A320Loaded);
+                _a320Overhead.PedMcduPopouts = fenix && (_fxMcdu == null || !_fxMcdu.Connected);
             if (_a320Active) ApplyA320Region();
             PlaceMsfsScreens();   // MSFS + FlyByWire (no fa res si no és el cas)
             if (_xp == null || !_xp.A320Loaded || !_a320Active || _a320Overhead == null || !_a320Overhead.Visible) { _xpSettle.Title = null; return; }
@@ -6265,9 +6296,14 @@ namespace SimConnect3
             // amb un ToLiss carregat a X-Plane, les ordres van cap a X-Plane
             if (_xp != null && _xp.A320Loaded) { _xp.SendCommand(id, cmd); return; }
             if (simconnect == null) return;
-            // Fenix: tot el glareshield (QNH inclòs) va per Form1.A320Fenix.cs
-            if (IsA320Fenix()) { TrySendFenix(id, cmd); return; }
-            // FlyByWire: FCU, EFIS i warnings (el QNH, a sota)
+            // Fenix: tecles de les MCDU pel servidor GraphQL del Fenix; la resta del panell (QNH inclòs), per Form1.A320Fenix.cs
+            if (IsA320Fenix())
+            {
+                if (cmd == "PUSH" && _fxMcdu != null && _fxMcdu.TrySendKey(id)) return;
+                TrySendFenix(id, cmd); return;
+            }
+            // FlyByWire: tecles de les MCDU pel SimBridge; FCU, EFIS i warnings (el QNH, a sota)
+            if (cmd == "PUSH" && _fbwMcdu != null && _fbwMcdu.TrySendKey(id)) return;
             if (id != "MIP_BARO" && TrySendMsfsA320(id, cmd)) return;
             if (id == "MIP_BARO")
             {

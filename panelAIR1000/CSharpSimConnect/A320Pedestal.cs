@@ -863,6 +863,7 @@ namespace panelAIR1000
             'a' => Color.FromArgb(255, 150, 25),
             'y' => Color.FromArgb(250, 240, 60),
             'm' => Color.FromArgb(255, 90, 255),
+            'r' => Color.FromArgb(255, 40, 30),   // vermell (Fenix)
             // els símbols ("[ ]" dels camps per omplir) surten en blau, com a la MCDU real
             's' => Color.FromArgb(60, 200, 235),
             _ => Color.FromArgb(240, 242, 244),
@@ -921,6 +922,18 @@ namespace panelAIR1000
                     if (ch == '`') ch = '°';
                     // "|" és el triangle Δ al tipus de lletra del ToLiss (p.ex. "700Δ" a F-PLN, en qualsevol color)
                     if (ch == '|') ch = 'Δ';
+                    if (ch == 'Δ')
+                    {
+                        // triangle dibuixat (no el de la lletra): buit, més baix i ample que una lletra, assegut a la
+                        // línia de base, perquè no es pugui confondre mai amb una A (ToLiss "|" i Fenix "&")
+                        var fd = sm ? small : big;
+                        float capH = fd.Size * 0.64f;
+                        float cyc = cell.Y + rh / 2 + (sm ? rh * 0.06f : 0);
+                        float yb = cyc + capH * 0.5f, th = capH * 0.55f, tw = cw * 0.78f, xc = cell.X + cw / 2;
+                        using var tp = new Pen(color, fd.Size * (sm ? 0.08f : 0.1f)) { LineJoin = LineJoin.Round };
+                        g.DrawPolygon(tp, new[] { new PointF(xc - tw / 2, yb), new PointF(xc + tw / 2, yb), new PointF(xc, yb - th) });
+                        continue;
+                    }
                     // símbols especials del ToLiss (cadenes de color "s"), comprovats a la pàgina PROG: A "[" i B "]"
                     // (els altres, de moment tal com arriben)
                     // (2 i 3: fletxes de canvi de pàgina ← → del títol, en blanc; 4: fletxa ← davant d'un text, p.ex.

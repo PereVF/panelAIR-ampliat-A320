@@ -394,6 +394,10 @@ namespace SimConnect3
                     int kind;
                     using (var bmp = XPlaneWindows.Capture(h)) kind = bmp == null ? -1 : ClassifyFenix(bmp);
                     if (kind < 0) continue;
+                    // una MCDU ja reconeguda no surt mai cap al forat del ND: "ND" només és el cas per defecte (p.ex. una
+                    // pàgina plena de text on les files queden enganxades) i una MCDU no s'ha de veure mai al MFD. Només en
+                    // surt si ara té una signatura clara d'una altra pantalla (PFD, ISIS o ECAM).
+                    if (kind == 1 && placed && (cur == FxMcduSlot || cur == FxMcdu2Slot)) kind = cur;
                     _fxLastKind[h] = kind;
                     // MCDU: dos forats (esquerra / dreta). Si ja és en un dels dos, hi continua; si no, va al primer lliure
                     if (kind == FxMcduSlot)
@@ -464,6 +468,11 @@ namespace SimConnect3
         private void PlaceFenixMcdu()
         {
             if (DateTime.UtcNow < _fxPauseUntil) return;
+            // amb la connexió GraphQL del Fenix, la pantalla de la MCDU la dibuixa l'app: les pop-out de les MCDU no es
+            // toquen (l'usuari les pot tenir on vulgui, p.ex. per comparar)
+            // (mentre la connexió s'estableix, els primers 10 s, tampoc: si no, s'aparcarien abans d'hora; si no
+            //  arriba, es fa com sempre amb les pop-out)
+            if (_fxMcdu != null && (_fxMcdu.Connected || (DateTime.UtcNow - _fxMcduSince).TotalSeconds < 10)) return;
             var vs = System.Windows.Forms.SystemInformation.VirtualScreen;
             foreach (var kv in _fxSlots)
             {
@@ -557,7 +566,9 @@ namespace SimConnect3
                 }
                 else if (inBlock && ++dark >= gap) { inBlock = false; dark = 0; }
             }
-            if (blocks >= 2 && maxBlock <= h * 0.13) return FxMcduSlot;
+            // (fins al 20%: en pàgines plenes, una etiqueta petita i la seva línia de dades poden quedar enganxades en un
+            //  sol bloc de ~2 files; els arcs del ND en fan molts més)
+            if (blocks >= 2 && maxBlock <= h * 0.20) return FxMcduSlot;
             return 1;
         }
 
@@ -634,7 +645,14 @@ namespace SimConnect3
 
         private void CloseFenixScreens()
         {
-            foreach (var h in FenixWindows()) XPlaneWindows.Close(h);
+            // amb la connexió GraphQL, les pop-out de les MCDU no són de l'app: es deixen obertes (i també les que encara
+            // no s'han reconegut, que poden ser MCDU)
+            bool keepMcdu = _fxMcdu != null && _fxMcdu.Connected;
+            foreach (var h in FenixWindows())
+            {
+                if (keepMcdu && (!_fxSlots.TryGetValue(h, out int slot) || slot == FxMcduSlot || slot == FxMcdu2Slot)) continue;
+                XPlaneWindows.Close(h);
+            }
         }
     }
 }
