@@ -2671,11 +2671,27 @@ namespace panelAIR1000
         public float TextScale = 1f;
         /// <summary>Fletxa dibuixada en lloc del text: 1 amunt, 2 avall, 3 esquerra, 4 dreta (0 = text).</summary>
         public int ArrowDir;
+        /// <summary>Tecla taronja amb el rètol fosc (tecla ZOOM del mòdul MCDU del panell principal).</summary>
+        public bool Orange;
 
         public override void Draw(Graphics g)
         {
             var r = Bounds;
             bool pressed = _hold > 0;
+            if (Orange && !Mip)
+            {
+                using (var sp = Oh.RoundRect(new RectangleF(r.X + 1, r.Y + 1.5f, r.Width, r.Height), 2.5f))
+                using (var sb = new SolidBrush(Color.FromArgb(100, 15, 25, 35))) g.FillPath(sb, sp);
+                var fo = pressed ? RectangleF.Inflate(r, -0.6f, -0.6f) : r;
+                using (var bp = Oh.RoundRect(fo, 2.5f))
+                {
+                    using (var bb = new LinearGradientBrush(fo, Color.FromArgb(255, 170, 60), Color.FromArgb(205, 105, 10), 90f)) g.FillPath(bb, bp);
+                    using var pe = new Pen(Color.FromArgb(90, 45, 0), 0.6f); g.DrawPath(pe, bp);
+                }
+                float osz = Math.Min(fo.Height * 0.48f * TextScale, (fo.Width - 4) / (Label.Length * 0.64f + 0.2f));
+                Oh.Text(g, Label, fo.X + fo.Width / 2, fo.Y + fo.Height / 2 + 0.2f, Math.Min(osz, MaxText), Color.FromArgb(30, 20, 10));
+                return;
+            }
             if (Mip)
             {
                 var mf = Oh.MipFrame(g, r);
@@ -4039,7 +4055,8 @@ namespace panelAIR1000
             public Bitmap? Bmp; public IntPtr HDib, MemDC, OldObj; public int ContentH; public float S; public int Zoom;
         }
         // 2 = pedestal (només a la seva capa)
-        readonly PageData[] _pages = { new(), new(), new() };
+        // 3 = mòdul MCDU del panell principal (només a la seva capa)
+        readonly PageData[] _pages = { new(), new(), new(), new() };
         int _page;
         List<OhSilk> _silk => _pages[_page].Silk;
         List<OhElement> _els { get => _pages[_page].Els; set => _pages[_page].Els = value; }
@@ -4130,7 +4147,7 @@ namespace panelAIR1000
         /// true = hi ha un simulador connectat que governa els llums: les tecles i polsadors no canvien d'estat
         /// en tocar-los (només envien l'ordre i fan l'efecte de prémer); el llum arriba amb SetLight.
         /// </summary>
-        public bool SimDriven { get => _simDriven; set { _simDriven = value; if (_ov != null) _ov.SimDriven = value; if (_ped != null) _ped.SimDriven = value; } }
+        public bool SimDriven { get => _simDriven; set { _simDriven = value; if (_ov != null) _ov.SimDriven = value; if (_ped != null) _ped.SimDriven = value; if (_mcduMod != null) _mcduMod.SimDriven = value; } }
 
         // vidres de les pantalles del panell principal (coordenades del panell): forats de la finestra
         readonly List<RectangleF> _screenGlass = new();
@@ -4153,9 +4170,8 @@ namespace panelAIR1000
                     (int)Math.Round(_offX + gl.Right * s), (int)Math.Round(_offY - _scrollY + (gl.Bottom - sh) * s)));
             if (_ov != null && _ov.Visible && _ov.Region != null) rg.Exclude(_ov.Region);
             if (_ped != null && _ped.Visible && _ped.Region != null) rg.Exclude(_ped.Region);
-            // pantalla de la MCDU esquerra del pedestal (només amb el pedestal a la vista i quiet)
-            if (_pedMcduPopouts && PedMcduClientRect(0) is Rectangle mr) rg.Union(mr);
-            if (_pedMcduPopouts && PedMcduClientRect(1) is Rectangle mr2) rg.Union(mr2);
+            // el mòdul MCDU tapa les pantalles que té a sota (ISIS, ECAM amb el ZOOM)
+            if (McduModOpen) rg.Exclude(_mcduMod!.Bounds);
             return rg;
         }
 
@@ -4279,6 +4295,7 @@ namespace panelAIR1000
                 Redraw(t.DirtyBounds);
             }
             _ped?.SetMcdu(unit, s);
+            if (unit == 1) _mcduMod?.SetMcdu(unit, s);
         }
 
         /// <summary>
@@ -4318,13 +4335,14 @@ namespace panelAIR1000
         /// </summary>
         public A320OverheadControl() : this(false) { }
 
-        A320OverheadControl(bool overlay, bool pedestal = false)
+        A320OverheadControl(bool overlay, bool pedestal = false, bool mcduModule = false)
         {
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.Opaque, true);
             SetStyle(ControlStyles.OptimizedDoubleBuffer, false); // ja tenim el nostre propi Bitmap
             BackColor = Color.Black;
             _isOverlay = overlay;
             _isPed = pedestal;
+            _isMcduMod = mcduModule;
             _anim.Tick += (s, e) => AnimTick();
             Build();
             if (!overlay) { _page = 1; _pages[1].Visited = true; }
@@ -4372,6 +4390,76 @@ namespace panelAIR1000
         bool AnyOverlayOpen => OverlayOpen || PedOpen;
         /// <summary>Capa oberta que governen els botons + / − (el zoom és independent per a cada capa).</summary>
         A320OverheadControl? ZoomTarget => PedOpen ? _ped : _ov;
+
+        // ─────────────── Mòdul MCDU del panell principal (botó MCDU) ───────────────
+        readonly bool _isMcduMod;           // true: aquesta instància és el mòdul MCDU
+        A320OverheadControl? _mcduMod;      // (panell principal) el mòdul MCDU
+        bool _mcduZoom;                     // mida gran (la de la MCDU del pedestal tal com s'obre, 100%)
+        bool McduModOpen => _mcduMod != null && _mcduMod.Visible;
+
+        void CreateMcduMod()
+        {
+            if (_mcduMod != null || _isOverlay || IsDisposed) return;
+            _mcduMod = new A320OverheadControl(true, false, true) { Visible = false, SimDriven = _simDriven };
+            _mcduMod.ElementChanged += (id, st) => ElementChanged?.Invoke(id, st);
+            // la tecla buida de la dreta de DATA és el ZOOM del mòdul (no va al simulador)
+            _mcduMod.Command += (id, c) => { if (id == "PED_MCDU1_BLANK1") ToggleMcduZoom(); else Command?.Invoke(id, c); };
+            Controls.Add(_mcduMod);
+            if (_mcduCache[0] is McduScreen ms) _mcduMod.SetMcdu(1, ms);
+        }
+
+        /// <summary>
+        /// Lloc del mòdul (coordenades de client): just sota la placa de la matrícula. Mida petita: entre la vora exterior
+        /// del marc del MFD (ND) i la del marc de les ECAM. ZOOM: la mida de la MCDU del pedestal al 100%, creixent només
+        /// cap a la dreta i avall (la cantonada de dalt a l'esquerra queda fixa); si no hi cap per baix, la més gran que hi cap.
+        /// </summary>
+        Rectangle McduModRect()
+        {
+            const float k = 0.625f;
+            float s = _s > 0 ? _s : Width / LW;
+            float x0 = 868f * k, x1 = 1254f * k, y0 = (393f + 4f) * k;   // marc de l'ND | marc de les ECAM | sota la matrícula
+            // amb el ZOOM puja fins a tapar la placa de la matrícula (la vora de dalt de la placa), per ser més gran
+            if (_mcduZoom) y0 = 348f * k;
+            float w = _mcduZoom ? McduUnitLW : x1 - x0;
+            float h = w * McduUnitLH / McduUnitLW;
+            float left = _offX + x0 * s, top = _offY - _scrollY + (y0 - CurShift) * s;
+            float pw = w * s, ph = h * s;
+            if (_mcduZoom && top + ph > Height) { ph = Height - top; pw = ph * McduUnitLW / McduUnitLH; }
+            return Rectangle.Round(new RectangleF(left, top, pw, ph));
+        }
+
+        void LayoutMcduMod()
+        {
+            if (_mcduMod == null) return;
+            var r = McduModRect();
+            if (_mcduMod.Bounds != r) _mcduMod.Bounds = r;
+            if (_mcduMod.Visible && _mcduMod.EnsureBitmap()) _mcduMod.UpdateOverlayRegion();
+            HolesChanged?.Invoke();
+        }
+
+        void ToggleMcduMod()
+        {
+            CreateMcduMod();
+            if (_mcduMod == null) return;
+            if (McduModOpen) _mcduMod.Visible = false;
+            else
+            {
+                _mcduMod.Visible = true;
+                // per sota de l'overhead i del pedestal: quan s'obren, el tapen
+                _mcduMod.SendToBack();
+                LayoutMcduMod();
+                _mcduMod.Invalidate();
+            }
+            HolesChanged?.Invoke();
+            InvalidateButtons();
+        }
+
+        void ToggleMcduZoom()
+        {
+            _mcduZoom = !_mcduZoom;
+            // (la tecla acaba d'animar-se: es redibuixa tot a la mida nova)
+            BeginInvoke(new Action(LayoutMcduMod));
+        }
 
         void CreatePed()
         {
@@ -4496,7 +4584,7 @@ namespace panelAIR1000
                 rg.Union(kp);
             }
             rg.Intersect(ClientRectangle);
-            if (Parent is A320OverheadControl main)
+            if (Parent is A320OverheadControl main && !_isMcduMod)
             {
                 rg.Exclude(Rectangle.Inflate(main.AllBtnsRect, 12, 12));
                 rg.Exclude(Rectangle.Inflate(main.AreasRect, 4, 4));   // el botó taronja sempre visible
@@ -4671,7 +4759,8 @@ namespace panelAIR1000
 
         // el panell principal sempre al 100% (sense zoom); l'overhead segons _zoom
         int EffZoom => _page == 1 ? 100 : _zoom;
-        int ContentWidth => Math.Max(1, (int)Math.Round(Width * EffZoom / 100.0));
+        // (mòdul MCDU: la MCDU sencera ocupa l'amplada del control)
+        int ContentWidth => Math.Max(1, (int)Math.Round(_isMcduMod ? Width * LW / McduUnitLW : Width * EffZoom / 100.0));
 
         /// <summary>Crea una DIB de Windows (memòria compartida entre GDI+ per dibuixar i GDI per copiar a pantalla).</summary>
         static bool CreateSurface(int w, int h, out IntPtr hDib, out Bitmap? bmp, out IntPtr memDC, out IntPtr oldObj)
@@ -4967,21 +5056,27 @@ namespace panelAIR1000
 
         // panell principal: no es desplaça; capa overhead: de "tot desplegat" (0) fins al topall de la línia de tall
         // capa pedestal: de "vora de dalt a dalt de la pantalla" (0) fins a veure'n la part de baix
-        int MaxScroll => _page == 1 ? 0 : _isPed ? Math.Max(0, _contentH - Height) : _isOverlay ? (int)Math.Round(OverheadCutY * _s) : Math.Max(0, _contentH - Height);
+        int MaxScroll => _page == 1 || _isMcduMod ? 0 : _isPed ? Math.Max(0, _contentH - Height) : _isOverlay ? (int)Math.Round(OverheadCutY * _s) : Math.Max(0, _contentH - Height);
         int ZoomBtnSize => Math.Max(40, (int)(80 * Width / 3840f));
         // columna de botons sota l'indicador de pressió de frens (panell principal 4K)
         Point BtnPos(float x, float y) => new((int)(x * Width / 3840f), (int)(y * Width / 3840f));
-        // − i + un al costat de l'altre, a sota de PED
-        Point DefaultMinusPos => BtnPos(3600, 2070);
-        Point DefaultPlusPos => BtnPos(3692, 2070);
-        // botó TH (quadrant de gas), just a sota d'OVHD
-        Point DefaultThPos => BtnPos(3646, 1890);
-        Rectangle ThRect => new(ThLocation ?? DefaultThPos, new Size(ZoomBtnSize, ZoomBtnSize));
+        // Dos grups de botons (sota el GEAR i l'indicador de frens):
+        //  - mòduls que s'afegeixen al panell principal: TH | MCDU
+        //  - capes que pugen o baixen i el tapen: OVHD | PED, amb el seu zoom − | + a sota
+        // (posicions fixes: les desades d'abans, d'un sol botó, ja no s'apliquen)
+        Point DefaultThPos => BtnPos(3600, 1800);
+        Point DefaultMcduPos => BtnPos(3692, 1800);
+        Point DefaultMinusPos => BtnPos(3600, 2000);
+        Point DefaultPlusPos => BtnPos(3692, 2000);
+        Rectangle ThRect => new(DefaultThPos, new Size(ZoomBtnSize, ZoomBtnSize));
+        Rectangle McduRect => new(DefaultMcduPos, new Size(ZoomBtnSize, ZoomBtnSize));
+        Rectangle ModulesGroupRect => Rectangle.Inflate(Rectangle.Union(ThRect, McduRect), 9, 9);
+        Rectangle LayersGroupRect => Rectangle.Inflate(Rectangle.Union(Rectangle.Union(PageRect, PedRect), Rectangle.Union(MinusRect, PlusRect)), 9, 9);
         /// <summary>Posició del botó TH (null = sota d'OVHD).</summary>
         public Point? ThLocation { get; set; }
         // botó PED (pedestal), just a sota de TH
-        Point DefaultPedPos => BtnPos(3646, 1980);
-        Rectangle PedRect => new(PedLocation ?? DefaultPedPos, new Size(ZoomBtnSize, ZoomBtnSize));
+        Point DefaultPedPos => BtnPos(3692, 1910);
+        Rectangle PedRect => new(DefaultPedPos, new Size(ZoomBtnSize, ZoomBtnSize));
         /// <summary>Posició del botó PED (null = sota de TH).</summary>
         public Point? PedLocation { get; set; }
         OhThrottle? _throttle;
@@ -5048,10 +5143,10 @@ namespace panelAIR1000
 
         /// <summary>L'usuari ha premut TH (per desar l'opció).</summary>
         public event Action<bool>? ThrottleVisibleChanged;
-        Rectangle PlusRect => new(PlusLocation ?? DefaultPlusPos, new Size(ZoomBtnSize, ZoomBtnSize));
-        Rectangle MinusRect => new(MinusLocation ?? DefaultMinusPos, new Size(ZoomBtnSize, ZoomBtnSize));
-        Point DefaultPagePos => BtnPos(3646, 1800);
-        Rectangle PageRect => new(PageLocation ?? DefaultPagePos, new Size(ZoomBtnSize, ZoomBtnSize));
+        Rectangle PlusRect => new(DefaultPlusPos, new Size(ZoomBtnSize, ZoomBtnSize));
+        Rectangle MinusRect => new(DefaultMinusPos, new Size(ZoomBtnSize, ZoomBtnSize));
+        Point DefaultPagePos => BtnPos(3600, 1910);
+        Rectangle PageRect => new(DefaultPagePos, new Size(ZoomBtnSize, ZoomBtnSize));
         // botó taronja "mostrar àrees clicables" (com el de la banda G1000): cantonada de dalt a l'esquerra
         Point DefaultAreasPos => BtnPos(24, 48);
         Rectangle AreasRect => new(AreasLocation ?? DefaultAreasPos, new Size(ZoomBtnSize, ZoomBtnSize));
@@ -5063,8 +5158,8 @@ namespace panelAIR1000
         static bool s_showAreas;
         /// <summary>Color del botó "mostrar àrees": taronja, dibuixat molt subtil (poca opacitat) (a joc amb el panell A320).</summary>
         static readonly Color AreasColor = Color.Orange;
-        Rectangle BtnRect(int b) => b == 1 ? PlusRect : b == 2 ? MinusRect : b == 4 ? AreasRect : b == 5 ? ThRect : b == 6 ? PedRect : PageRect;
-        Rectangle AllBtnsRect => Rectangle.Union(Rectangle.Union(Rectangle.Union(Rectangle.Union(PlusRect, MinusRect), PageRect), ThRect), PedRect);
+        Rectangle BtnRect(int b) => b == 1 ? PlusRect : b == 2 ? MinusRect : b == 4 ? AreasRect : b == 5 ? ThRect : b == 6 ? PedRect : b == 7 ? McduRect : PageRect;
+        Rectangle AllBtnsRect => Rectangle.Union(ModulesGroupRect, LayersGroupRect);
 
         /// <summary>Posició dels botons de zoom (null = posició per defecte a baix a la dreta).</summary>
         public Point? PlusLocation { get; set; }
@@ -5211,6 +5306,7 @@ namespace panelAIR1000
             {
                 if (_ov != null && _ov.Visible) { _ov._closing = false; _ov.Visible = false; }
                 if (_ped != null && _ped.Visible) { _ped._closing = false; _ped.Visible = false; }
+                if (_mcduMod != null) { _mcduMod.Visible = false; _mcduZoom = false; }   // el mòdul MCDU comença sempre tancat
                 InvalidateButtons();
                 return;
             }
@@ -5218,99 +5314,87 @@ namespace panelAIR1000
             if (_bmp != null) { _scrollY = MaxScroll; _openAtBottom = false; Invalidate(); }
         }
 
-        void DrawZoomButtons(Graphics g, Rectangle clip)
+void DrawZoomButtons(Graphics g, Rectangle clip)
         {
             if (_isOverlay) return;
+            if (!Rectangle.Inflate(AllBtnsRect, 16, 16).IntersectsWith(clip)) return;
             var oldMode = g.SmoothingMode;
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            var oldHint = g.TextRenderingHint;
+            g.TextRenderingHint = TextRenderingHint.AntiAlias;
             bool open = AnyOverlayOpen;
             int z = ZoomTarget?._zoom ?? 100;
-            // amb l'overhead (o el pedestal) obert, els botons i + / − van dins un mateix marc: el zoom és només de la capa oberta
-            if (open)
+            float bs = ZoomBtnSize;
+            Color edge = CalibrationMode ? Color.FromArgb(220, 255, 140, 0) : Color.FromArgb(150, 255, 255, 255);
+
+            // ── grup de mòduls (TH, MCDU): marc continu, botons arrodonits; actiu = fons blau-gris clar ──
+            var mg = ModulesGroupRect;
+            using (var gp = Oh.RoundRect(mg, bs * 0.30f))
             {
-                var grp = Rectangle.Inflate(AllBtnsRect, 9, 9);
-                using var gp = Oh.RoundRect(grp, ZoomBtnSize * 0.24f);
                 using (var gb = new SolidBrush(Color.FromArgb(70, 0, 0, 0))) g.FillPath(gb, gp);
-                using var pe = new Pen(Color.FromArgb(120, 255, 255, 255), Math.Max(1.5f, ZoomBtnSize / 40f)) { DashPattern = new[] { 3f, 2f } };
+                using var pe = new Pen(Color.FromArgb(120, 255, 255, 255), Math.Max(1.5f, bs / 40f));
                 g.DrawPath(pe, gp);
             }
+            void Module(Rectangle r, string text, bool active, bool pressed, float textK)
+            {
+                using (var path = Oh.RoundRect(r, r.Width * 0.38f))
+                {
+                    var fill = active ? Color.FromArgb(pressed ? 220 : 190, 70, 130, 150) : Color.FromArgb(pressed ? 170 : 110, 0, 0, 0);
+                    using (var b = new SolidBrush(fill)) g.FillPath(b, path);
+                    using var p = new Pen(edge, Math.Max(2f, r.Width / 30f));
+                    g.DrawPath(p, path);
+                }
+                using var f = new Font("Segoe UI", Math.Max(9f, r.Width * textK), FontStyle.Bold, GraphicsUnit.Pixel);
+                using var tb = new SolidBrush(Color.FromArgb(235, 255, 255, 255));
+                g.DrawString(text, f, tb, r.X + r.Width / 2f, r.Y + r.Height / 2f, Oh.Center);
+            }
+            Module(ThRect, "TH", _throttleShown, _btnPressed == 5, 0.30f);
+            Module(McduRect, "MCDU", McduModOpen, _btnPressed == 7, 0.22f);
+
+            // ── grup de capes (OVHD, PED) amb el seu zoom − / +: marc discontinu, botons quadrats ──
+            var lg = LayersGroupRect;
+            using (var gp = Oh.RoundRect(lg, bs * 0.24f))
+            {
+                using (var gb = new SolidBrush(Color.FromArgb(70, 0, 0, 0))) g.FillPath(gb, gp);
+                using var pe = new Pen(Color.FromArgb(120, 255, 255, 255), Math.Max(1.5f, bs / 40f)) { DashPattern = new[] { 3f, 2f } };
+                g.DrawPath(pe, gp);
+            }
+            void Layer(Rectangle r, string text, bool active, bool pressed, float textK)
+            {
+                using (var path = Oh.RoundRect(r, r.Width * 0.12f))
+                {
+                    var fill = active ? Color.FromArgb(pressed ? 200 : 160, 95, 108, 122) : Color.FromArgb(pressed ? 170 : 110, 0, 0, 0);
+                    using (var b = new SolidBrush(fill)) g.FillPath(b, path);
+                    using var p = new Pen(edge, Math.Max(2f, r.Width / 30f));
+                    g.DrawPath(p, path);
+                }
+                using var f = new Font("Segoe UI", Math.Max(9f, r.Width * textK), FontStyle.Bold, GraphicsUnit.Pixel);
+                using var tb = new SolidBrush(Color.FromArgb(230, 255, 255, 255));
+                g.DrawString(text, f, tb, r.X + r.Width / 2f, r.Y + r.Height / 2f, Oh.Center);
+            }
+            Layer(PageRect, "OVHD", OverlayOpen, _btnPressed == 3, 0.24f);
+            Layer(PedRect, "PED", PedOpen, _btnPressed == 6, 0.27f);
+            // zoom de la capa oberta (sense cap capa oberta, apagats)
             foreach (var (r, plus) in new[] { (PlusRect, true), (MinusRect, false) })
             {
-                if (!open) continue;
-                if (!r.IntersectsWith(clip)) continue;
                 bool pressed = _btnPressed == (plus ? 1 : 2);
-                bool enabled = plus ? z < MaxZoom : z > MinZoom;
-                using (var path = Oh.RoundRect(r, r.Width * 0.18f))
+                bool enabled = open && (plus ? z < MaxZoom : z > MinZoom);
+                using (var path = Oh.RoundRect(r, r.Width * 0.12f))
                 {
                     using (var b = new SolidBrush(Color.FromArgb(pressed ? 170 : 110, 0, 0, 0))) g.FillPath(b, path);
-                    using var p = new Pen(CalibrationMode ? Color.FromArgb(220, 255, 140, 0) : Color.FromArgb(150, 255, 255, 255), Math.Max(2f, r.Width / 30f));
+                    using var p = new Pen(open ? edge : Color.FromArgb(70, 255, 255, 255), Math.Max(2f, r.Width / 30f));
                     g.DrawPath(p, path);
                 }
                 float cx = r.X + r.Width / 2f, cy = r.Y + r.Height / 2f, arm = r.Width * 0.26f;
-                using var sp = new Pen(Color.FromArgb(enabled ? 230 : 80, 255, 255, 255), Math.Max(3f, r.Width / 11f)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                using var sp = new Pen(Color.FromArgb(enabled ? 230 : 70, 255, 255, 255), Math.Max(3f, r.Width / 11f)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
                 g.DrawLine(sp, cx - arm, cy, cx + arm, cy);
                 if (plus) g.DrawLine(sp, cx, cy - arm, cx, cy + arm);
             }
-            // botó de canvi de pàgina: indica on porta (MAIN = panell principal, OVHD = overhead)
-            var pr = PageRect;
-            if (pr.IntersectsWith(clip))
-            {
-                bool pressed = _btnPressed == 3;
-                using (var path = Oh.RoundRect(pr, pr.Width * 0.18f))
-                {
-                    using (var b = new SolidBrush(Color.FromArgb(pressed ? 170 : 110, 0, 0, 0))) g.FillPath(b, path);
-                    using var p = new Pen(CalibrationMode ? Color.FromArgb(220, 255, 140, 0) : Color.FromArgb(150, 255, 255, 255), Math.Max(2f, pr.Width / 30f));
-                    g.DrawPath(p, path);
-                }
-                using var f = new Font("Segoe UI", Math.Max(9f, pr.Width * 0.24f), FontStyle.Bold, GraphicsUnit.Pixel);
-                using var tb = new SolidBrush(Color.FromArgb(230, 255, 255, 255));
-                var oldHint = g.TextRenderingHint;
-                g.TextRenderingHint = TextRenderingHint.AntiAlias;
-                g.DrawString("OVHD", f, tb, pr.X + pr.Width / 2f, pr.Y + pr.Height / 2f, Oh.Center);
-                g.TextRenderingHint = oldHint;
-            }
-            // botó TH: igual que OVHD; quan el quadrant es mostra, el fons és més clar
-            var th = ThRect;
-            if (th.IntersectsWith(clip))
-            {
-                bool pressed = _btnPressed == 5;
-                using (var path = Oh.RoundRect(th, th.Width * 0.18f))
-                {
-                    var fill = _throttleShown ? Color.FromArgb(pressed ? 200 : 160, 95, 108, 122) : Color.FromArgb(pressed ? 170 : 110, 0, 0, 0);
-                    using (var b = new SolidBrush(fill)) g.FillPath(b, path);
-                    using var p = new Pen(CalibrationMode ? Color.FromArgb(220, 255, 140, 0) : Color.FromArgb(150, 255, 255, 255), Math.Max(2f, th.Width / 30f));
-                    g.DrawPath(p, path);
-                }
-                using var f2 = new Font("Segoe UI", Math.Max(9f, th.Width * 0.3f), FontStyle.Bold, GraphicsUnit.Pixel);
-                using var tb2 = new SolidBrush(Color.FromArgb(230, 255, 255, 255));
-                var oldHint2 = g.TextRenderingHint;
-                g.TextRenderingHint = TextRenderingHint.AntiAlias;
-                g.DrawString("TH", f2, tb2, th.X + th.Width / 2f, th.Y + th.Height / 2f, Oh.Center);
-                g.TextRenderingHint = oldHint2;
-            }
-            // botó PED: igual que TH; amb el pedestal obert, el fons és més clar
-            var pd = PedRect;
-            if (pd.IntersectsWith(clip))
-            {
-                bool pressed = _btnPressed == 6;
-                using (var path = Oh.RoundRect(pd, pd.Width * 0.18f))
-                {
-                    var fill = PedOpen ? Color.FromArgb(pressed ? 200 : 160, 95, 108, 122) : Color.FromArgb(pressed ? 170 : 110, 0, 0, 0);
-                    using (var b = new SolidBrush(fill)) g.FillPath(b, path);
-                    using var p = new Pen(CalibrationMode ? Color.FromArgb(220, 255, 140, 0) : Color.FromArgb(150, 255, 255, 255), Math.Max(2f, pd.Width / 30f));
-                    g.DrawPath(p, path);
-                }
-                using var f3 = new Font("Segoe UI", Math.Max(9f, pd.Width * 0.27f), FontStyle.Bold, GraphicsUnit.Pixel);
-                using var tb3 = new SolidBrush(Color.FromArgb(230, 255, 255, 255));
-                var oldHint3 = g.TextRenderingHint;
-                g.TextRenderingHint = TextRenderingHint.AntiAlias;
-                g.DrawString("PED", f3, tb3, pd.X + pd.Width / 2f, pd.Y + pd.Height / 2f, Oh.Center);
-                g.TextRenderingHint = oldHint3;
-            }
+            g.TextRenderingHint = oldHint;
             g.SmoothingMode = oldMode;
         }
 
-        int ZoomButtonAt(Point p) => _isOverlay ? 0 : Rectangle.Inflate(AreasRect, 8, 8).Contains(p) ? 4 : PageRect.Contains(p) ? 3 : ThRect.Contains(p) ? 5 : PedRect.Contains(p) ? 6 : !AnyOverlayOpen ? 0 : PlusRect.Contains(p) ? 1 : MinusRect.Contains(p) ? 2 : 0;
+        int ZoomButtonAt(Point p) => _isOverlay ? 0 : Rectangle.Inflate(AreasRect, 8, 8).Contains(p) ? 4 : PageRect.Contains(p) ? 3 : ThRect.Contains(p) ? 5 : PedRect.Contains(p) ? 6 : McduRect.Contains(p) ? 7 : !AnyOverlayOpen ? 0 : PlusRect.Contains(p) ? 1 : MinusRect.Contains(p) ? 2 : 0;
 
         void ToggleShowAreas()
         {
@@ -5474,7 +5558,8 @@ namespace panelAIR1000
                 _anim.Stop();
         }
 
-        void ClampScroll() { if (!_closing && !_opening) _scrollY = Math.Clamp(_scrollY, 0, MaxScroll); }
+        void ClampScroll() { if (!_closing && !_opening && !_pulling) _scrollY = Math.Clamp(_scrollY, 0, MaxScroll); }
+        bool _pulling;   // (pedestal) s'està estirant avall des de dalt de tot (segueix el dit, encara no es tanca)
 
         void ScrollTo(int y)
         {
@@ -5498,7 +5583,7 @@ namespace panelAIR1000
                 // Es repinta tota la franja vertical de cada botó (de dalt a baix): qualsevol còpia
                 // desplaçada, d'aquest pas o d'un d'anterior, queda esborrada.
                 if (!_isOverlay)
-                    foreach (var zr in new[] { PlusRect, MinusRect, PageRect, ThRect, PedRect })
+                    foreach (var zr in new[] { AllBtnsRect })
                         Invalidate(new Rectangle(zr.X - 3, 0, zr.Width + 6, Height));
             }
             else Invalidate();
@@ -5529,7 +5614,7 @@ namespace panelAIR1000
             int zb = ZoomButtonAt(e.Location);
             if (zb != 0)
             {
-                if (CalibrationMode)
+                if (CalibrationMode && zb == 4)
                 {
                     _btnDrag = zb;
                     var r = BtnRect(zb);
@@ -5547,7 +5632,7 @@ namespace panelAIR1000
             _downPt = e.Location; _downScroll = _scrollY;
             // (capa) si el gest comença amb l'overhead al topall, arrossegar amunt el tanca;
             // amb el pedestal a dalt de tot, arrossegar avall el tanca
-            _startAtCut = _isOverlay && (_isPed ? _scrollY <= 1 : _scrollY >= MaxScroll - 1);
+            _startAtCut = _isOverlay && !_isMcduMod && (_isPed ? _scrollY <= 1 : _scrollY >= MaxScroll - 1);
             _lastMoveY = e.Y; _lastMoveT = _clock.Elapsed.TotalSeconds;
             // acció mantinguda (p.ex. gir continu del rotatiu PULL STD); amb el dit ja s'ha començat a WM_POINTERDOWN
             if (!_touchPress && !_edgeStart && !_edgeStartBottom) BeginPress(e.Location);
@@ -5616,9 +5701,6 @@ namespace panelAIR1000
             int dy = e.Y - _downPt.Y;
             if (!_dragging && Math.Abs(dy) > Math.Max(10, Width / 200)) { _dragging = true; EndPress(); }
             if (!_dragging) return;
-            if (_isOverlay && _startAtCut && (_isPed ? dy > 0 : dy < 0)) { BeginClose(); return; }
-            if (_edgeStart && dy > 0) { _edgeStart = false; _down = false; _dragging = false; OpenOverlayAnimated(); return; }
-            if (_edgeStartBottom && dy < 0) { _edgeStartBottom = false; _down = false; _dragging = false; OpenPedAnimated(); return; }
             double t = _clock.Elapsed.TotalSeconds;
             double ddt = t - _lastMoveT;
             if (ddt > 0.001)
@@ -5627,6 +5709,16 @@ namespace panelAIR1000
                 _velY = _velY * 0.6f + v * 0.4f;
                 _lastMoveT = t; _lastMoveY = e.Y;
             }
+            // (pedestal) amb el pedestal a dalt de tot, arrossegar avall el fa baixar seguint el dit; en deixar-lo anar,
+            // només s'amaga si hi ha intenció clara (veure OnMouseUp); si no, torna a pujar
+            if (_isPed && _startAtCut && (dy > 0 || _pulling))
+            {
+                if (dy > 0) { _pulling = true; ScrollTo(-dy); return; }
+                _pulling = false;   // ha tornat per sobre del punt de partida: desplaçament normal
+            }
+            else if (_isOverlay && !_isPed && _startAtCut && dy < 0) { BeginClose(); return; }
+            if (_edgeStart && dy > 0) { _edgeStart = false; _down = false; _dragging = false; OpenOverlayAnimated(); return; }
+            if (_edgeStartBottom && dy < 0) { _edgeStartBottom = false; _down = false; _dragging = false; OpenPedAnimated(); return; }
             _pendingScroll = _downScroll - dy;
             _hasPendingScroll = true;
             StartAnim();
@@ -5640,13 +5732,14 @@ namespace panelAIR1000
             {
                 int b = _btnPressed;
                 _btnPressed = 0;
-                Invalidate(PlusRect); Invalidate(MinusRect); Invalidate(PageRect); Invalidate(PedRect); Invalidate(Rectangle.Inflate(AreasRect, 6, 6));
+                Invalidate(Rectangle.Inflate(AllBtnsRect, 16, 16)); Invalidate(Rectangle.Inflate(AreasRect, 6, 6));
                 if (ZoomButtonAt(e.Location) == b)
                 {
                     if (b == 4) ToggleShowAreas();
                     else if (b == 5) { ThrottleVisible = !ThrottleVisible; ThrottleVisibleChanged?.Invoke(ThrottleVisible); }
                     else if (b == 3) ToggleOverlay();
                     else if (b == 6) TogglePed();
+                    else if (b == 7) ToggleMcduMod();
                     else if (ZoomTarget is A320OverheadControl zt) { zt.SetZoom(zt._zoom + (b == 1 ? 10 : -10)); InvalidateButtons(); }
                 }
                 return;
@@ -5655,6 +5748,17 @@ namespace panelAIR1000
             _down = false;
             EndPress();
             _touchPress = false;
+            if (_dragging && _pulling)
+            {
+                // (pedestal estirat avall) s'amaga si s'ha baixat més d'un 30% de l'alçada, o amb una estirada ràpida
+                // avall d'almenys un 8%; si no, torna a pujar al seu lloc
+                _pulling = false; _dragging = false;
+                bool recentP = _clock.Elapsed.TotalSeconds - _lastMoveT < 0.08;
+                int pulled = -_scrollY;
+                if (pulled > Height * 0.30f || (recentP && _velY > Height * 1.5f && pulled > Height * 0.08f)) BeginClose();
+                else { _opening = true; _flingV = 0; StartAnim(); }
+                return;
+            }
             if (_dragging)
             {
                 bool recent = _clock.Elapsed.TotalSeconds - _lastMoveT < 0.08;
@@ -5695,6 +5799,8 @@ namespace panelAIR1000
             _offY = _isOverlay ? 0 : Math.Max(0, Height - _contentH);
             ClampScroll();
             Invalidate();
+            if (_isMcduMod && Visible && EnsureBitmap()) UpdateOverlayRegion();
+            if (!_isOverlay) LayoutMcduMod();
             if (!_isOverlay) HolesChanged?.Invoke();
         }
 
@@ -5800,6 +5906,19 @@ namespace panelAIR1000
 
         void Build()
         {
+            // mòdul MCDU del panell principal: només la pàgina 3 (la MCDU esquerra del pedestal, sencera)
+            if (_isMcduMod)
+            {
+                _page = 3;
+                _pages[3].Shift = 30f * PedK;
+                _pages[3].LH = McduUnitLH;
+                _pages[3].Frame = McduModFrame;
+                _ls = 1f;
+                BuildPedestal(mcduOnly: true);
+                _els = _els.OrderBy(e => e.Z).ToList();
+                _pages[3].Visited = true;
+                return;
+            }
             // capa pedestal: només la pàgina 2
             if (_isPed)
             {

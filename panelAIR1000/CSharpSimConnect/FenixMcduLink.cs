@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.WebSockets;
@@ -57,7 +57,8 @@ namespace panelAIR1000
 
         public void Dispose() { Stop(); _http.Dispose(); }
 
-        void Post(Action a) { if (_ui != null) _ui.Post(_ => a(), null); else a(); }
+        // (després d'Stop ja no es publica res: si no, una pantalla pendent tornaria a sortir un cop netejada)
+        void Post(Action a) { if (_ui != null) _ui.Post(_ => { if (_cts != null) a(); }, null); else a(); }
 
         async Task RunAsync(CancellationToken ct)
         {
@@ -66,6 +67,7 @@ namespace panelAIR1000
                 try { await SessionAsync(ct); }
                 catch { /* el Fenix no hi és o s'ha tancat: es torna a provar */ }
                 Connected = false;
+                if (!ct.IsCancellationRequested) ShowNoConnection();
                 try { await Task.Delay(3000, ct); } catch { }
             }
         }
@@ -107,6 +109,36 @@ namespace panelAIR1000
                 string? value = dr.TryGetProperty("value", out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
                 int unit = Array.IndexOf(DisplayRefs, name);
                 if (unit >= 0 && value != null) Publish(unit, value);
+            }
+        }
+
+        /// <summary>Missatge a les dues MCDU mentre no hi ha connexió amb el servidor del Fenix (p.ex. mentre es carrega).</summary>
+        void ShowNoConnection()
+        {
+            (string text, char col, bool small)[] lines =
+            {
+                ("FENIX MCDU", 'w', false), ("", 'w', false),
+                ("NO CONNECTION", 'a', false), ("", 'w', false),
+                ("FENIX NOT RUNNING OR", 'w', true), ("STILL LOADING", 'w', true), ("", 'w', false),
+                ("RETRYING EVERY 3 S", 'b', true), ("(LOCALHOST PORT 8083)", 'b', true),
+            };
+            var s = new McduScreen();
+            for (int row = 0; row < lines.Length; row++)
+            {
+                var (text, col, small) = lines[row];
+                int start = Math.Max(0, (McduScreen.Cols - text.Length) / 2);
+                for (int k = 0; k < text.Length && start + k < McduScreen.Cols; k++)
+                {
+                    if (text[k] == ' ') continue;
+                    s.Ch[row, start + k] = text[k]; s.Col[row, start + k] = col; s.Small[row, start + k] = small;
+                }
+            }
+            for (int u = 0; u < 2; u++)
+            {
+                if (s.Equals(_last[u])) continue;
+                _last[u] = s;
+                int unit = u + 1;
+                Post(() => McduChanged?.Invoke(unit, s));
             }
         }
 

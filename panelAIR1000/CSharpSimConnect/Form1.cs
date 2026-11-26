@@ -5954,10 +5954,7 @@ namespace SimConnect3
                 _fbwMcdu.Dispose(); _fbwMcdu = null;
                 if (_xp == null || !_xp.A320Loaded) { _a320Overhead?.SetMcdu(1, new panelAIR1000.McduScreen()); _a320Overhead?.SetMcdu(2, new panelAIR1000.McduScreen()); }
             }
-            // forats de les MCDU del pedestal: només amb el Fenix sense connexió GraphQL (pop-out); si no, la pantalla
-            // la dibuixa l'app
-            if (_a320Overhead != null)
-                _a320Overhead.PedMcduPopouts = fenix && (_fxMcdu == null || !_fxMcdu.Connected);
+            // (les pantalles de les MCDU les dibuixa sempre l'app: mai es fan servir les pop-out de les MCDU)
             if (_a320Active) ApplyA320Region();
             PlaceMsfsScreens();   // MSFS + FlyByWire (no fa res si no és el cas)
             if (_xp == null || !_xp.A320Loaded || !_a320Active || _a320Overhead == null || !_a320Overhead.Visible) { _xpSettle.Title = null; return; }
@@ -6079,7 +6076,7 @@ namespace SimConnect3
                           && _a320Overhead != null && _a320Overhead.Visible;
             if (!active) { _msfsSince = DateTime.MinValue; _fbwSettle.Title = null; return; }
             if (_msfsSince == DateTime.MinValue) _msfsSince = DateTime.UtcNow;
-            if (IsA320Fenix()) { PlaceFenixScreens(); PlaceFenixMcdu(); return; }   // Fenix: finestres sense títol propi (Form1.A320Fenix.cs)
+            if (IsA320Fenix()) { PlaceFenixScreens(); return; }   // Fenix: finestres sense títol propi (Form1.A320Fenix.cs)
             if (DateTime.UtcNow < _fxPauseUntil) return;   // s'està prement / animant la palanca del tren
             int missing = 0;
             var found = XPlaneWindows.FindEach(MsfsScreens.Select(s => s.title).Concat(FbwIsisTitles), MsfsProcesses);   // una sola passada

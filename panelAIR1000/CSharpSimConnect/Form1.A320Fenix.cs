@@ -458,32 +458,8 @@ namespace SimConnect3
         /// <summary>"Forats" de les MCDU del pedestal (5 esquerra, 6 dreta): fora dels 5 vidres del panell principal.</summary>
         private const int FxMcduSlot = 5, FxMcdu2Slot = 6;
 
-        /// <summary>
-        /// MCDU del Fenix (pop-out reconegudes per la imatge, veure ClassifyFenix) als forats de les MCDU del pedestal,
-        /// només si el pedestal és a la vista: la primera que surt va a l'esquerra i la segona a la dreta (les dues tenen el
-        /// mateix aspecte, no es poden distingir pel contingut). Es col·loquen després de les altres pantalles, just
-        /// darrere de l'app: així queden per sobre de totes les altres pop-out si es superposen. Sense pedestal s'aparquen
-        /// fora de les pantalles (no es veuen per cap forat).
-        /// </summary>
-        private void PlaceFenixMcdu()
-        {
-            if (DateTime.UtcNow < _fxPauseUntil) return;
-            // amb la connexió GraphQL del Fenix, la pantalla de la MCDU la dibuixa l'app: les pop-out de les MCDU no es
-            // toquen (l'usuari les pot tenir on vulgui, p.ex. per comparar)
-            // (mentre la connexió s'estableix, els primers 10 s, tampoc: si no, s'aparcarien abans d'hora; si no
-            //  arriba, es fa com sempre amb les pop-out)
-            if (_fxMcdu != null && (_fxMcdu.Connected || (DateTime.UtcNow - _fxMcduSince).TotalSeconds < 10)) return;
-            var vs = System.Windows.Forms.SystemInformation.VirtualScreen;
-            foreach (var kv in _fxSlots)
-            {
-                if (kv.Value != FxMcduSlot && kv.Value != FxMcdu2Slot) continue;
-                int side = kv.Value == FxMcduSlot ? 0 : 1;
-                System.Drawing.Rectangle wr = _a320Overhead?.PedMcduScreenRect(side) is System.Drawing.Rectangle rc
-                    ? PopoutRect(rc, MsfsExtraHeight)
-                    : new System.Drawing.Rectangle(vs.Right + 200 + side * 450, vs.Top, 400, 350);
-                try { XPlaneWindows.Place(kv.Key, wr, this.Handle); } catch { }
-            }
-        }
+        // (les pop-out de les MCDU no es col·loquen mai: la pantalla de les MCDU la dibuixa l'app amb el servidor GraphQL del Fenix;
+        //  si l'usuari en fa una, es reconeix com a MCDU només perquè no vagi a parar al forat d'una altra pantalla)
 
         private DateTime _fxLastClassify = DateTime.MinValue, _fxLastVerify = DateTime.MinValue;
         private DateTime _fxPauseUntil = DateTime.MinValue, _fxStableSince = DateTime.MinValue;
@@ -645,12 +621,11 @@ namespace SimConnect3
 
         private void CloseFenixScreens()
         {
-            // amb la connexió GraphQL, les pop-out de les MCDU no són de l'app: es deixen obertes (i també les que encara
-            // no s'han reconegut, que poden ser MCDU)
-            bool keepMcdu = _fxMcdu != null && _fxMcdu.Connected;
+            // les pop-out de les MCDU no són de l'app: es deixen obertes (i també les que encara no s'han reconegut, que
+            // poden ser MCDU)
             foreach (var h in FenixWindows())
             {
-                if (keepMcdu && (!_fxSlots.TryGetValue(h, out int slot) || slot == FxMcduSlot || slot == FxMcdu2Slot)) continue;
+                if (!_fxSlots.TryGetValue(h, out int slot) || slot == FxMcduSlot || slot == FxMcdu2Slot) continue;
                 XPlaneWindows.Close(h);
             }
         }

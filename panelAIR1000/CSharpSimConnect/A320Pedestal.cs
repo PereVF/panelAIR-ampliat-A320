@@ -67,7 +67,20 @@ namespace panelAIR1000
             new(1046 * PedK, 3206 * PedK), new(908 * PedK, 3206 * PedK), new(898 * PedK, 3168 * PedK)
         };
 
-        void BuildPedestal()
+        // ── Mòdul MCDU del panell principal (botó MCDU): la MCDU esquerra sencera, desplaçada perquè quedi centrada a
+        //    l'amplada lògica (així el control del mòdul la mostra sencera amb el mateix mecanisme de dibuix) ──
+        /// <summary>Desplaçament (px de referència) de la MCDU del mòdul: el centre de la MCDU al centre de l'amplada lògica.</summary>
+        const float McduModDx = LW / PedK / 2f - (SideL0 + SideL1) / 2f;
+        /// <summary>Amplada i alçada lògiques de la MCDU sencera (planxa de sota: 66,6..590,4 × 30..856 px de referència).</summary>
+        public const float McduUnitLW = (SideL1 - SideL0) * PedK, McduUnitLH = (856f - 30f) * PedK;
+        /// <summary>Contorn de la MCDU del mòdul (unitats lògiques), per retallar-ne la finestra.</summary>
+        static readonly PointF[] McduModFrame = Oh.RoundAll(new PointF[]
+        {
+            new((SideL0 + McduModDx) * PedK, 30 * PedK), new((SideL1 + McduModDx) * PedK, 30 * PedK),
+            new((SideL1 + McduModDx) * PedK, 856 * PedK), new((SideL0 + McduModDx) * PedK, 856 * PedK)
+        }, 2.5f);
+
+        void BuildPedestal(bool mcduOnly = false)
         {
             const float k = PedK;
             RectangleF R(float x0, float y0, float x1, float y1) => RectangleF.FromLTRB(x0 * k, y0 * k, x1 * k, y1 * k);
@@ -124,7 +137,9 @@ namespace panelAIR1000
                 if (L)
                 {
                     // 1) planxa de sota: llisa, sense osques (els DZUS hi queden per sobre)
-                    Pp(62 + dx, 30, 595 + dx, 856);
+                    // (mòdul MCDU del panell principal: la MCDU es construeix desplaçada; la planxa fa la mateixa amplada)
+                    if (dx == 0 || dx == PedMcdu2Dx) Pp(62 + dx, 30, 595 + dx, 856);
+                    else Pp(SideL0 + dx, 30, SideL1 + dx, 856);
                     // 2) planxa de la cara (tecles laterals, lletres i números): osques DZUS a la meitat de dalt; a la
                     //    meitat de baix va per dins de la nansa
                     _silk.Add(new OhMcduFace(k, dx));
@@ -276,6 +291,14 @@ namespace panelAIR1000
                 float fx0 = (L ? 84 : 80) + dx, mx0 = (L ? 547 : 536) + dx;
                 _silk.Add(new OhBlock(R(fx0, 578, fx0 + 26, 724), Color.FromArgb(44, 48, 53), Color.FromArgb(22, 24, 27), 3f));
                 _silk.Add(new OhBlock(R(mx0, 578, mx0 + 26, 724), Color.FromArgb(44, 48, 53), Color.FromArgb(22, 24, 27), 3f));
+            }
+            // mòdul MCDU del panell principal: només la MCDU esquerra, centrada a l'amplada lògica (veure McduModDx)
+            if (mcduOnly)
+            {
+                Mcdu("PED_MCDU1", McduModDx);
+                // la tecla buida de la dreta de DATA és el botó ZOOM (només en aquest mòdul): taronja i amb el rètol
+                if (_byId.TryGetValue("PED_MCDU1_BLANK1", out var zk) && zk is OhKey zkey) { zkey.Label = "ZOOM"; zkey.Orange = true; zkey.MaxText = 11f; }
+                return;
             }
             Mcdu("PED_MCDU1", 0);
             Mcdu("PED_MCDU2", PedMcdu2Dx);
