@@ -332,6 +332,10 @@ namespace SimConnect3
                 if (!_drIds.ContainsKey(mdr) && await LookupId("datarefs", mdr, ct) is long id) _drIds[mdr] = id;
             foreach (var c in CommandMap.Values)
                 if (!_cmdIds.ContainsKey(c) && await LookupId("commands", c, ct) is long id) _cmdIds[c] = id;
+            // text de les pantalles de les MCDU: ~150 datarefs per MCDU, es resolen tots d'una sola petició (0,4 s)
+            _mcduText.Clear(); _lastMcdu[0] = _lastMcdu[1] = null;
+            _mcduBootClr[0] = _mcduBootClr[1] = true; _mcduInit[0] = _mcduInit[1] = false;
+            try { await LookupMcduAsync(ct); } catch (OperationCanceledException) { throw; } catch { }
 
             using var ws = new ClientWebSocket();
             await ws.ConnectAsync(new Uri(WsUrl), ct);
@@ -379,16 +383,143 @@ namespace SimConnect3
             }
         }
 
+        // ── Pantalles de les MCDU (text dels datarefs AirbusFBW/MCDU1… i MCDU2…) ──
+        const string McduPrefix = "AirbusFBW/MCDU";
+        readonly Dictionary<string, string> _mcduText = new();
+        readonly panelAIR1000.McduScreen?[] _lastMcdu = new panelAIR1000.McduScreen?[2];
+        /// <summary>Pantalla d'una MCDU (1 capità, 2 primer oficial) (al fil de la interfície).</summary>
+        public event Action<int, panelAIR1000.McduScreen>? McduChanged;
+
+        /// <summary>
+        /// Tecles de les MCDU del pedestal → commands del ToLiss (comprovats a la llista de commands d'X-Plane; n'hi ha 72
+        /// per MCDU). Totes les tecles de l'app envien "PUSH".
+        /// </summary>
+        static readonly Dictionary<string, string> McduCmdMap = BuildMcduCmdMap();
+        static Dictionary<string, string> BuildMcduCmdMap()
+        {
+            var m = new Dictionary<string, string>();
+            for (int u = 1; u <= 2; u++)
+            {
+                string a = "PED_MCDU" + u + "_", x = "AirbusFBW/MCDU" + u;
+                for (int i = 1; i <= 6; i++) { m[a + "LSK" + i + "L"] = x + "LSK" + i + "L"; m[a + "LSK" + i + "R"] = x + "LSK" + i + "R"; }
+                foreach (var (key, cmd) in new[]
+                {
+                    ("DIR", "DirTo"), ("PROG", "Prog"), ("PERF", "Perf"), ("INIT", "Init"), ("DATA", "Data"),
+                    ("FPLN", "Fpln"), ("RADNAV", "RadNav"), ("FUELPRED", "FuelPred"), ("SECFPLN", "SecFpln"), ("ATCCOMM", "ATC"),
+                    ("MCDUMENU", "Menu"), ("AIRPORT", "Airport"),
+                    ("PREV", "SlewLeft"), ("NEXT", "SlewRight"), ("UP", "SlewUp"), ("DOWN", "SlewDown"),
+                    ("BRT", "KeyBright"), ("DIM", "KeyDim"),
+                    ("KEY_DIV", "KeySlash"), ("KEY_SP", "KeySpace"), ("KEY_OVFY", "KeyOverfly"), ("KEY_CLR", "KeyClear"),
+                    ("KEY_DOT", "KeyDecimal"), ("KEY_PLUSMINUS", "KeyPM"),
+                })
+                    m[a + key] = x + cmd;
+                for (char c = 'A'; c <= 'Z'; c++) m[a + "KEY_" + c] = x + "Key" + c;
+                for (char c = '0'; c <= '9'; c++) m[a + "KEY_" + c] = x + "Key" + c;
+            }
+            return m;
+        }
+
+        /// <summary>Resol d'una sola petició els ID de tots els datarefs de text de les dues MCDU i els afegeix a les lectures.</summary>
+        async Task LookupMcduAsync(CancellationToken ct)
+        {
+            // commands de les tecles (també d'una sola petició)
+            using (var cr = await _http.GetAsync(RestBase + "commands?fields=id,name", ct))
+                if (cr.IsSuccessStatusCode)
+                {
+                    using var cdoc = JsonDocument.Parse(await cr.Content.ReadAsByteArrayAsync(ct));
+                    var want = new HashSet<string>(McduCmdMap.Values);
+                    if (cdoc.RootElement.TryGetProperty("data", out var carr) && carr.ValueKind == JsonValueKind.Array)
+                        foreach (var e in carr.EnumerateArray())
+                        {
+                            string? name = e.TryGetProperty("name", out var n) ? n.GetString() : null;
+                            if (name != null && want.Contains(name) && e.TryGetProperty("id", out var idEl) && idEl.TryGetInt64(out long cid))
+                                _cmdIds[name] = cid;
+                        }
+                }
+            using var resp = await _http.GetAsync(RestBase + "datarefs?fields=id,name,value_type", ct);
+            if (!resp.IsSuccessStatusCode) return;
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsByteArrayAsync(ct));
+            if (!doc.RootElement.TryGetProperty("data", out var arr) || arr.ValueKind != JsonValueKind.Array) return;
+            foreach (var e in arr.EnumerateArray())
+            {
+                string? name = e.TryGetProperty("name", out var n) ? n.GetString() : null;
+                if (name == null || !(name.StartsWith(McduPrefix + "1") || name.StartsWith(McduPrefix + "2"))) continue;
+                // text ("data") i el número de les fletxes ↑↓ (VertSlewKeys)
+                if (!e.TryGetProperty("value_type", out var vt) || (vt.GetString() != "data" && !name.EndsWith("VertSlewKeys"))) continue;
+                if (!e.TryGetProperty("id", out var idEl) || !idEl.TryGetInt64(out long id)) continue;
+                _drIds[name] = id; _drNames[id] = name;
+            }
+        }
+
+        /// <summary>
+        /// En carregar un vol, el ToLiss mostra "CLR" al scratchpad de la pàgina d'identificació (A320-xxx) sense
+        /// publicar-lo (comprovat: spw i spa a zero). L'app l'hi posa mentre el scratchpad i el títol no canviïn per
+        /// primer cop després de connectar; a partir d'aquí tot surt dels datarefs (prémer CLR ja el publica a spw).
+        /// </summary>
+        readonly bool[] _mcduBootClr = new bool[2], _mcduInit = new bool[2];
+        readonly int[] _mcduSlew = new int[2];
+
+        void PublishMcdu(bool[] dirty)
+        {
+            for (int u = 0; u < 2; u++)
+            {
+                if (!dirty[u]) continue;
+                _mcduInit[u] = true;
+                panelAIR1000.McduScreen s;
+                string P = McduPrefix + (u + 1);
+                lock (_mcduText)
+                {
+                    string? Get(string n) => _mcduText.TryGetValue(n, out var t) ? t : null;
+                    bool boot = _mcduBootClr[u] && string.IsNullOrWhiteSpace(Get(P + "spw")) && string.IsNullOrWhiteSpace(Get(P + "spa"))
+                                && (Get(P + "titlew") ?? "").Contains("A320-");
+                    s = panelAIR1000.McduScreen.Build(u + 1, n => boot && n == P + "spw" ? "CLR" : Get(n));
+                    s.VertSlew = _mcduSlew[u];
+                }
+                if (s.Equals(_lastMcdu[u])) continue;
+                _lastMcdu[u] = s;
+                int unit = u + 1;
+                Post(() => McduChanged?.Invoke(unit, s));
+            }
+        }
+
         void HandleMessage(byte[] data)
         {
             using var doc = JsonDocument.Parse(data);
             var root = doc.RootElement;
             if (!root.TryGetProperty("type", out var t) || t.GetString() != "dataref_update_values") return;
             if (!root.TryGetProperty("data", out var d) || d.ValueKind != JsonValueKind.Object) return;
+            var mcduDirty = new bool[2];
             foreach (var p in d.EnumerateObject())
             {
                 if (!long.TryParse(p.Name.Trim(), out var id) || !_drNames.TryGetValue(id, out var name)) continue;
                 var v = p.Value;
+                if (name.StartsWith(McduPrefix) && name.EndsWith("VertSlewKeys"))
+                {
+                    if (v.ValueKind == JsonValueKind.Array && v.GetArrayLength() > 0) v = v[0];
+                    if (v.ValueKind != JsonValueKind.Number) continue;
+                    int mu2 = name[McduPrefix.Length] == '2' ? 1 : 0;
+                    _mcduSlew[mu2] = (int)Math.Round(v.GetDouble());
+                    mcduDirty[mu2] = true;
+                    continue;
+                }
+                if (name.StartsWith(McduPrefix) && v.ValueKind == JsonValueKind.String)
+                {
+                    // text en base64 (Latin-1, acabat en zeros)
+                    string txt;
+                    try { txt = Encoding.Latin1.GetString(Convert.FromBase64String(v.GetString() ?? "")).Split('\0')[0]; }
+                    catch { continue; }
+                    int mu = name[McduPrefix.Length] == '2' ? 1 : 0;
+                    lock (_mcduText)
+                    {
+                        // primer canvi del scratchpad o del títol després de connectar: ja no cal el "CLR" de l'arrencada
+                        if (_mcduInit[mu] && (name.EndsWith("spw") || name.EndsWith("spa") || name.EndsWith("titlew"))
+                            && (!_mcduText.TryGetValue(name, out var old) || old != txt))
+                            _mcduBootClr[mu] = false;
+                        _mcduText[name] = txt;
+                    }
+                    mcduDirty[mu] = true;
+                    continue;
+                }
                 if (name == ThrDr)
                 {
                     // un valor per motor: es publiquen els dos primers
@@ -427,6 +558,7 @@ namespace SimConnect3
                 if (v.ValueKind == JsonValueKind.Number) lock (_values) _values[name] = v.GetDouble();
             }
             lock (_values) { PublishBaro(); PublishFcu(); PublishLights(); PublishPositions(); PublishLegends(); PublishClock(); PublishGear(); }
+            if (mcduDirty[0] || mcduDirty[1]) PublishMcdu(mcduDirty);
         }
 
         void PublishGear()
@@ -597,6 +729,13 @@ namespace SimConnect3
             if ((cmd == "DOWN" || cmd == "UP") && CommandMap.TryGetValue((id, "PUSH"), out var hc) && _cmdIds.TryGetValue(hc, out var hid))
             {
                 _ = SendAsync(new { req_id = NextReq(), type = "command_set_is_active", @params = new { commands = new[] { new { id = hid, is_active = cmd == "DOWN" } } } });
+                return;
+            }
+            // tecles de les MCDU del pedestal
+            if (cmd == "PUSH" && McduCmdMap.TryGetValue(id, out var mc))
+            {
+                if (_cmdIds.TryGetValue(mc, out var mcid))
+                    _ = SendAsync(new { req_id = NextReq(), type = "command_set_is_active", @params = new { commands = new[] { new { id = mcid, is_active = true, duration = 0.0 } } } });
                 return;
             }
             object? req = null;

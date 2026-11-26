@@ -4154,8 +4154,8 @@ namespace panelAIR1000
             if (_ov != null && _ov.Visible && _ov.Region != null) rg.Exclude(_ov.Region);
             if (_ped != null && _ped.Visible && _ped.Region != null) rg.Exclude(_ped.Region);
             // pantalla de la MCDU esquerra del pedestal (només amb el pedestal a la vista i quiet)
-            if (PedMcduClientRect(0) is Rectangle mr) rg.Union(mr);
-            if (PedMcduClientRect(1) is Rectangle mr2) rg.Union(mr2);
+            if (_pedMcduPopouts && PedMcduClientRect(0) is Rectangle mr) rg.Union(mr);
+            if (_pedMcduPopouts && PedMcduClientRect(1) is Rectangle mr2) rg.Union(mr2);
             return rg;
         }
 
@@ -4269,6 +4269,29 @@ namespace panelAIR1000
             if (gl.Animating) { _animating.Add(gl); StartAnim(); }
         }
 
+        /// <summary>Pantalla d'una MCDU del pedestal (1 capità, 2 primer oficial) llegida del simulador (ToLiss).</summary>
+        public void SetMcdu(int unit, McduScreen s)
+        {
+            if (unit is 1 or 2) _mcduCache[unit - 1] = s;
+            if (_byId.TryGetValue("PED_MCDU" + unit + "_SCREEN", out var e) && e is OhMcduText t && !s.Equals(t.Screen))
+            {
+                t.Screen = s;
+                Redraw(t.DirtyBounds);
+            }
+            _ped?.SetMcdu(unit, s);
+        }
+
+        /// <summary>
+        /// Les finestres pop-out de les MCDU (Fenix) es veuen per un forat a la pantalla de cada MCDU del pedestal. Amb el
+        /// ToLiss no: la pantalla la dibuixa l'app (text dels datarefs). Per defecte, sense forat.
+        /// </summary>
+        public bool PedMcduPopouts
+        {
+            get => _pedMcduPopouts;
+            set { if (_pedMcduPopouts == value) return; _pedMcduPopouts = value; HolesChanged?.Invoke(); }
+        }
+        bool _pedMcduPopouts;
+
         /// <summary>Pantalla del FCU llegida del simulador.</summary>
         public void SetFcu(FcuState s)
         {
@@ -4359,8 +4382,11 @@ namespace panelAIR1000
             _ped.OverlayMoved += () => HolesChanged?.Invoke();
             _ped.OverlayClosed += () => { InvalidateButtons(); HolesChanged?.Invoke(); };
             Controls.Add(_ped);
+            // pantalles de les MCDU que ja han arribat del simulador abans de crear el pedestal
+            for (int u = 0; u < 2; u++) if (_mcduCache[u] is McduScreen ms) _ped.SetMcdu(u + 1, ms);
             BeginInvoke(new Action(() => { if (_ped != null && !_ped.IsDisposed) _ped.EnsureBitmap(); }));
         }
+        readonly McduScreen?[] _mcduCache = new McduScreen?[2];
 
         void TogglePed()
         {

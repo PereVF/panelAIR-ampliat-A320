@@ -931,6 +931,7 @@ namespace SimConnect3
         private (string chr, string utc, string et)? _xpClock;          // pantalles del rellotge des d'X-Plane
         private bool? _xpGear;                                          // palanca del tren des d'X-Plane
         private (float a, float l, float r)? _xpBrakes;                  // indicador ACCU / BRAKES des d'X-Plane
+        private readonly panelAIR1000.McduScreen?[] _xpMcdu = new panelAIR1000.McduScreen?[2];   // pantalles de les MCDU des d'X-Plane
         private string? _xpReg;                                          // matrícula des d'X-Plane
         private void ApplyXpLegend(string id, bool upper, bool on) =>
             _a320Overhead?.SetLegend(id, upper ? (on ? 1f : 0f) : null, upper ? null : (on ? 1f : 0f));
@@ -5272,6 +5273,14 @@ namespace SimConnect3
             _xp.ClockChanged += (c, u, e) => { _xpClock = (c, u, e); _a320Overhead?.SetClock(c, u, e); };
             _xp.GearChanged += d => { _xpGear = d; _a320Overhead?.SetGearLever(d); };
             _xp.BrakesChanged += (a, l, r) => { _xpBrakes = (a, l, r); _a320Overhead?.SetBrakeGauge(a, l, r); };
+            // pantalles de les MCDU del pedestal (text dels datarefs del ToLiss)
+            _xp.McduChanged += (u, s) => { _xpMcdu[u - 1] = s; _a320Overhead?.SetMcdu(u, s); };
+            _xp.A320Changed += on =>
+            {
+                if (on) return;
+                _xpMcdu[0] = _xpMcdu[1] = null;
+                _a320Overhead?.SetMcdu(1, new panelAIR1000.McduScreen()); _a320Overhead?.SetMcdu(2, new panelAIR1000.McduScreen());
+            };
             _xp.RegistrationChanged += t => { _xpReg = t; _a320Overhead?.SetRegistration(t); };
             _xp.A320Changed += on => { if (!on) { _xpGear = null; _xpBrakes = null; _xpReg = null; _a320Overhead?.SetRegistration(""); } };
             _xp.A320Changed += on => { if (!on) { _xpLegends.Clear(); _xpClock = null; _a320Overhead?.SetClock("", "", ""); } };
@@ -5915,6 +5924,9 @@ namespace SimConnect3
         private void PlaceXPlanePfd()
         {
             // els forats de les pantalles de l'A320 es revisen cada segon (només es tornen a aplicar si han canviat)
+            // forats de les MCDU del pedestal: només amb el Fenix (pop-out); amb el ToLiss la pantalla la dibuixa l'app
+            if (_a320Overhead != null)
+                _a320Overhead.PedMcduPopouts = simconnect != null && IsA320Fenix() && (_xp == null || !_xp.A320Loaded);
             if (_a320Active) ApplyA320Region();
             PlaceMsfsScreens();   // MSFS + FlyByWire (no fa res si no és el cas)
             if (_xp == null || !_xp.A320Loaded || !_a320Active || _a320Overhead == null || !_a320Overhead.Visible) { _xpSettle.Title = null; return; }
@@ -6346,6 +6358,7 @@ namespace SimConnect3
                         if (_xpGear is bool xg) _a320Overhead.SetGearLever(xg);
                         if (_xpBrakes is var (xba, xbl, xbr)) _a320Overhead.SetBrakeGauge(xba, xbl, xbr);
                         if (_xpReg != null) _a320Overhead.SetRegistration(_xpReg);
+                        for (int u = 0; u < 2; u++) if (_xpMcdu[u] is panelAIR1000.McduScreen ms) _a320Overhead.SetMcdu(u + 1, ms);
                     }
                     else if (_a320Baro is A320BaroStruct ab)
                         _a320Overhead.SetBaro(ab.powered > 0.5, (int)Math.Round(ab.mode), ab.value, ab.isInhg > 0.5);

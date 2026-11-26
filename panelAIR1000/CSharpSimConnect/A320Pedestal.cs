@@ -16,6 +16,8 @@ namespace panelAIR1000
     public sealed partial class A320OverheadControl
     {
         const float PedK = 0.625f;
+        /// <summary>Escala de px de referència a unitats lògiques (per als elements del pedestal).</summary>
+        public const float PedKPublic = PedK;
         /// <summary>Alçada lògica del pedestal (inclou el pom de la GRAVITY GEAR, que sobresurt per baix).</summary>
         public const float PedLH = 3216f * PedK;
 
@@ -28,6 +30,14 @@ namespace panelAIR1000
         /// de les tecles de control (aquesta comença a 372 + 3/4 de l'alçada d'una tecla de control, 36 × 0,95 × 0,75).
         /// </summary>
         const float McduScrDy = 36f * 0.95f * 0.75f - 5f;
+
+        // ── Graella de text de la pantalla de la MCDU (la mateixa per a ToLiss, FBW i Fenix): 14 files iguals dins el
+        //    vidre, amb un marge de 4 (px de referència) a dalt i a baix. Les línies de dades (files 2, 4 … 12) queden
+        //    a l'alçada de les ratlles de les tecles laterals. ──
+        public const float McduTextInsetY = 4f;
+        const float McduRowH = (295f - 2 * McduTextInsetY) / 14f;
+        /// <summary>Centre vertical d'una fila de text de la MCDU (0 títol … 13 scratchpad), en px de referència.</summary>
+        static float McduRowY(int row) => 65 + McduScrDy + McduTextInsetY + (row + 0.5f) * McduRowH;
 
         static readonly PointF[] PedFramePoly = MakePedFrame();
         static PointF[] MakePedFrame()
@@ -131,6 +141,8 @@ namespace panelAIR1000
                     // pantalla enfonsada dins la cara: forat (vora exterior = marc de la MCDU dreta), parets còniques i pantalla de sempre al fons
                     var glass = PedMcdu1Glass; glass.Offset(dx * k, 0);
                     _silk.Add(new OhMcduWell(R(143 + dx, 53 + McduScrDy, 507 + dx, 372 + McduScrDy), glass, 12f * k, 6f * k));
+                    // text de la pantalla (ToLiss: llegit dels datarefs; amb el Fenix hi va la finestra pop-out a sobre)
+                    Add(new OhMcduText(p + "_SCREEN", glass));
                     // 5 llums d'avís de la part de dalt (apagats: càpsules negres), entre la vora de la cara i l'embut,
                     // repartits per igual entre els dos LED i centrats a la MCDU
                     float ay = (36 + 53 + McduScrDy) / 2f;
@@ -163,11 +175,17 @@ namespace panelAIR1000
                     {
                         // tecles com les de la MCDU dreta, una mica més cap a la vora del panell; la ratlla travessa
                         // la planxa i baixa per la paret del con fins a la pantalla (convergeix: la pantalla és més petita)
-                        PK(p + "_LSK" + (i + 1) + "L", 111 + dx, y, 40, 26, "—");
-                        PK(p + "_LSK" + (i + 1) + "R", 539 + dx, y, 40, 26, "—");
-                        float yg = 65 + McduScrDy + (y - 53 - McduScrDy) * (295f / 319f);
-                        Wl(131 + dx, y, 143 + dx, y, 155 + dx, yg);
-                        Wl(519 + dx, y, 507 + dx, y, 495 + dx, yg);
+                        // model del ToLiss: la ratlla va recta de la tecla a la vora de la pantalla, on arriba al centre
+                        // de la línia de dades; puja cap a la pantalla 0,5° a la 1a tecla, 1° a la 2a … 3° a la 6a
+                        // (la tecla queda una mica més avall que la seva línia)
+                        float yd = McduRowY(2 * (i + 1));
+                        float rise = (float)Math.Tan((i + 1) * 0.5 * Math.PI / 180) * (155 - 131);
+                        float yk = yd + rise;
+                        PK(p + "_LSK" + (i + 1) + "L", 111 + dx, yk, 40, 26, "—");
+                        PK(p + "_LSK" + (i + 1) + "R", 539 + dx, yk, 40, 26, "—");
+                        // horitzontal fins a la vora de l'embut (143 / 507) i, a dins, inclinada fins a la pantalla
+                        Wl(131 + dx, yk, 143 + dx, yk, 155 + dx, yd);
+                        Wl(519 + dx, yk, 507 + dx, yk, 495 + dx, yd);
                     }
                     else
                     {
@@ -705,11 +723,7 @@ namespace panelAIR1000
             {
                 using (var gb = new SolidBrush(Color.FromArgb(6, 7, 8))) g.FillPath(gb, gp);
                 st = g.Save(); g.SetClip(gp);
-                // ombra de la paret de dalt sobre la pantalla i reflex molt suau del vidre
-                using (var sb = new LinearGradientBrush(new RectangleF(i.X, i.Y - 0.5f, i.Width, 7f), Color.FromArgb(150, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), 90f))
-                    g.FillRectangle(sb, i.X, i.Y, i.Width, 6.5f);
-                using (var rb = new LinearGradientBrush(i, Color.FromArgb(22, 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 35f))
-                    g.FillRectangle(rb, new RectangleF(i.X, i.Y, i.Width, i.Height * 0.45f));
+                // pantalla totalment negra (sense reflex: el text ha de quedar sobre negre uniforme)
                 g.Restore(st);
                 using var pe = new Pen(Color.FromArgb(200, 10, 12, 14), 0.8f); g.DrawPath(pe, gp);
             }
@@ -827,6 +841,144 @@ namespace panelAIR1000
             using (var sp = new Pen(Color.FromArgb(90, 20, 24, 28), _r * 0.18f)) g.DrawEllipse(sp, o.X + _r * 0.08f, o.Y + _r * 0.1f, o.Width, o.Height);
             g.Restore(st);
             using (var pe = new Pen(Color.FromArgb(200, 30, 34, 38), 0.8f)) g.DrawEllipse(pe, o);
+        }
+    }
+
+    /// <summary>
+    /// Text de la pantalla d'una MCDU (14 files × 24 columnes, veure McduScreen), dibuixat a sobre del vidre negre.
+    /// Lletra monoespaiada; files de label i scont en lletra petita. "#" és la casella buida (requadre), "`" el símbol de grau.
+    /// </summary>
+    internal sealed class OhMcduText : OhElement
+    {
+        readonly RectangleF _r;
+        public McduScreen? Screen;
+        public OhMcduText(string id, RectangleF glass) { Id = id; _r = glass; Bounds = glass; }
+        public override bool HitTest(PointF p) => false;
+        public override RectangleF DirtyBounds => Bounds;
+
+        static Color ColorOf(char c) => c switch
+        {
+            'g' => Color.FromArgb(40, 230, 90),
+            'b' => Color.FromArgb(60, 200, 235),
+            'a' => Color.FromArgb(255, 150, 25),
+            'y' => Color.FromArgb(250, 240, 60),
+            'm' => Color.FromArgb(255, 90, 255),
+            // els símbols ("[ ]" dels camps per omplir) surten en blau, com a la MCDU real
+            's' => Color.FromArgb(60, 200, 235),
+            _ => Color.FromArgb(240, 242, 244),
+        };
+
+        /// <summary>Color del text (no símbol) més proper a la mateixa fila: primer cap a la dreta, després cap a l'esquerra.</summary>
+        static char? NeighbourColor(McduScreen s, int row, int col)
+        {
+            for (int c = col + 1; c < McduScreen.Cols; c++)
+            {
+                if (s.Ch[row, c] == ' ') break;
+                if (s.Col[row, c] != 's') return s.Col[row, c];
+            }
+            for (int c = col - 1; c >= 0; c--)
+            {
+                if (s.Ch[row, c] == ' ') break;
+                if (s.Col[row, c] != 's') return s.Col[row, c];
+            }
+            return null;
+        }
+
+        public override void Draw(Graphics g)
+        {
+            var s = Screen;
+            if (s == null) return;
+            // graella: la mateixa que posa les tecles laterals (marge vertical McduTextInsetY, 14 files iguals); marge
+            // horitzontal petit perquè el text no toqui la vora del vidre
+            float iy = A320OverheadControl.McduTextInsetY * A320OverheadControl.PedKPublic;
+            var r = RectangleF.FromLTRB(_r.Left + _r.Width * 0.035f, _r.Top + iy, _r.Right - _r.Width * 0.035f, _r.Bottom - iy);
+            float cw = r.Width / McduScreen.Cols, rh = r.Height / McduScreen.Rows;
+            var st = g.Save();
+            g.SetClip(_r);
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+            // lletra com la del ToLiss: gruixuda i estreta (negreta, i s'estreny en horitzontal)
+            using var big = new Font("Consolas", rh * 1.12f, FontStyle.Bold, GraphicsUnit.Pixel);
+            using var small = new Font("Consolas", rh * 0.86f, FontStyle.Regular, GraphicsUnit.Pixel);
+            using var sf = new StringFormat(StringFormat.GenericTypographic) { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+            for (int row = 0; row < McduScreen.Rows; row++)
+                for (int col = 0; col < McduScreen.Cols; col++)
+                {
+                    char ch = s.Ch[row, col];
+                    if (ch == ' ') continue;
+                    var color = ColorOf(s.Col[row, col]);
+                    bool sm = s.Small[row, col];
+                    var cell = new RectangleF(r.X + col * cw, r.Y + row * rh, cw, rh);
+                    // símbols del ToLiss (color "s", comprovats a PROG i TAKE OFF): E casella àmbar, A "[", B "]" (blaus)
+                    if (s.Col[row, col] == 's' && ch == 'E') { ch = '#'; color = ColorOf('a'); }
+                    if (ch == '#')
+                    {
+                        // casella per omplir: requadre de la mida de la lletra
+                        float bh = rh * (sm ? 0.62f : 0.8f), bw = cw * 0.86f;
+                        using var bp = new Pen(color, Math.Max(0.8f, rh * 0.07f));
+                        g.DrawRectangle(bp, cell.X + (cw - bw) / 2, cell.Y + (rh - bh) / 2, bw, bh);
+                        continue;
+                    }
+                    if (ch == '`') ch = '°';
+                    // "|" és el triangle Δ al tipus de lletra del ToLiss (p.ex. "700Δ" a F-PLN, en qualsevol color)
+                    if (ch == '|') ch = 'Δ';
+                    // símbols especials del ToLiss (cadenes de color "s"), comprovats a la pàgina PROG: A "[" i B "]"
+                    // (els altres, de moment tal com arriben)
+                    // (2 i 3: fletxes de canvi de pàgina ← → del títol, en blanc; 4: fletxa ← davant d'un text, p.ex.
+                    //  "←UNDO" a F-PLN). Els altres símbols prenen el color del text que tenen al costat (←UNDO àmbar,
+                    //  [M] blau); sense text al costat, blau.
+                    if (s.Col[row, col] == 's')
+                    {
+                        if (ch is '2' or '3') color = ColorOf('w');
+                        else color = ColorOf(NeighbourColor(s, row, col) ?? 'b');
+                        // (0: fletxa ← davant de les SID/STAR, p.ex. "←NO SID" a DEPARTURE)
+                        // (1: fletxa → darrere d'un text, p.ex. "ABEAM PTS→" a DIR TO)
+                        ch = ch switch { 'A' => '[', 'B' => ']', '0' => '←', '1' => '→', '2' => '←', '3' => '→', '4' => '←', _ => ch };
+                    }
+                    // la lletra s'estreny si cal perquè hi càpiga a l'amplada de la columna
+                    var f = sm ? small : big;
+                    var sz = g.MeasureString(ch.ToString(), f, PointF.Empty, sf);
+                    float sx = Math.Min(0.84f, sz.Width > 0 ? cw * 0.92f / sz.Width : 1f);
+                    var st2 = g.Save();
+                    g.TranslateTransform(cell.X + cw / 2, cell.Y + rh / 2 + (sm ? rh * 0.06f : 0));
+                    g.ScaleTransform(sx, 1f);
+                    if (ch == 'Q')
+                    {
+                        // Q com la del ToLiss: una O amb un traç curt en diagonal a baix a la dreta (la de Consolas
+                        // té una cua que baixa per sota de la línia)
+                        using (var b = new SolidBrush(color)) g.DrawString("O", f, b, 0, 0, sf);
+                        float em = f.Size;
+                        using var qp = new Pen(color, em * (sm ? 0.09f : 0.12f)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                        // el traç va sobretot per dins de la O i a penes en surt, a baix a la dreta
+                        g.DrawLine(qp, em * 0.03f, em * 0.05f, em * 0.25f, em * 0.29f);
+                    }
+                    else
+                        using (var b = new SolidBrush(color)) g.DrawString(ch.ToString(), f, b, 0, 0, sf);
+                    g.Restore(st2);
+                }
+            // fletxes de la cantonada de baix a la dreta (pàgines amb més línies), en blanc i petites. VertSlewKeys
+            // (comprovat al ToLiss): 1 ↑↓ (F-PLN), 2 només ↑ (DEPARTURE); 3 = només ↓ (suposat, no vist encara)
+            if (s.VertSlew != 0)
+            {
+                var wb = ColorOf('w');
+                var arrows = s.VertSlew switch
+                {
+                    2 => new[] { ('↑', 23) },
+                    3 => new[] { ('↓', 23) },
+                    _ => new[] { ('↑', 22), ('↓', 23) },
+                };
+                foreach (var (ch, col) in arrows)
+                {
+                    var cell = new RectangleF(r.X + col * cw, r.Y + 13 * rh, cw, rh);
+                    var sz = g.MeasureString(ch.ToString(), small, PointF.Empty, sf);
+                    float sx = Math.Min(0.84f, sz.Width > 0 ? cw * 0.92f / sz.Width : 1f);
+                    var st2 = g.Save();
+                    g.TranslateTransform(cell.X + cw / 2, cell.Y + rh / 2 + rh * 0.06f);
+                    g.ScaleTransform(sx, 1f);
+                    using (var b = new SolidBrush(wb)) g.DrawString(ch.ToString(), small, b, 0, 0, sf);
+                    g.Restore(st2);
+                }
+            }
+            g.Restore(st);
         }
     }
 
