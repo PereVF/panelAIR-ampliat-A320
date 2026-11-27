@@ -507,9 +507,11 @@ namespace SimConnect3
                         tot++;
                         // cel: blau amb poc verd (el cian dels símbols del ND no hi compta);
                         // terra: marró fosc (l'ambre dels textos no hi compta)
-                        if (bl > rd + 50 && bl > 100 && gr < bl - 40) sky++;
-                        else if (rd > bl + 40 && rd > 60 && rd < 190 && gr > 30 && gr < rd * 0.75) ground++;
-                        if (rd + gr + bl > 150) lit++;
+                        // (per proporcions, no per intensitat: amb la pantalla poc brillant (p.ex. l'ISIS enfosquit: cel
+                        //  20,52,76 i terra 35,24,11, mesurat) els colors són molt foscos però mantenen el to)
+                        if (bl >= 40 && bl > rd * 2 && bl > gr * 1.2f) sky++;
+                        else if (rd >= 25 && rd < 190 && rd > bl * 2 && gr > bl && gr < rd * 0.85f) ground++;
+                        if (rd + gr + bl > 150 || (rd + gr + bl > 40 && (bl > rd * 2 || rd > bl * 2))) lit++;   // (també el cel / terra foscos)
                     }
                     if ((rd + gr + bl) / 3 > 110) { if (++run > maxRun) maxRun = run; } else run = 0;
                 }

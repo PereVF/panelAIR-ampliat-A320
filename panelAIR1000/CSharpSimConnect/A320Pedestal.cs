@@ -541,14 +541,23 @@ namespace panelAIR1000
             Pp(272, 1966, 797, 2330, null, null, Y(2015, 2290), Y(2030, 2290));   // SPEED BRAKE: estrelles grans
             Lb("SPEED", 443, 2143, 14f); Lb("BRAKE", 443, 2167, 14f);
             _silk.Add(new OhBoxLabel("GND SPLRS ARMED", 668 * k, 1993 * k, 9f, Oh.Silk));
-            Wl(610, 2258, 622, 2258, 622, 2030); Wl(610, 2105, 622, 2105); Wl(610, 2159, 622, 2159); Wl(610, 2210, 622, 2210);
-            Wl(734, 2258, 722, 2258, 722, 2030); Wl(734, 2105, 722, 2105); Wl(734, 2159, 722, 2159); Wl(734, 2210, 722, 2210);
-            _silk.Add(new OhArrow(622 * k, 2026 * k, -90, 3.2f, Oh.Silk));
-            _silk.Add(new OhArrow(722 * k, 2026 * k, -90, 3.2f, Oh.Silk));
-            Lb("RET", 585, 2066, 11f); Lb("RET", 760, 2066, 11f);
-            Lb("1/2", 585, 2159, 11f); Lb("1/2", 760, 2159, 11f);
-            Lb("FULL", 578, 2258, 11f); Lb("FULL", 766, 2258, 11f);
-            Add(new OhSpeedBrake("PED_SPEEDBRAKE", 672 * k, 2015 * k, 2290 * k, 17 * k, 1925 * k, 2232 * k, 120 * k, 92 * k));
+            // serigrafia com a la foto de Pere: fletxa just sota el rètol; la línia baixa arran de la ranura, a RET fa un graó cap
+            // enfora i continua fins a FULL, on acaba en L cap a la ranura. Ratlles cap a dins: RET/4, 1/2 (més llarga), 3/4.
+            // RET i FULL cauen just al centre del coll dins la hucha (forat de la goma) amb el pom al límit de dalt / de baix.
+            const float sbY0 = 1970, sbY1 = 2170, sbEntry = 76.2f;   // centre del forat de la goma = centre del pom + 76,2
+            float yRet = sbY0 + sbEntry, yFull = sbY1 + sbEntry, yHalf = (yRet + yFull) / 2;
+            foreach (int sg in new[] { -1, 1 })
+            {
+                float X(float d) => 672 + sg * d;                 // d = distància al centre de la ranura
+                Wl(X(40), 2010, X(40), yRet, X(45), yRet, X(45), yFull, X(31), yFull);
+                Wl(X(45), yHalf, X(32), yHalf);
+                Wl(X(45), (yRet + yHalf) / 2, X(36), (yRet + yHalf) / 2);
+                Wl(X(45), (yHalf + yFull) / 2, X(36), (yHalf + yFull) / 2);
+                _silk.Add(new OhArrow(X(40) * k, 2008 * k, -90, 3.2f, Oh.Silk));
+                Lb("RET", X(70), yRet, 11f); Lb("1/2", X(65), yHalf, 11f); Lb("FULL", X(71), yFull, 11f);
+            }
+            // pom quadrat (92 × 92); a RET tapa el rètol GND SPLRS ARMED i el tronc entra a la ranura just a dalt (com a la captura)
+            Add(new OhSpeedBrake("PED_SPEEDBRAKE", 672 * k, 2015 * k, 2290 * k, 26 * k, sbY0 * k, sbY1 * k, 92 * k, 92 * k));   // ranura més ampla (26); límits superior (RET) i inferior (FULL) fixats per Pere 2026-11-27
 
             // ═══════════════ RUD TRIM i PARKING BRK ═══════════════
             Pp(810, 1970, 1145, 2750, Y(2018, 2715), Y(2018, 2715));
@@ -1448,24 +1457,33 @@ namespace panelAIR1000
             Id = id; _cx = cx; _top = slotTop; _bot = slotBot; _hw = slotHalfW; _y0 = gripY0; _y1 = gripY1; _gw = gripW; _gh = gripH;
             Bounds = RectangleF.FromLTRB(cx - gripW / 2 - 2, gripY0 - gripH / 2 - 2, cx + gripW / 2 + 2, Math.Max(slotBot, gripY1 + gripH / 2) + 2);
         }
-        public override RectangleF DirtyBounds => RectangleF.Inflate(Bounds, 8, 10);
+        // (de costat només 2: si no, en repintar el pom es menjava un tros dels rètols RET / 1/2 / FULL de la dreta)
+        public override RectangleF DirtyBounds => RectangleF.Inflate(Bounds, 2, 12);
         float Y(float p) => _y0 + (_y1 - _y0) * p;
         RectangleF Grip(float p) => new(_cx - _gw / 2, Y(p) - _gh / 2, _gw, _gh);
         public override int State => (int)Math.Round(Pos * 100);
         public override bool Animating => Math.Abs(_arm - (Armed ? 1 : 0)) > 0.001f;
         public override void Tick(float dt) => _arm = Approach(_arm, Armed ? 1 : 0, dt * 8f);
-        public bool Grabbing => _grab;
+        // tota l'àrea del recorregut és de la palanca: un toc-i-arrossegar a qualsevol lloc d'aquesta àrea no mou el pedestal
+        public bool Grabbing => _grab || _hold;
+        bool _hold; float _holdY;
+        /// <summary>(només per a renders de prova) no dibuixa l'anell blanc.</summary>
+        internal static bool HideRing;
 
         public override void PressStart(PointF p)
         {
             _grab = RectangleF.Inflate(Grip(Pos), 4, 4).Contains(p);
+            _hold = !_grab && Bounds.Contains(p); _holdY = p.Y;
             _moved = false; _grabDy = p.Y - Y(Pos); _startPos = Pos;
         }
         public void DragTo(PointF p)
         {
+            // (fora del pom però dins l'àrea) no mou res; si el dit es desplaça, ja no compta com a toc
+            if (_hold) { if (Math.Abs(p.Y - _holdY) > 3f) _moved = true; return; }
             if (!_grab) return;
             float v = Math.Clamp((p.Y - _grabDy - _y0) / (_y1 - _y0), 0f, 1f);
-            if (!_moved && Math.Abs(v - _startPos) < 0.03f) return;
+            // zona morta petita (com el FLAPS, 3 unitats): abans era un 3% del recorregut i els moviments curts no comptaven
+            if (!_moved && Math.Abs(v - _startPos) * (_y1 - _y0) < 3f) return;
             _moved = true;
             if (Math.Abs(v - Pos) < 0.002f) return;
             Pos = v;
@@ -1476,11 +1494,11 @@ namespace panelAIR1000
         void Send() { _lastSend = OhThrottle.Now; Owner.RaiseCommand(Id, "POS:" + Pos.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)); }
         public override void PressEnd()
         {
+            _hold = false;
             if (!_grab) return;
             _grab = false;
             if (!_moved) return;
-            // a prop d'una marca (RET, 1/2, FULL) s'hi queda enganxada
-            foreach (float d in new[] { 0f, 0.5f, 1f }) if (Math.Abs(Pos - d) < 0.05f) Pos = d;
+            // palanca contínua: es queda exactament on la deixes (sense enganxar-se a RET / 1/2 / FULL)
             Send(); Changed();
         }
         public override void Tap(PointF p)
@@ -1501,49 +1519,178 @@ namespace panelAIR1000
 
         public override void Draw(Graphics g)
         {
-            // ranura fosca
+            // ranura (com a la captura del Fenix): fosca, amb textura, vores amb relleu i una regata central més fosca per
+            // on baixa la tija (sembla que la tija hi entra)
             var slot = new RectangleF(_cx - _hw, _top, _hw * 2, _bot - _top);
             using (var sp = Oh.RoundRect(slot, _hw * 0.8f))
             {
                 using (var sb = new LinearGradientBrush(new RectangleF(slot.X - 0.01f, 0, slot.Width + 0.02f, 1), Color.Black, Color.Black, 0f)
-                { InterpolationColors = new ColorBlend { Colors = new[] { Color.FromArgb(8, 9, 10), Color.FromArgb(40, 42, 46), Color.FromArgb(10, 11, 12) }, Positions = new[] { 0f, 0.5f, 1f } } })
+                { InterpolationColors = new ColorBlend { Colors = new[] { Color.FromArgb(10, 11, 12), Color.FromArgb(46, 48, 50), Color.FromArgb(30, 31, 33), Color.FromArgb(46, 48, 50), Color.FromArgb(10, 11, 12) }, Positions = new[] { 0f, 0.22f, 0.5f, 0.78f, 1f } } })
                     g.FillPath(sb, sp);
+                // textura: ratlletes horitzontals molt suaus (com el raspallat de la captura)
+                using (var tx = new Pen(Color.FromArgb(28, 0, 0, 0), 0.5f))
+                    for (float ty = slot.Y + 2f; ty < slot.Bottom - 2f; ty += 1.6f)
+                        g.DrawLine(tx, slot.X + _hw * 0.25f, ty, slot.Right - _hw * 0.25f, ty + 0.4f);
+                // regata central
+                var groove = RectangleF.FromLTRB(_cx - _hw * 0.25f, slot.Y + _hw * 0.5f, _cx + _hw * 0.25f, slot.Bottom - _hw * 0.5f);   // (la mateixa amplada que abans)
+                using (var gp0 = Oh.RoundRect(groove, _hw * 0.35f))
+                using (var gb0 = new LinearGradientBrush(new RectangleF(groove.X - 0.01f, 0, groove.Width + 0.02f, 1), Color.Black, Color.Black, 0f)
+                { InterpolationColors = new ColorBlend { Colors = new[] { Color.FromArgb(4, 4, 5), Color.FromArgb(4, 4, 5), Color.FromArgb(4, 4, 5) }, Positions = new[] { 0f, 0.5f, 1f } } })
+                    g.FillPath(gb0, gp0);   // tan fosca com el forat de la goma
                 using (var lip = new Pen(Color.FromArgb(120, Oh.PlateHi), 0.6f)) { var st0 = g.Save(); g.TranslateTransform(0.5f, 0.5f); g.DrawPath(lip, sp); g.Restore(st0); }
                 using (var ep = new Pen(Color.FromArgb(220, 8, 10, 12), 0.8f)) g.DrawPath(ep, sp);
             }
-            float gy = Y(Pos), lift = _arm * _gh * 0.08f;
+            // armat (GND SPLRS ARMED): el pom puja una mica
+            float lift = _arm * _gh * 0.1f;
             var grip = Grip(Pos); grip.Offset(0, -lift);
-            // tija: de sota el pom cap avall, dins la ranura
-            float stemTop = grip.Bottom - _gh * 0.2f, stemBot = Math.Min(_bot - _hw * 0.6f, gy + _gh * 1.9f);
-            if (stemBot > stemTop)
+            // coll: exactament com el del FLAPS (fosc, arrodonit), el doble de llarg per sota del pom
+            var stem = new RectangleF(_cx - _gw * 0.16f, grip.Y + _gh * 0.6f, _gw * 0.32f, _gh * 0.84f + lift);
+            float shw = stem.Width / 2f;
+            // on el coll entra a la ranura, la goma s'obre (es deforma) al seu voltant; la deformació va amb el coll
+            float entryY = stem.Bottom - shw * 0.7f;
+            var lens = new RectangleF(_cx - shw * 1.3f, entryY - shw * 1.5f, shw * 2.6f, shw * 3.0f);
+            // (la goma és dins la ranura: la deformació no en surt; i a la regata interior no hi ha goma: allà el cercle es
+            //  trenca i es veu el coll que hi baixa)
+            var slotPath = Oh.RoundRect(slot, _hw * 0.8f);
+            var grooveR = RectangleF.FromLTRB(_cx - _hw * 0.25f, slot.Y, _cx + _hw * 0.25f, slot.Bottom);
+            // contorn de la goma oberta, a cada costat de la regata: vora vertical de la goma (a tocar de la regata) → acord
+            // arrodonit → arc del cercle → acord → vora vertical. L'acord fa que la goma, rígida, ja s'obri abans d'arribar
+            // al cercle (sense cantonada viva)
+            float ecx = _cx, ecy = lens.Y + lens.Height / 2f, gwh = _hw * 0.25f, fr = gwh * 2f * 0.45f;
+            List<PointF> Side(float a, float b, int sg)
             {
-                var stem = new[] { new PointF(_cx - _gw * 0.22f, stemTop), new PointF(_cx + _gw * 0.22f, stemTop), new PointF(_cx + _hw * 1.0f, stemBot), new PointF(_cx - _hw * 1.0f, stemBot) };
-                using (var sh = new SolidBrush(Color.FromArgb(90, 0, 0, 0))) g.FillPolygon(sh, stem.Select(q => new PointF(q.X + _hw * 0.5f, q.Y + 2f)).ToArray());
-                using (var sb = new LinearGradientBrush(new RectangleF(_cx - _gw * 0.22f - 0.01f, 0, _gw * 0.44f + 0.02f, 1), Color.Black, Color.Black, 0f)
-                { InterpolationColors = new ColorBlend { Colors = new[] { Color.FromArgb(14, 15, 17), Color.FromArgb(70, 73, 78), Color.FromArgb(24, 25, 28), Color.FromArgb(8, 8, 9) }, Positions = new[] { 0f, 0.35f, 0.7f, 1f } } })
-                    g.FillPolygon(sb, stem);
-                // anella clara (collar) just sota el pom
-                var col = new RectangleF(_cx - _gw * 0.2f, stemTop + _gh * 0.18f, _gw * 0.4f, _gh * 0.12f);
-                using (var cb = new LinearGradientBrush(new RectangleF(col.X - 0.01f, 0, col.Width + 0.02f, 1), Color.FromArgb(150, 154, 160), Color.FromArgb(240, 242, 244), 0f)) g.FillEllipse(cb, col);
+                var pts = new List<PointF>();
+                if (gwh >= a * 0.98f) return pts;
+                float ti = MathF.Acos(gwh / a);                       // angle on el cercle toca la vora de la regata
+                PointF E(float t) => new(ecx + sg * a * MathF.Cos(t), ecy + b * MathF.Sin(t));
+                float sp = MathF.Sqrt(a * a * MathF.Sin(ti) * MathF.Sin(ti) + b * b * MathF.Cos(ti) * MathF.Cos(ti));
+                float dt = Math.Min(fr / Math.Max(sp, 0.01f), ti * 0.8f);
+                void Fillet(PointF p0, PointF c, PointF p1)
+                { for (int i = 0; i <= 8; i++) { float u = i / 8f, v = 1 - u; pts.Add(new PointF(v * v * p0.X + 2 * u * v * c.X + u * u * p1.X, v * v * p0.Y + 2 * u * v * c.Y + u * u * p1.Y)); } }
+                var cTop = E(-ti); var cBot = E(ti);
+                Fillet(new PointF(cTop.X, cTop.Y - fr), cTop, E(-ti + dt));
+                for (int i = 1; i < 24; i++) { float t = -ti + dt + (2 * (ti - dt)) * i / 24f; pts.Add(E(t)); }
+                Fillet(E(ti - dt), cBot, new PointF(cBot.X, cBot.Y + fr));
+                return pts;
             }
-            // pom: bloc negre amb la cara de dalt més clara
-            using var gp = Oh.RoundRect(grip, _gw * 0.12f);
-            Oh.SoftShadow(g, gp, _gw * 0.04f, _gh * (0.08f + 0.1f * _arm), _gw * 0.08f, 160);
-            using (var gb = new LinearGradientBrush(new RectangleF(grip.X - 0.01f, 0, grip.Width + 0.02f, 1), Color.Black, Color.Black, 0f)
+            void Run(Pen pen, List<PointF> pts, Func<PointF, bool> keep)
             {
-                InterpolationColors = new ColorBlend
+                var run = new List<PointF>();
+                foreach (var q in pts) { if (keep(q)) run.Add(q); else { if (run.Count > 1) g.DrawLines(pen, run.ToArray()); run.Clear(); } }
+                if (run.Count > 1) g.DrawLines(pen, run.ToArray());
+            }
+            float la = lens.Width / 2f, lb2 = lens.Height / 2f;
+            var sR = Side(la, lb2, 1); var sL = Side(la, lb2, -1);
+            var stClip = g.Save();
+            g.SetClip(slotPath, CombineMode.Intersect);
+            g.SetClip(grooveR, CombineMode.Exclude);
+            if (sR.Count > 2)
+            {
+                var hole = new List<PointF>(sR); var rl = new List<PointF>(sL); rl.Reverse(); hole.AddRange(rl);
+                using (var lp = new GraphicsPath())
                 {
-                    Colors = new[] { Color.FromArgb(20, 21, 23), Color.FromArgb(70, 73, 78), Color.FromArgb(108, 112, 118), Color.FromArgb(46, 48, 52), Color.FromArgb(12, 12, 14) },
-                    Positions = new[] { 0f, 0.25f, 0.42f, 0.7f, 1f }
+                    lp.AddPolygon(hole.ToArray());
+                    // forat: tot negre, com la regata estreta del mig
+                    using (var lb = new SolidBrush(Color.FromArgb(4, 4, 5))) g.FillPath(lb, lp);
                 }
-            }) g.FillPath(gb, gp);
-            var top = new RectangleF(grip.X + _gw * 0.06f, grip.Y + _gh * 0.05f, grip.Width - _gw * 0.12f, _gh * 0.34f);
-            using (var tp = Oh.RoundRect(top, _gw * 0.08f))
-            using (var tb = new LinearGradientBrush(new RectangleF(top.X, top.Y - 0.01f, top.Width, top.Height + 0.02f), Color.FromArgb(120 + (int)(40 * _arm), 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 90f)) g.FillPath(tb, tp);
-            using (var pe = new Pen(Color.FromArgb(220, 4, 4, 5), 0.7f)) g.DrawPath(pe, gp);
+                // vora de la goma bombada (clara a dalt, on rep llum)
+                using (var rp = new Pen(Color.FromArgb(150, 92, 96, 102), shw * 0.18f) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round })
+                { Run(rp, sR, q => q.Y <= ecy - lb2 * 0.34f); Run(rp, sL, q => q.Y <= ecy - lb2 * 0.34f); }
+                using (var rp2 = new Pen(Color.FromArgb(200, 8, 8, 9), shw * 0.12f) { LineJoin = LineJoin.Round })
+                { g.DrawLines(rp2, sR.ToArray()); g.DrawLines(rp2, sL.ToArray()); }
+            }
+            g.Restore(stClip);
+            // coll: a baix no acaba tallat recte, acaba arrodonit (mitja el·lipse amb la proporció del forat de la goma);
+            // la part de baix s'enfosqueix dins el forat
+            float sry = shw * lb2 / la;
+            using (var stp = new GraphicsPath())
+            {
+                float rr = _gw * 0.14f;
+                stp.AddArc(stem.X, stem.Y, rr * 2, rr * 2, 180, 90);
+                stp.AddArc(stem.Right - rr * 2, stem.Y, rr * 2, rr * 2, 270, 90);
+                stp.AddArc(new RectangleF(stem.X, entryY - sry, stem.Width, sry * 2), 0, 180);   // final arrodonit
+                stp.CloseFigure();
+                using (var stb = new LinearGradientBrush(new RectangleF(stem.X - 0.01f, 0, stem.Width + 0.02f, 1), Color.FromArgb(10, 10, 12), Color.FromArgb(50, 52, 56), 0f)) g.FillPath(stb, stp);
+                var fade = RectangleF.FromLTRB(stem.X - 0.3f, entryY - shw * 0.6f, stem.Right + 0.3f, entryY + sry + 0.3f);
+                var stF = g.Save();
+                g.SetClip(stp, CombineMode.Intersect);
+                // anell blanc: U suau i simètrica envoltant el coll (vores paral·leles). Desarmat queda gairebé dins el forat
+                // (posició triada per Pere al lliscador: 0,825 del tram base del pom → fons del forat); armat puja amb el pom
+                if (!HideRing)
+                {
+                    float gb0 = grip.Bottom + lift;
+                    float mid = gb0 + 0.825f * (entryY - gb0 + sry) - lift, bh = shw * 0.4f, ud = shw * 0.45f;
+                    float t = mid - bh / 2f;
+                    using var bp = new GraphicsPath();
+                    bp.AddArc(new RectangleF(stem.X, t - ud, stem.Width, ud * 2), 180, -180);        // vora de dalt
+                    bp.AddArc(new RectangleF(stem.X, t + bh - ud, stem.Width, ud * 2), 0, 180);      // vora de baix
+                    bp.CloseFigure();
+                    using var wb = new LinearGradientBrush(new RectangleF(stem.X - 0.01f, 0, stem.Width + 0.02f, 1), Color.Black, Color.Black, 0f)
+                    {
+                        InterpolationColors = new ColorBlend
+                        {
+                            Colors = new[] { Color.FromArgb(150, 150, 150), Color.FromArgb(250, 250, 248), Color.FromArgb(225, 225, 222), Color.FromArgb(120, 120, 120) },
+                            Positions = new[] { 0f, 0.4f, 0.7f, 1f }
+                        }
+                    };
+                    g.FillPath(wb, bp);
+                }
+                // (dins el forat s'enfosqueix tot: coll i anell)
+                using (var fb = new LinearGradientBrush(new RectangleF(fade.X, fade.Y - 0.01f, fade.Width, fade.Height + 0.02f), Color.FromArgb(0, 4, 4, 5), Color.FromArgb(235, 4, 4, 5), 90f))
+                    g.FillRectangle(fb, fade);
+                g.Restore(stF);
+            }
+            var stClip2 = g.Save();
+            g.SetClip(slotPath, CombineMode.Intersect);
+            g.SetClip(grooveR, CombineMode.Exclude);
+            using (var lip = new Pen(Color.FromArgb(220, 40, 42, 45), shw * 0.22f) { LineJoin = LineJoin.Round, StartCap = LineCap.Round, EndCap = LineCap.Round })
+            { Run(lip, sR, q => q.Y >= ecy + lb2 * 0.42f); Run(lip, sL, q => q.Y >= ecy + lb2 * 0.42f); }
+            using (var lipHi = new Pen(Color.FromArgb(120, 110, 114, 120), shw * 0.08f) { LineJoin = LineJoin.Round })
+            {
+                var iR = Side(la - shw * 0.08f, lb2 - shw * 0.08f, 1); var iL = Side(la - shw * 0.08f, lb2 - shw * 0.08f, -1);
+                Run(lipHi, iR, q => q.Y >= ecy + lb2 * 0.64f); Run(lipHi, iL, q => q.Y >= ecy + lb2 * 0.64f);
+            }
+            g.Restore(stClip2);
+            slotPath.Dispose();            // pom arrodonit amb relleu: el mirem des de la part de baix de la pantalla; es veu la cara de dalt (clara) i, a
+            // sota, la cara frontal del bloc (més fosca)
+            float fh = _gh * 0.26f;   // alçada visible de la cara frontal
+            float rad = _gw * 0.2f;   // radi de les cantonades
+            var topF = RectangleF.FromLTRB(grip.X, grip.Y, grip.Right, grip.Bottom - fh);
+            // una mica cònic de dalt a baix (com a la captura): a baix, un 12% més estret
+            float tap = _gw * 0.06f;
+            GraphicsPath Cone(float y0, float y1)
+            {
+                float d0 = tap * (y0 - grip.Y) / _gh, d1 = tap * (y1 - grip.Y) / _gh;
+                var gpth = new GraphicsPath();
+                gpth.AddPolygon(Oh.RoundAll(new[] { new PointF(grip.X + d0, y0), new PointF(grip.Right - d0, y0), new PointF(grip.Right - d1, y1), new PointF(grip.X + d1, y1) }, rad));
+                return gpth;
+            }
+            using (var whole = Cone(grip.Y, grip.Bottom))
+            {
+                // cara frontal (tot el bloc, la cara de dalt hi va a sobre)
+                using (var fb = new LinearGradientBrush(new RectangleF(grip.X, topF.Bottom - rad - 0.01f, grip.Width, fh + rad + 0.02f), Color.FromArgb(36, 38, 41), Color.FromArgb(6, 6, 7), 90f)) g.FillPath(fb, whole);
+                using (var fs = new LinearGradientBrush(new RectangleF(grip.X - 0.01f, 0, grip.Width + 0.02f, 1), Color.Black, Color.Black, 0f)
+                { InterpolationColors = new ColorBlend { Colors = new[] { Color.FromArgb(110, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), Color.FromArgb(130, 0, 0, 0) }, Positions = new[] { 0f, 0.25f, 0.7f, 1f } } })
+                    g.FillPath(fs, whole);
+                using (var pe = new Pen(Color.FromArgb(220, 4, 4, 5), 0.7f)) g.DrawPath(pe, whole);
+            }
+            // cara de dalt
+            using (var tp = Cone(topF.Y, topF.Bottom))
+            {
+                using (var gb = new LinearGradientBrush(new RectangleF(topF.X - 0.01f, 0, topF.Width + 0.02f, 1), Color.Black, Color.Black, 0f)
+                {
+                    InterpolationColors = new ColorBlend
+                    {
+                        Colors = new[] { Color.FromArgb(24, 25, 28), Color.FromArgb(62, 65, 70), Color.FromArgb(92, 96, 102), Color.FromArgb(46, 48, 52), Color.FromArgb(16, 16, 18) },
+                        Positions = new[] { 0f, 0.26f, 0.44f, 0.72f, 1f }
+                    }
+                }) g.FillPath(gb, tp);
+                using (var hb = new LinearGradientBrush(new RectangleF(topF.X, topF.Y - 0.01f, topF.Width, topF.Height + 0.02f), Color.FromArgb(70 + (int)(30 * _arm), 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 90f)) g.FillPath(hb, tp);
+                using (var pe = new Pen(Color.FromArgb(220, 4, 4, 5), 0.7f)) g.DrawPath(pe, tp);
+            }            // aresta entre les dues cares: llum fina
+            using (var ep = new Pen(Color.FromArgb(110, 200, 205, 210), 0.6f)) g.DrawLine(ep, grip.X + rad + tap * 0.7f, topF.Bottom, grip.Right - rad - tap * 0.7f, topF.Bottom);
         }
     }
-
     /// <summary>
     /// FLAPS: palanca dins una guia metàl·lica amb cinc posicions (0, 1, 2, 3, FULL). S'arrossega amb el dit i en deixar-la
     /// s'enganxa a la posició més propera; tocar per sobre / per sota del pom la mou una posició.

@@ -4117,6 +4117,8 @@ namespace panelAIR1000
         [DllImport("gdi32.dll")] static extern bool DeleteObject(IntPtr obj);
         [DllImport("gdi32.dll")] static extern bool BitBlt(IntPtr hdc, int x, int y, int w, int h, IntPtr src, int sx, int sy, uint rop);
         [DllImport("user32.dll")] static extern int ScrollWindowEx(IntPtr hWnd, int dx, int dy, IntPtr scroll, IntPtr clip, IntPtr hrgnUpdate, IntPtr update, uint flags);
+        [StructLayout(LayoutKind.Sequential)] struct WRECT { public int L, T, R, B; }
+        [DllImport("user32.dll")] static extern int ScrollWindowEx(IntPtr hWnd, int dx, int dy, ref WRECT scroll, ref WRECT clip, IntPtr hrgnUpdate, IntPtr update, uint flags);
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool SetProp(IntPtr hWnd, string name, IntPtr data);
         [DllImport("user32.dll")] static extern bool SetWindowFeedbackSetting(IntPtr hwnd, int feedback, uint flags, uint size, ref int config);
         [DllImport("gdi32.dll")] static extern bool StretchBlt(IntPtr hdcDest, int xDest, int yDest, int wDest, int hDest, IntPtr hdcSrc, int xSrc, int ySrc, int wSrc, int hSrc, uint rop);
@@ -4793,7 +4795,9 @@ namespace panelAIR1000
 
         internal void NotifyChanged(OhElement el)
         {
-            Redraw(TopDirty(el));
+            // arrossegant el SPEED BRAKE: només es redibuixa el pom sobre el fons guardat (fluid, sense repintar tota la zona)
+            if (el is OhSpeedBrake sbk && sbk.Grabbing) RedrawFast(el);
+            else Redraw(TopDirty(el));
             if (el.Animating) { _animating.Add(el); StartAnim(); }
             ElementChanged?.Invoke(el.Id, el.State);
         }
@@ -4962,7 +4966,7 @@ namespace panelAIR1000
                 g.DrawImage(_fastBg, px, dst, GraphicsUnit.Pixel);
                 g.CompositingMode = CompositingMode.SourceOver;
                 float sh = CurShift;
-                var lr = RectangleF.FromLTRB(px.Left / _s, px.Top / _s + sh, px.Right / _s, px.Bottom / _s + sh);
+                var lr = RectangleF.FromLTRB(px.Left / _s + CurShiftX, px.Top / _s + sh, px.Right / _s + CurShiftX, px.Bottom / _s + sh);
                 PrepareGraphics(g, _s, px, sh, CurShiftX);
                 bool after = false;
                 foreach (var e in _els)
@@ -4992,7 +4996,10 @@ namespace panelAIR1000
         void DrawContent(Bitmap target, float s, Rectangle px, CancellationToken ct, OhElement? stopAt = null, bool lighting = true)
         {
             float sh = CurShift;
-            var lr = RectangleF.FromLTRB(px.Left / s, px.Top / s + sh, px.Right / s, px.Bottom / s + sh);
+            // (també el desplaçament X de la pàgina: al pedestal, sense això, els elements de la dreta d'una zona repintada
+            //  quedaven fora i el fons els esborrava — ratlletes i rètols de la dreta del SPEED BRAKE)
+            float shx = CurShiftX;
+            var lr = RectangleF.FromLTRB(px.Left / s + shx, px.Top / s + sh, px.Right / s + shx, px.Bottom / s + sh);
             using var g = Graphics.FromImage(target);
             g.SetClip(px);
             g.FillRectangle(Brushes.Black, px);
@@ -5078,7 +5085,7 @@ namespace panelAIR1000
             var zr = Rectangle.Empty;
             foreach (var kz in _knobZones.Keys) { var kr = KnobZonesScreenRect(kz); zr = zr.IsEmpty ? kr : Rectangle.Union(zr, kr); }
             zr = Rectangle.Intersect(clip, zr);
-            if (s_showAreas) zr = clip;   // amb totes les zones a la vista, tot el que es repinta es compon (sense tremolor)
+            if (s_showAreas && !_areasHeld) zr = clip;   // amb totes les zones a la vista, tot el que es repinta es compon (sense tremolor)
             if (zr.Width > 0 && zr.Height > 0 && ov.IntersectsWith(zr)) zr = Rectangle.Union(zr, ov);   // (rar: tot junt)
 
 // botons del dit (àrees) i ⚙ (pantalla AUX): transparents, a sobre de tot (també de l'overhead i del pedestal,
@@ -5532,9 +5539,21 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
         }
 
         /// <summary>Ressalta en taronja les zones clicables dels elements (si el botó "mostrar àrees" està actiu).</summary>
-        void DrawHitAreas(Graphics g, Rectangle clip)
+        // Mentre la capa es desplaça amb les àrees a la vista, no es dibuixen (repintar-les a cada pas fa tremolar tot):
+        // tornen a sortir 1 s després de l'últim moviment.
+        bool _areasHeld;
+        double _areasHoldUntil;
+        void HoldAreasWhileMoving()
         {
             if (!s_showAreas) return;
+            _areasHoldUntil = _clock.Elapsed.TotalSeconds + 1.0;
+            if (!_areasHeld) { _areasHeld = true; Invalidate(); }
+            StartAnim();
+        }
+
+        void DrawHitAreas(Graphics g, Rectangle clip)
+        {
+            if (!s_showAreas || _areasHeld) return;
             // mateix estil que les zones dels rotatius en tocar-los (perímetre blanc arrodonit, farciment blanc suau, + / −)
             var oldMode = g.SmoothingMode;
             g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -5709,6 +5728,7 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
             }
 
             bool zonesActive = TickKnobZones();
+            if (_areasHeld && _clock.Elapsed.TotalSeconds >= _areasHoldUntil) { _areasHeld = false; Invalidate(); }
             bool barPending = _barHideAt != DateTime.MinValue;
             if (barPending && DateTime.UtcNow >= _barHideAt)
             {
@@ -5717,7 +5737,7 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
                 Invalidate(new Rectangle(Width - Math.Max(6, Width / 320) - 6, 0, Math.Max(6, Width / 320) + 6, Height));
             }
 
-            if (_animating.Count == 0 && _tests.Count == 0 && _flingV == 0 && !barPending && !zonesActive && !_hasPendingScroll && !_down && !_closing && !_opening)
+            if (_animating.Count == 0 && _tests.Count == 0 && _flingV == 0 && !barPending && !zonesActive && !_areasHeld && !_hasPendingScroll && !_down && !_closing && !_opening)
                 _anim.Stop();
         }
 
@@ -5731,6 +5751,7 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
             ClampScroll();
             int d = old - _scrollY;
             if (d == 0) return;
+            HoldAreasWhileMoving();
             _barHideAt = DateTime.UtcNow.AddSeconds(1.0);
             StartAnim();
             if (IsHandleCreated && Math.Abs(d) < Height)
@@ -5738,7 +5759,22 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
                 // Primer es buida qualsevol repintat pendent (perquè no quedi desplaçat a mitges), després
                 // Windows mou els píxels que ja són a pantalla i només cal pintar la franja nova.
                 Update();
-                ScrollWindowEx(Handle, 0, d, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, SW_INVALIDATE);
+                // (capes: la columna del botó del dit i del ⚙ no es desplaça mai: es repinta sencera i composta, de manera
+                //  que els botons no tremolen; la resta, a l'esquerra i a la dreta, la mou Windows)
+                if (_isOverlay && !_isMcduMod && Parent is A320OverheadControl cm0)
+                {
+                    var c0 = Rectangle.Union(cm0.AreasRect, cm0.AuxRect);
+                    int sl = Math.Max(0, c0.X - 8), sr = Math.Min(Width, c0.Right + 8);
+                    foreach (var part in new[] { new WRECT { L = 0, T = 0, R = sl, B = Height }, new WRECT { L = sr, T = 0, R = Width, B = Height } })
+                    {
+                        if (part.R <= part.L) continue;
+                        var p1 = part; var p2 = part;
+                        ScrollWindowEx(Handle, 0, d, ref p1, ref p2, IntPtr.Zero, IntPtr.Zero, SW_INVALIDATE);
+                    }
+                    Invalidate(Rectangle.FromLTRB(sl, 0, sr, Height));
+                }
+                else
+                    ScrollWindowEx(Handle, 0, d, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, SW_INVALIDATE);
                 int bw = Math.Max(6, Width / 320) + 6;
                 Invalidate(new Rectangle(Width - bw, 0, bw, Height)); // la barreta de posició es redibuixa sencera
                 // Els botons no es desplacen amb el panell: es repinten al seu lloc i també on Windows n'ha
@@ -5748,12 +5784,6 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
                 if (!_isOverlay)
                     foreach (var zr in new[] { AllBtnsRect })
                         Invalidate(new Rectangle(zr.X - 3, 0, zr.Width + 6, Height));
-                // (capes: el botó del dit i el ⚙ del panell principal, que dibuixen elles)
-                if (_isOverlay && !_isMcduMod && Parent is A320OverheadControl sm)
-                {
-                    var cr = Rectangle.Union(sm.AreasRect, sm.AuxRect);
-                    Invalidate(new Rectangle(cr.X - 8, 0, cr.Width + 16, Height));
-                }
             }
             else Invalidate();
             if (_isOverlay) UpdateOverlayRegion();

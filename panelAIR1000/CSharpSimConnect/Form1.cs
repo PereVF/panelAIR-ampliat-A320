@@ -90,6 +90,38 @@ namespace SimConnect3
         // de fullscreen natiu 1:1 sobre una pantalla 4K real. Decidit a Program.cs abans de
         // construir frmMain (necessari perquè el constructor fa servir screen4K de seguida).
         internal static bool IsDemoMode = false;
+        /// <summary>Argument amb què l'app es torna a obrir en mode complet en detectar un A320 (provisional).</summary>
+        internal const string A320FullArg = "--a320-full";
+        /// <summary>L'app s'ha obert en mode complet perquè en DEMO s'havia detectat un A320 (provisional).</summary>
+        internal static bool A320ForcedFull;
+        private bool _leavingDemo;
+        private Form? _trialCountdownForm;   // compte enrere de 10 minuts (verificació fallida)
+
+        /// <summary>
+        /// PROVISIONAL (2026-11-27, Pere): en mode DEMO, si es detecta un A320 (FlyByWire, Fenix o ToLiss), l'app es torna
+        /// a obrir sola en mode complet (pantalla 4K, sense límit de temps). Només si hi ha una pantalla 4K (el mode complet
+        /// la necessita).
+        /// </summary>
+        private void MaybeLeaveDemoForA320()
+        {
+            // mode complet amb la verificació fallida (sense RotAIR, etc.): s'atura el compte enrere de 10 minuts
+            if (trialBgTimer != null)
+            {
+                try { trialBgTimer.Dispose(); } catch { }
+                trialBgTimer = null;
+                try { if (_trialCountdownForm != null && !_trialCountdownForm.IsDisposed) _trialCountdownForm.Close(); } catch { }
+                _trialCountdownForm = null;
+            }
+            if (!IsDemoMode || _leavingDemo) return;
+            if (!Screen.AllScreens.Any(sc => sc.Bounds.Width == 3840 && sc.Bounds.Height == 2160)) return;
+            _leavingDemo = true;
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(Application.ExecutablePath, A320FullArg) { UseShellExecute = false });
+                BeginInvoke(new Action(() => { try { Application.Exit(); } catch { Environment.Exit(0); } }));
+            }
+            catch { _leavingDemo = false; }
+        }
         private System.Threading.Timer? _demoTimer;
         private DateTime _demoStartTime;
 
@@ -4935,7 +4967,8 @@ namespace SimConnect3
                 // mateix hardware físic en 3 PC's diferents). XMI3446 ("Mi Monitor") NO és el panell
                 // panelAIR — és un monitor normal que Pere té al seu escriptori, no relacionat.
                 using (var searcher = new System.Management.ManagementObjectSearcher(
-                    @"SELECT * FROM Win32_PnPEntity WHERE DeviceID LIKE '%RTK2775%' AND ConfigManagerErrorCode = 0"))
+                    // (2026-11-27, Pere: també RTK1B1A, "RTK UHD HDR", un altre model de pantalla del panell)
+                    @"SELECT * FROM Win32_PnPEntity WHERE (DeviceID LIKE '%RTK2775%' OR DeviceID LIKE '%RTK1B1A%') AND ConfigManagerErrorCode = 0"))
                 {
                     hasMonitor = searcher.Get().Count > 0;
                 }
@@ -4952,7 +4985,8 @@ namespace SimConnect3
                     }
                 }
 
-                if (!hasPanel || !hasMonitor || !hasRotAIR)
+                // (provisional: oberta en mode complet per un A320 detectat en DEMO, no es verifica el maquinari)
+                if (!A320ForcedFull && (!hasPanel || !hasMonitor || !hasRotAIR))
                 {
                     var screen4K = Screen.AllScreens.FirstOrDefault(s => !s.Primary && s.Bounds.Width == 3840 && s.Bounds.Height == 2160)
                         ?? Screen.AllScreens.First(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
@@ -5081,6 +5115,7 @@ namespace SimConnect3
                     };
                     countdownForm.Controls.Add(label);
                     countdownForm.Show();   // no-modal: l'app principal continua inicialitzant-se
+                    _trialCountdownForm = countdownForm;
 
                     var startTime = DateTime.Now;
                     int totalSeconds = 600;
@@ -5310,6 +5345,7 @@ namespace SimConnect3
             _xp = new XPlaneLink();
             _xp.A320Changed += on =>
             {
+                if (on) MaybeLeaveDemoForA320();   // (provisional) DEMO → mode complet
                 if (on) SetA320Active(true);
                 else if (!IsA320Msfs()) SetA320Active(false);
             };
@@ -9274,6 +9310,7 @@ namespace SimConnect3
                 // es deixa (i la lògica TBM/G1000 de sota tria el cockpit que toca). Va primer perquè la
                 // condició TBM depèn de _a320Active.
                 bool isA320Now = IsA320Msfs();   // FlyByWire o Fenix
+                if (isA320Now) MaybeLeaveDemoForA320();   // (provisional) DEMO → mode complet
                 if (isA320Now != wasA320 && _a320Active != isA320Now && !calibrationMode)
                     SetA320Active(isA320Now);
                 bool isTBM930Now = IsTBM930();
