@@ -832,7 +832,34 @@ namespace SimConnect3
         const int GWL_STYLE = -16;
         const long WS_POPUP = 0x80000000L, WS_FRAME = 0x00CF0000L;   // WS_OVERLAPPEDWINDOW: títol, vores, botons
         const uint SWP_NOACTIVATE = 0x0010, SWP_FRAMECHANGED = 0x0020, SWP_SHOWWINDOW = 0x0040;
+        // (asíncron: l'app no s'espera que el simulador respongui; si el simulador està penjat, l'app no es penja amb ell)
+        const uint SWP_ASYNCWINDOWPOS = 0x4000;
         const uint GW_HWNDPREV = 3;
+        const int GWL_EXSTYLE = -20;
+        const long WS_EX_NOACTIVATE = 0x08000000L;
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool IsHungAppWindow(IntPtr h);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr SendMessageTimeout(IntPtr h, uint msg, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
+        [System.Runtime.InteropServices.DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+        static readonly Dictionary<IntPtr, long> s_noReplyUntil = new();
+        static readonly HashSet<IntPtr> s_placed = new();
+
+        /// <summary>
+        /// La finestra (d'un altre procés) respon? Si el simulador té el fil de les finestres penjat, qualsevol crida que
+        /// l'hagi d'esperar (canviar l'estil, capturar-la) penjaria també l'app. Es pregunta amb un missatge buit i un
+        /// límit de 100 ms; si no respon, durant 2 s ni es torna a provar.
+        /// </summary>
+        static bool Responds(IntPtr h)
+        {
+            long now = Environment.TickCount64;
+            if (s_noReplyUntil.TryGetValue(h, out long until) && now < until) return false;
+            const uint SMTO_ABORTIFHUNG = 0x0002;
+            bool ok = !IsHungAppWindow(h) && SendMessageTimeout(h, 0 /* WM_NULL */, IntPtr.Zero, IntPtr.Zero, SMTO_ABORTIFHUNG, 100, out _) != IntPtr.Zero;
+            if (ok) s_noReplyUntil.Remove(h); else s_noReplyUntil[h] = now + 2000;
+            return ok;
+        }
+
+        /// <summary>true si la finestra que té el focus és una de les pop-out que l'app ha col·locat als forats.</summary>
+        public static bool ForegroundIsPlaced() { var f = GetForegroundWindow(); return f != IntPtr.Zero && s_placed.Contains(f); }
 
         // Llista de processos: buscar-la (GetProcessesByName) és lent (desenes de ms) i abans es feia per a cada títol
         // cada segon, cosa que aturava l'app uns 300 ms; ara es reaprofita durant 3 s.
@@ -912,6 +939,7 @@ namespace SimConnect3
         public static System.Drawing.Bitmap? Capture(IntPtr h)
         {
             if (!GetWindowRect(h, out var r)) return null;
+            if (!Responds(h)) return null;   // (PrintWindow s'esperaria fins que el simulador respongués)
             int w = r.R - r.L, hh = r.B - r.T;
             if (w < 50 || hh < 50) return null;
             var b = new System.Drawing.Bitmap(w, hh, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
@@ -933,6 +961,11 @@ namespace SimConnect3
         /// </summary>
         public static void Place(IntPtr h, System.Drawing.Rectangle screen, IntPtr behind)
         {
+            if (!Responds(h)) return;   // simulador penjat: no es toca (l'app no s'hi ha de quedar esperant)
+            s_placed.Add(h);
+            // la pop-out no ha d'agafar mai el focus (un toc a un forat de l'app cau a la finestra de sota)
+            long ex = GetWindowLongPtr(h, GWL_EXSTYLE).ToInt64();
+            if ((ex & WS_EX_NOACTIVATE) == 0) SetWindowLongPtr(h, GWL_EXSTYLE, new IntPtr(ex | WS_EX_NOACTIVATE));
             long style = GetWindowLongPtr(h, GWL_STYLE).ToInt64();
             bool framed = (style & WS_FRAME) != 0;
             // Hi ha finestres a les quals algú (el simulador o una altra eina) torna a posar el marc just després de
@@ -949,7 +982,7 @@ namespace SimConnect3
                 var want = System.Drawing.Rectangle.FromLTRB(screen.Left - dl, screen.Top - dt, screen.Right + dr, screen.Bottom + db);
                 bool ok = wr.L == want.Left && wr.T == want.Top && wr.R == want.Right && wr.B == want.Bottom;
                 if (!ok || GetWindow(h, GW_HWNDPREV) != behind)
-                    SetWindowPos(h, behind, want.X, want.Y, want.Width, want.Height, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+                    SetWindowPos(h, behind, want.X, want.Y, want.Width, want.Height, SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS);
                 return;
             }
             if (framed) { SetWindowLongPtr(h, GWL_STYLE, new IntPtr((style & ~WS_FRAME) | WS_POPUP)); s_stripped.Add(h); }
@@ -957,7 +990,7 @@ namespace SimConnect3
             bool placed = r.L == screen.Left && r.T == screen.Top && r.R == screen.Right && r.B == screen.Bottom;
             bool zOk = GetWindow(h, GW_HWNDPREV) == behind;   // la finestra de just a sobre és la de l'app
             if (framed || !placed || !zOk)
-                SetWindowPos(h, behind, screen.X, screen.Y, screen.Width, screen.Height, SWP_NOACTIVATE | SWP_SHOWWINDOW | (framed ? SWP_FRAMECHANGED : 0));
+                SetWindowPos(h, behind, screen.X, screen.Y, screen.Width, screen.Height, SWP_NOACTIVATE | SWP_SHOWWINDOW | SWP_ASYNCWINDOWPOS | (framed ? SWP_FRAMECHANGED : 0));
         }
     }
 }

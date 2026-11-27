@@ -1824,6 +1824,7 @@ namespace SimConnect3
         // Mode A320: overhead dibuixat 100% vectorial (A320Overhead.cs), sense PNG. Es crea la
         // primera vegada que s'activa; en sortir s'amaga i allibera el seu bitmap.
         private System.Windows.Forms.Button _a320Btn = null!;
+        private panelAIR1000.AuxToggle _knobZonesSw = null!;   // menú AUX, OPTIONS: zones dels rotatius
         private bool  _a320BtnDragging;
         private Point _a320BtnDragOffset;
         private bool  _a320Active = false;
@@ -2209,7 +2210,8 @@ namespace SimConnect3
             _overlayPanel.KeyDown += (s, e) => handleF12(e);
             _overlayPanel.Paint += (s, e) =>
             {
-                using var pen = new Pen(Color.Orange, 1);
+                // (A320: vora blanca; G1000 / TBM: taronja, com sempre)
+                using var pen = new Pen(_a320Active ? Color.White : Color.Orange, _a320Active ? 2 : 1);
                 e.Graphics.DrawRectangle(pen, 0, 0, _overlayPanel.Width - 1, _overlayPanel.Height - 1);
             };
 
@@ -2396,7 +2398,9 @@ namespace SimConnect3
 
             _a320Btn = MakeGroupBtn("A320", 363, 63);
             _a320Btn.Location = new Point(_g1000Btn.Location.X, _g1000Btn.Location.Y + _g1000Btn.Height + 10);
-            _a320Btn.Click += (s, e) => SetA320Active(true);
+            // (en calibratge F12 el botó només s'arrossega: no canvia de mode; si en canviar de mode es perdia el "deixar
+            //  anar", el botó continuava seguint el ratolí sense prémer-lo i acabava mig amagat a baix a la dreta)
+            _a320Btn.Click += (s, e) => { if (calibrationMode) return; SetA320Active(true); };
             _a320Btn.MouseDown += (s, e) =>
             {
                 if (!calibrationMode) return;
@@ -2406,12 +2410,58 @@ namespace SimConnect3
             _a320Btn.MouseMove += (s, e) =>
             {
                 if (!_a320BtnDragging) return;
+                if (!calibrationMode || (e.Button & MouseButtons.Left) == 0) { _a320BtnDragging = false; return; }   // ja no es prem
                 var screenPt = _a320Btn.PointToScreen(e.Location);
                 var formPt = _overlayPanel!.PointToClient(screenPt);
                 _a320Btn.Location = new Point(formPt.X - _a320BtnDragOffset.X, formPt.Y - _a320BtnDragOffset.Y);
+                KeepA320BtnInside();
             };
-            _a320Btn.MouseUp += (s, e) => { _a320BtnDragging = false; try { ExportCalibrationPositions(silent: true); } catch { } };
+            _a320Btn.MouseCaptureChanged += (s, e) => { if (!_a320Btn.Capture) _a320BtnDragging = false; };
+            _a320Btn.MouseUp += (s, e) =>
+            {
+                bool was = _a320BtnDragging;
+                _a320BtnDragging = false;
+                if (was) { KeepA320BtnInside(); try { ExportCalibrationPositions(silent: true); } catch { } }
+            };
             _overlayPanel.Controls.Add(_a320Btn);
+
+            // ── OPTIONS (opcions de l'usuari; de moment, una) ──
+            var optionsTitle = new Label
+            {
+                Text = "OPTIONS",
+                Location = new Point(420, 20),
+                Size = new Size(620, 44),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Font = new Font("Segoe UI Emoji", 26f, FontStyle.Bold, GraphicsUnit.Pixel),
+                ForeColor = Color.White,
+                BackColor = Color.FromArgb(40, 40, 40)
+            };
+            _overlayPanel.Controls.Add(optionsTitle);
+            // A320: zones de toc d'un rotatiu visibles mentre s'hi treballa (veure A320OverheadControl.ShowKnobZones)
+            // (interruptor lliscant blau i el text al costat, sense marc)
+            panelAIR1000.A320OverheadControl.ShowKnobZones = AppSettings.Instance.A320KnobZones;
+            _knobZonesSw = new panelAIR1000.AuxToggle { Location = new Point(420, 78), Size = new Size(92, 46) };
+            _knobZonesSw.SetInitial(AppSettings.Instance.A320KnobZones);
+            _knobZonesSw.Enabled2 = () => !calibrationMode;
+            _knobZonesSw.Toggled += on =>
+            {
+                AppSettings.Instance.A320KnobZones = on;
+                panelAIR1000.A320OverheadControl.ShowKnobZones = on;
+                try { AppSettings.Instance.Save(); } catch { }
+            };
+            _overlayPanel.Controls.Add(_knobZonesSw);
+            var knobZonesLbl = new Label
+            {
+                Text = "Show knob zones while turning",
+                Location = new Point(528, 74),
+                Size = new Size(560, 54),
+                TextAlign = ContentAlignment.MiddleLeft,
+                Font = new Font("Segoe UI Emoji", 24f, FontStyle.Bold, GraphicsUnit.Pixel),
+                ForeColor = Color.White,
+                BackColor = Color.FromArgb(40, 40, 40)
+            };
+            knobZonesLbl.Click += (s, e) => _knobZonesSw.PerformClickToggle();
+            _overlayPanel.Controls.Add(knobZonesLbl);
             UpdateCockpitModeButtons();
 
             _thrQuadrantBtn = new System.Windows.Forms.Button
@@ -2492,7 +2542,7 @@ namespace SimConnect3
                 Text = "",
                 Location = new Point(1896, 22),
                 Size = new Size(63, 63),
-                BackColor = Color.Red,
+                BackColor = AuxCloseColor,
                 ForeColor = Color.White,
                 FlatStyle = FlatStyle.Flat,
                 Font = new Font("Segoe UI Emoji", 34f, FontStyle.Bold, GraphicsUnit.Pixel),
@@ -2524,11 +2574,11 @@ namespace SimConnect3
             {
                 if (calibrationMode) return;
                 _panelVisible = !_panelVisible;
-                _gearBtn.BackColor = _panelVisible ? Color.Red : Color.FromArgb(40, 40, 40);
+                _gearBtn.BackColor = _panelVisible ? AuxCloseColor : Color.FromArgb(40, 40, 40);
                 _gearBtn.Text = _panelVisible ? "" : "⚙";
                 _gearBtn.Invalidate();
-                if (_panelVisible)
-                    _overlayPanel!.Show(this);
+                if (_a320Overhead != null) _a320Overhead.AuxOpen = _panelVisible;   // (mode A320: el ⚙ el dibuixa el panell)
+                if (_panelVisible) { KeepA320BtnInside(); _overlayPanel!.Show(this); }
                 else
                     _overlayPanel!.Hide();
             };
@@ -2541,6 +2591,7 @@ namespace SimConnect3
                 e.Graphics.DrawLine(xPen, _gearBtn.Width - m, m, m, _gearBtn.Height - m);
             };
             _gearBtn.Click += (s, e) => toggleOverlay();
+            _toggleAux = toggleOverlay;
             _overlayGearBtn.Click += (s, e) => toggleOverlay();
             _gearBtn.MouseDown += (s, e) =>
             {
@@ -4519,6 +4570,7 @@ namespace SimConnect3
             };
 
             LoadCalibrationPositions();
+            KeepA320BtnInside();
 
             // Timer global per apagar ombres + animació flaps SW
             uiSurfaceTimer.Tick += (s, e) =>
@@ -5870,6 +5922,48 @@ namespace SimConnect3
         // des de la detecció automàtica d'avió sense passar per PerformClick() (el botó viu a la
         // pantalla AUX, que sempre està amagada — CanSelect pot ser false i fer que PerformClick no faci res).
         /// <summary>Ressalta el botó del cockpit actiu (TBM 930 / G1000) i apaga l'altre.</summary>
+        /// <summary>
+        /// El botó A320 del menú AUX sempre sencer a la vista: si queda fora del menú (posició de fàbrica, que sortia mig
+        /// amagada per baix, o un arrossegament perdut), es posa a sota del botó G1000 (o, si no hi cap, a sobre del TBM).
+        /// </summary>
+        private void KeepA320BtnInside()
+        {
+            if (_a320Btn == null || _overlayPanel == null) return;
+            var area = _overlayPanel.ClientRectangle;
+            if (area.Contains(_a320Btn.Bounds)) return;
+            var under = new Rectangle(_g1000Btn.Left, _g1000Btn.Bottom + 10, _a320Btn.Width, _a320Btn.Height);
+            var above = new Rectangle(_g3000Btn.Left, _g3000Btn.Top - 10 - _a320Btn.Height, _a320Btn.Width, _a320Btn.Height);
+            var r = area.Contains(under) ? under : area.Contains(above) ? above : under;
+            r.X = Math.Clamp(r.X, 0, Math.Max(0, area.Width - r.Width));
+            r.Y = Math.Clamp(r.Y, 0, Math.Max(0, area.Height - r.Height));
+            _a320Btn.Location = r.Location;
+        }
+
+        /// <summary>A320: farciment del menú AUX a joc amb el panell (gris blavós fosc) i la creu de tancar sense vermell.</summary>
+        private static readonly Color AuxA320Fill = Color.FromArgb(44, 53, 64), AuxG1000Fill = Color.FromArgb(40, 40, 40);
+        private Color AuxCloseColor => _a320Active ? AuxA320Fill : Color.Red;
+
+        /// <summary>Colors del menú AUX segons el mode: A320 (vora i creu blanques, farciment gris blavós) o G1000 / TBM.</summary>
+        private void ApplyAuxStyle()
+        {
+            if (_overlayPanel == null) return;
+            var fill = _a320Active ? AuxA320Fill : AuxG1000Fill;
+            void Walk(Control c)
+            {
+                foreach (Control ch in c.Controls)
+                {
+                    if (ch == _overlayGearBtn) continue;
+                    if (ch.BackColor.ToArgb() == AuxG1000Fill.ToArgb() || ch.BackColor.ToArgb() == AuxA320Fill.ToArgb()) ch.BackColor = fill;
+                    Walk(ch);
+                }
+            }
+            _overlayPanel.BackColor = fill;
+            Walk(_overlayPanel);
+            if (_overlayGearBtn != null) _overlayGearBtn.BackColor = AuxCloseColor;
+            if (_gearBtn != null && _panelVisible) _gearBtn.BackColor = AuxCloseColor;
+            _overlayPanel.Invalidate(true);
+        }
+
         private void UpdateCockpitModeButtons()
         {
             // 2026-09-05: la vora blanca prima (1px) de l'inactiu es confonia amb l'activa (4px) — massa
@@ -5888,6 +5982,7 @@ namespace SimConnect3
                 _a320Btn.FlatAppearance.BorderSize = _a320Active ? 7 : 1;
                 _a320Btn.FlatAppearance.BorderColor = _a320Active ? accent : Color.White;
             }
+            ApplyAuxStyle();
         }
 
         /// <summary>Forats de la Region segons el mode actual (A320 no en té: l'overhead ocupa tota la pantalla).</summary>
@@ -5926,6 +6021,9 @@ namespace SimConnect3
         private const double XpBezelX = 0.04, XpBezelY = 0.015;
         private void PlaceXPlanePfd()
         {
+            // si una pop-out col·locada en un forat ha agafat el focus (un toc al forat cau a la finestra de sota), el focus
+            // torna a l'app: amb el focus a una pop-out, el MSFS 2024 s'ha vist que es pot quedar congelat
+            try { if (XPlaneWindows.ForegroundIsPlaced()) SetForegroundWindow(this.Handle); } catch { }
             // els forats de les pantalles de l'A320 es revisen cada segon (només es tornen a aplicar si han canviat)
             // Fenix: pantalles i tecles de les MCDU pel seu servidor GraphQL (port 8083); mentre no hi ha connexió, pop-out
             bool fenix = simconnect != null && IsA320Fenix() && (_xp == null || !_xp.A320Loaded);
@@ -6067,15 +6165,20 @@ namespace SimConnect3
         };
         private DateTime _msfsSince = DateTime.MinValue;   // des de quan hi ha el FlyByWire en mode A320 (per a l'avís)
         private bool _msfsPopoutMsgShown;
-        private const string XpPopoutText = "In X-Plane, click this icon on each ToLiss display, one at a time, to pop it out. panelAIR will place it in the panel.";
-        private const string MsfsPopoutText = "In Microsoft Flight Simulator, hold down the right **ALT** key on your keyboard and click each A320 display (PFD, ND and both ECAMs) to pop it out. panelAIR will place it in the panel.";
+        private const string XpPopoutText = "In X-Plane, click this icon on each ToLiss display, one at a time, to pop it out, including the small STBY gauge. panelAIR will place it in the panel.";
+        private const string MsfsPopoutText = "In Microsoft Flight Simulator, hold down the right **ALT** key on your keyboard and click each A320 display (PFD, ND, both ECAMs and the small STBY gauge) to pop it out. panelAIR will place it in the panel.";
 
         private void PlaceMsfsScreens()
         {
             bool active = simconnect != null && IsA320Msfs() && _a320Active && (_xp == null || !_xp.A320Loaded)
                           && _a320Overhead != null && _a320Overhead.Visible;
             if (!active) { _msfsSince = DateTime.MinValue; _fbwSettle.Title = null; return; }
-            if (_msfsSince == DateTime.MinValue) _msfsSince = DateTime.UtcNow;
+            // l'avís de fer el pop-out de les pantalles només surt amb el vol carregat i l'usuari dins de l'avió: amb el
+            // MSFS als menús o carregant (CAMERA STATE 11 o més: espera, mapa, hangar, menú…) no; el compte de 3 s comença
+            // en entrar al vol (2 cabina … 10 dron d'avió)
+            bool inFlight = _cameraState >= 2 && _cameraState <= 10;
+            if (!inFlight) _msfsSince = DateTime.MinValue;
+            else if (_msfsSince == DateTime.MinValue) _msfsSince = DateTime.UtcNow;
             if (IsA320Fenix()) { PlaceFenixScreens(); return; }   // Fenix: finestres sense títol propi (Form1.A320Fenix.cs)
             if (DateTime.UtcNow < _fxPauseUntil) return;   // s'està prement / animant la palanca del tren
             int missing = 0;
@@ -6331,6 +6434,8 @@ namespace SimConnect3
         /// </summary>
         /// <summary>Posició habitual del ⚙ mentre el mode A320 el té desplaçat (null = no desplaçat).</summary>
         private Point? _gearHomePos;
+        /// <summary>Obre / tanca la pantalla AUX (el mateix que el ⚙).</summary>
+        private Action? _toggleAux;
 
         /// <summary>
         /// Mode A320: el ⚙ (obre la pantalla AUX) va just a sota del botó del dit (mostrar àrees clicables), a la
@@ -6340,10 +6445,9 @@ namespace SimConnect3
         {
             if (_a320Overhead == null || !_a320Active) return;
             _gearHomePos ??= _gearBtn.Location;
-            var r = _a320Overhead.AreasButtonBounds;
-            var origin = _a320Overhead.Location;   // (el control de l'A320 ocupa la finestra; per si no comença a 0,0)
-            _gearBtn.Location = new Point(origin.X + r.X, origin.Y + r.Bottom + 12);
-            _gearBtn.BringToFront();
+            // el ⚙ de l'A320 el dibuixa el mateix panell (igual que el botó del dit i 10 px per sota): el de l'app s'amaga
+            _gearBtn.Visible = false;
+            _a320Overhead.AuxOpen = _panelVisible;
         }
 
         private void SetA320Active(bool active)
@@ -6366,6 +6470,7 @@ namespace SimConnect3
                         PedLocation = _a320PedBtnPos,
                         ThrottleVisible = AppSettings.Instance.A320ThrottleVisible   // opció de l'usuari (per defecte no)
                     };
+                    _a320Overhead.AuxButtonClicked += () => _toggleAux?.Invoke();
                     _a320Overhead.ThrottleVisibleChanged += on =>
                     {
                         AppSettings.Instance.A320ThrottleVisible = on;
@@ -6430,6 +6535,7 @@ namespace SimConnect3
                 pbMain.Visible = true;
                 // el ⚙ torna al seu lloc de sempre (G1000 / TBM)
                 if (_gearHomePos is Point home) { _gearBtn.Location = home; _gearHomePos = null; }
+                _gearBtn.Visible = !IsDemoMode;
                 _thrQuadrantBtn.Visible = _g3000Active;
                 pbMain.Invalidate();
             }

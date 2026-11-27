@@ -1,4 +1,4 @@
-using System.Drawing.Drawing2D;
+﻿using System.Drawing.Drawing2D;
 
 namespace panelAIR1000
 {
@@ -40,6 +40,14 @@ namespace panelAIR1000
         static float McduRowY(int row) => 65 + McduScrDy + McduTextInsetY + (row + 0.5f) * McduRowH;
 
         static readonly PointF[] PedFramePoly = MakePedFrame();
+        /// <summary>
+        /// Escala i desplaçament amb què es mostra el pedestal perquè el seu marc (de SideL0 − 14 a SideR1 + 14, unitats
+        /// lògiques) ocupi a la pantalla el mateix que el de l'overhead (de 12 a 1238).
+        /// </summary>
+        const float OvhFrameL = 12f, OvhFrameR = 1238f;
+        const float PedFrameL = SideL0 * PedK - 14f, PedFrameR = SideR1 * PedK + 14f;
+        const float PedA = (OvhFrameR - OvhFrameL) / (PedFrameR - PedFrameL);
+        const float PedShiftX = PedFrameL - OvhFrameL / PedA;
         static PointF[] MakePedFrame()
         {
             // Com l'overhead: marc de gruix constant (14 unitats lògiques entre la vora dels panells i la vora del

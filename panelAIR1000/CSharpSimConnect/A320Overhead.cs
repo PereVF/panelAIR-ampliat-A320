@@ -1564,6 +1564,8 @@ namespace panelAIR1000
         public virtual void PressEnd() { }
         /// <summary>Zones clicables (coordenades del panell) que es ressalten amb el botó "mostrar àrees".</summary>
         public virtual IEnumerable<RectangleF> HitAreas { get { yield return RectangleF.Inflate(Bounds, 3, 3); } }
+        /// <summary>Què fa cada zona de HitAreas (en el mateix ordre): -1 decrementa, +1 incrementa, 0 una altra cosa.</summary>
+        public virtual int ZoneSign(int index) => 0;
         public virtual bool Animating => false;
         public virtual void Tick(float dt) { }
         public virtual int State => 0;
@@ -1797,6 +1799,7 @@ namespace panelAIR1000
                 yield return RectangleF.FromLTRB(_cx, z.Top, z.Right, z.Bottom);   // +
             }
         }
+        public override int ZoneSign(int index) => ZoneHalfWidth <= 0 ? 0 : PushZone ? (index == 0 ? -1 : index == 2 ? 1 : 0) : (index == 0 ? -1 : 1);
         public OhKnob(string id, float cx, float cy, float r, int index, float[] angles, KnobStyle style)
         {
             Id = id; _cx = cx; _cy = cy; _r = r; _angles = angles; Index = index; Style = style;
@@ -3502,6 +3505,7 @@ namespace panelAIR1000
                 yield return ZPush; yield return ZLeft; yield return ZRight; yield return ZPull;
             }
         }
+        public override int ZoneSign(int index) { int i = index - (Simple ? 0 : 2); return i == 1 ? -1 : i == 2 ? 1 : 0; }
         public override bool HitTest(PointF p) => SingleZone ? (!Simple && (ZInHg.Contains(p) || ZHpa.Contains(p))) || ZOne.Contains(p) || ZLeft.Contains(p) || ZRight.Contains(p) : (!Simple && (ZInHg.Contains(p) || ZHpa.Contains(p))) || ZPush.Contains(p) || ZPull.Contains(p) || ZLeft.Contains(p) || ZRight.Contains(p);
         const float InHgAng = -38f, HpaAng = 38f;
         public OhBaroKnob(string id, float cx, float cy, float r, bool alt = false, float zoneHalfWidth = 2f, KnobFace face = KnobFace.Baro)
@@ -3950,8 +3954,7 @@ namespace panelAIR1000
         {
             _a = Approach(_a, Accu, dt * 3f); _l = Approach(_l, Left, dt * 3f); _rr = Approach(_rr, Right, dt * 3f);
         }
-        // tocar-lo simula el fre d'estacionament (0 ↔ 2000 PSI); amb SimConnect s'hi enviaran els valors reals
-        public override void Tap(PointF p) { if (Owner.SimDriven) return; float v = Left > 1 ? 0f : 2f; Left = v; Right = v; Changed(); }
+        // (només és un indicador: no es pot tocar; els valors arriben del simulador)
 
         // Com a la captura del Fenix: tres eixos amb la seva agulla.
         //  - ACCU PRESS: eix a dalt, l'agulla mira avall; escala 0 (avall-esquerra) … 4 (avall-dreta).
@@ -4048,6 +4051,8 @@ namespace panelAIR1000
             public List<OhElement> Els = new();
             public float LH;
             public float Shift;   // unitats lògiques retallades per dalt (el dibuix es desplaça amunt)
+            // escala i retall de l'esquerra (pedestal: perquè el seu marc faci la mateixa amplada que el de l'overhead)
+            public float ShiftX; public float A = 1f;
             public PointF[] Frame = Array.Empty<PointF>();
             public int ScrollY;
             public bool Visited;
@@ -4062,6 +4067,8 @@ namespace panelAIR1000
         List<OhElement> _els { get => _pages[_page].Els; set => _pages[_page].Els = value; }
         float CurLH => _pages[_page].LH;
         float CurShift => _pages[_page].Shift;
+        float CurShiftX => _pages[_page].ShiftX;
+        float CurA => _pages[_page].A;
         PointF[] CurFrame => _pages[_page].Frame;
         readonly Dictionary<string, OhElement> _byId = new();
         readonly HashSet<OhElement> _animating = new();
@@ -4188,8 +4195,8 @@ namespace panelAIR1000
             if (side == 1) gl.Offset(PedMcdu2Dx * PedK, 0);
             float s = p._s, sh = p.CurShift;
             var rc = Rectangle.FromLTRB(
-                (int)Math.Round(p._offX + gl.Left * s), (int)Math.Round(-p._scrollY + (gl.Top - sh) * s),
-                (int)Math.Round(p._offX + gl.Right * s), (int)Math.Round(-p._scrollY + (gl.Bottom - sh) * s));
+                (int)Math.Round(p._offX + (gl.Left - p.CurShiftX) * s), (int)Math.Round(-p._scrollY + (gl.Top - sh) * s),
+                (int)Math.Round(p._offX + (gl.Right - p.CurShiftX) * s), (int)Math.Round(-p._scrollY + (gl.Bottom - sh) * s));
             return p.ClientRectangle.Contains(rc) ? rc : null;
         }
 
@@ -4420,7 +4427,7 @@ namespace panelAIR1000
             float x0 = 868f * k, x1 = 1254f * k, y0 = (393f + 4f) * k;   // marc de l'ND | marc de les ECAM | sota la matrícula
             // amb el ZOOM puja fins a tapar la placa de la matrícula (la vora de dalt de la placa), per ser més gran
             if (_mcduZoom) y0 = 348f * k;
-            float w = _mcduZoom ? McduUnitLW : x1 - x0;
+            float w = _mcduZoom ? McduUnitLW * PedA : x1 - x0;   // (mida a la que es veu al pedestal)
             float h = w * McduUnitLH / McduUnitLW;
             float left = _offX + x0 * s, top = _offY - _scrollY + (y0 - CurShift) * s;
             float pw = w * s, ph = h * s;
@@ -4563,7 +4570,7 @@ namespace panelAIR1000
         }
         PointF[] ToScreen(PointF[] fr)
         {
-            return fr.Select(p => new PointF(_offX + p.X * _s, -_scrollY + (p.Y - CurShift) * _s)).ToArray();
+            return fr.Select(p => new PointF(_offX + (p.X - CurShiftX) * _s, -_scrollY + (p.Y - CurShift) * _s)).ToArray();
         }
 
         int OverlayBottom => (int)Math.Ceiling(-_scrollY + LH * _s);
@@ -4587,7 +4594,6 @@ namespace panelAIR1000
             if (Parent is A320OverheadControl main && !_isMcduMod)
             {
                 rg.Exclude(Rectangle.Inflate(main.AllBtnsRect, 12, 12));
-                rg.Exclude(Rectangle.Inflate(main.AreasRect, 4, 4));   // el botó taronja sempre visible
             }
             var old = Region;
             Region = rg;
@@ -4701,6 +4707,88 @@ namespace panelAIR1000
             var el = _pressEl;
             _pressEl = null;
             el?.PressEnd();
+            if (el != null) TouchKnobZones(el);
+        }
+
+        // ── Zones de toc d'un rotatiu, visibles mentre s'hi treballa ──
+        // En tocar un rotatiu (OhKnob, OhBaroKnob) se'n mostren totes les zones de toc: fins a 2 s després de l'últim toc
+        // i després s'esvaeixen en 1 s. Perímetre blanc de 4 px amb cantonades arrodonides i farciment blanc molt poc opac;
+        // cada perímetre queda 2 px dins la seva zona, de manera que entre dues zones veïnes hi ha sempre 4 px de separació.
+        // (les zones de toc no canvien: només es dibuixen)
+        readonly Dictionary<OhElement, double> _knobZones = new();
+        const double KnobZonesHold = 2.0;
+        static bool IsRotary(OhElement el) => el is OhKnob || el is OhBaroKnob;
+
+        /// <summary>Opció de l'usuari (menú AUX, OPTIONS): mostrar les zones d'un rotatiu en tocar-lo.</summary>
+        public static bool ShowKnobZones = true;
+
+        void TouchKnobZones(OhElement el)
+        {
+            if (!ShowKnobZones || !IsRotary(el)) return;
+            _knobZones[el] = _clock.Elapsed.TotalSeconds;
+            Invalidate(KnobZonesScreenRect(el));
+            StartAnim();
+        }
+
+        RectangleF ZoneToScreen(RectangleF r) =>
+            new(_offX + (r.X - CurShiftX) * _s, _offY - _scrollY + (r.Y - CurShift) * _s, r.Width * _s, r.Height * _s);
+
+        Rectangle KnobZonesScreenRect(OhElement el)
+        {
+            var u = RectangleF.Empty;
+            foreach (var r in el.HitAreas) { var sr = ZoneToScreen(r); u = u.IsEmpty ? sr : RectangleF.Union(u, sr); }
+            return Rectangle.Inflate(Rectangle.Round(u), 4, 4);
+        }
+
+        /// <summary>(tic d'animació) Repinta les zones que s'esvaeixen i treu les que ja han acabat. true si n'hi ha d'actives.</summary>
+        bool TickKnobZones()
+        {
+            if (_knobZones.Count == 0) return false;
+            double now = _clock.Elapsed.TotalSeconds;
+            foreach (var kv in _knobZones.ToArray())
+            {
+                double age = now - kv.Value;
+                if (kv.Key == _pressEl) continue;   // mentre es manté el dit, queden fixes
+                if (age >= KnobZonesHold) { _knobZones.Remove(kv.Key); Invalidate(KnobZonesScreenRect(kv.Key)); }
+            }
+            return _knobZones.Count > 0;
+        }
+
+        /// <summary>
+        /// Una zona de toc (coordenades de pantalla): perímetre blanc de 4 px amb cantonades arrodonides, 2 px per dins de
+        /// la zona (entre dues zones veïnes queden sempre 4 px), farciment blanc suau i, si incrementa / decrementa, un + / −
+        /// petit a la cantonada de baix de fora.
+        /// </summary>
+        static void DrawZone(Graphics g, Rectangle clip, RectangleF zone, int sign)
+        {
+            const float Stroke = 4f, Inset = 2f + Stroke / 2f;
+            var sr = RectangleF.Inflate(zone, -Inset, -Inset);
+            if (sr.Width <= 2 || sr.Height <= 2 || !Rectangle.Round(RectangleF.Inflate(sr, 3, 3)).IntersectsWith(clip)) return;
+            using var path = Oh.RoundRect(sr, Math.Min(10f, Math.Min(sr.Width, sr.Height) / 4f));
+            using (var fb = new SolidBrush(Color.FromArgb(62, 255, 255, 255))) g.FillPath(fb, path);
+            using (var pe = new Pen(Color.FromArgb(240, 255, 255, 255), Stroke)) g.DrawPath(pe, path);
+            if (sign == 0) return;
+            float sz = Math.Max(8f, Math.Min(16f, Math.Min(sr.Width, sr.Height) * 0.22f));
+            if (sr.Width < sz + 2 * (Stroke + 4) || sr.Height < sz + 2 * (Stroke + 4)) return;   // zona massa petita per al signe
+            float cx = sign < 0 ? sr.Left + Stroke + 4 + sz / 2 : sr.Right - Stroke - 4 - sz / 2;
+            float cy = sr.Bottom - Stroke - 4 - sz / 2;
+            using var sp = new Pen(Color.FromArgb(220, 255, 255, 255), Math.Max(2f, sz / 6f)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            g.DrawLine(sp, cx - sz / 2, cy, cx + sz / 2, cy);
+            if (sign > 0) g.DrawLine(sp, cx, cy - sz / 2, cx, cy + sz / 2);
+        }
+
+        void DrawKnobZones(Graphics g, Rectangle clip)
+        {
+            if (_knobZones.Count == 0 || s_showAreas) return;   // (amb totes les zones a la vista ja hi són)
+            double now = _clock.Elapsed.TotalSeconds;
+            var oldMode = g.SmoothingMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            foreach (var kv in _knobZones)
+            {
+                int zi = -1;
+                foreach (var r in kv.Key.HitAreas) { zi++; DrawZone(g, clip, ZoneToScreen(r), kv.Key.ZoneSign(zi)); }
+            }
+            g.SmoothingMode = oldMode;
         }
 
         internal void NotifyChanged(OhElement el)
@@ -4746,7 +4834,7 @@ namespace panelAIR1000
             // L'amplada sempre es calcula sobre l'original (amplada de pantalla) i el panell es torna a
             // dibuixar en vectorial a aquesta mida exacta: mai s'escala la imatge anterior.
             int cw = ContentWidth;
-            _s = cw / LW;
+            _s = cw / LW * CurA;
             _contentH = (int)Math.Ceiling(CurLH * _s);
             _offX = (Width - cw) / 2;
             _offY = _isOverlay ? 0 : Math.Max(0, Height - _contentH); // si hi cap sencer, queda enganxat a baix
@@ -4836,8 +4924,8 @@ namespace panelAIR1000
             // mentre es calcula un zoom en segon pla, no es dibuixa res (s'apunta i es repinta en acabar)
             if (_bgRendering) { _bgDirty.Add(logical); return; }
             var px = Rectangle.FromLTRB(
-                (int)Math.Floor(logical.Left * _s) - 1, (int)Math.Floor((logical.Top - CurShift) * _s) - 1,
-                (int)Math.Ceiling(logical.Right * _s) + 1, (int)Math.Ceiling((logical.Bottom - CurShift) * _s) + 1);
+                (int)Math.Floor((logical.Left - CurShiftX) * _s) - 1, (int)Math.Floor((logical.Top - CurShift) * _s) - 1,
+                (int)Math.Ceiling((logical.Right - CurShiftX) * _s) + 1, (int)Math.Ceiling((logical.Bottom - CurShift) * _s) + 1);
             px.Intersect(new Rectangle(0, 0, _bmp.Width, _bmp.Height));
             if (px.Width <= 0 || px.Height <= 0) return;
             if (_fastBg != null && px.IntersectsWith(_fastPx)) DropFast();   // el fons guardat ja no val
@@ -4855,8 +4943,8 @@ namespace panelAIR1000
             if (_bgRendering) { Redraw(el.DirtyBounds); return; }
             var logical = el.DirtyBounds;
             var px = Rectangle.FromLTRB(
-                (int)Math.Floor(logical.Left * _s) - 1, (int)Math.Floor((logical.Top - CurShift) * _s) - 1,
-                (int)Math.Ceiling(logical.Right * _s) + 1, (int)Math.Ceiling((logical.Bottom - CurShift) * _s) + 1);
+                (int)Math.Floor((logical.Left - CurShiftX) * _s) - 1, (int)Math.Floor((logical.Top - CurShift) * _s) - 1,
+                (int)Math.Ceiling((logical.Right - CurShiftX) * _s) + 1, (int)Math.Ceiling((logical.Bottom - CurShift) * _s) + 1);
             px.Intersect(new Rectangle(0, 0, _bmp.Width, _bmp.Height));
             if (px.Width <= 0 || px.Height <= 0) return;
             var dst = new Rectangle(0, 0, px.Width, px.Height);
@@ -4875,7 +4963,7 @@ namespace panelAIR1000
                 g.CompositingMode = CompositingMode.SourceOver;
                 float sh = CurShift;
                 var lr = RectangleF.FromLTRB(px.Left / _s, px.Top / _s + sh, px.Right / _s, px.Bottom / _s + sh);
-                PrepareGraphics(g, _s, px, sh);
+                PrepareGraphics(g, _s, px, sh, CurShiftX);
                 bool after = false;
                 foreach (var e in _els)
                 {
@@ -4887,7 +4975,7 @@ namespace panelAIR1000
             Invalidate(new Rectangle(px.X + _offX, px.Y + _offY - _scrollY, px.Width, px.Height));
         }
 
-        static void PrepareGraphics(Graphics g, float s, Rectangle px, float sh)
+        static void PrepareGraphics(Graphics g, float s, Rectangle px, float sh, float shx)
         {
             g.SetClip(px);
             g.SmoothingMode = SmoothingMode.AntiAlias;
@@ -4895,7 +4983,7 @@ namespace panelAIR1000
             g.PixelOffsetMode = PixelOffsetMode.Half;
             g.InterpolationMode = InterpolationMode.HighQualityBilinear;
             g.ScaleTransform(s, s);
-            g.TranslateTransform(0, -sh);
+            g.TranslateTransform(-shx, -sh);
             Oh.PixelScale = s;
         }
 
@@ -4908,7 +4996,7 @@ namespace panelAIR1000
             using var g = Graphics.FromImage(target);
             g.SetClip(px);
             g.FillRectangle(Brushes.Black, px);
-            PrepareGraphics(g, s, px, sh);
+            PrepareGraphics(g, s, px, sh, CurShiftX);
             DrawFrame(g);
             foreach (var si in _silk)
             {
@@ -4985,29 +5073,60 @@ namespace panelAIR1000
             var btnArea = _isOverlay ? Rectangle.Empty : Rectangle.Inflate(AllBtnsRect, 14, 14);
             var ov = Rectangle.Intersect(clip, btnArea);
 
-            // 1) tot el que no és la zona dels botons, directament a pantalla
-            foreach (var piece in Subtract(clip, ov))
-                PaintBase(g, piece, Point.Empty);
+            // zones d'un rotatiu a la vista: aquella part també es compon fora de pantalla (panell + zones) i es copia d'un
+            // sol cop; si no, a cada toc es veuria un instant el panell sense les zones (tremolor)
+            var zr = Rectangle.Empty;
+            foreach (var kz in _knobZones.Keys) { var kr = KnobZonesScreenRect(kz); zr = zr.IsEmpty ? kr : Rectangle.Union(zr, kr); }
+            zr = Rectangle.Intersect(clip, zr);
+            if (s_showAreas) zr = clip;   // amb totes les zones a la vista, tot el que es repinta es compon (sense tremolor)
+            if (zr.Width > 0 && zr.Height > 0 && ov.IntersectsWith(zr)) zr = Rectangle.Union(zr, ov);   // (rar: tot junt)
 
-            // 2) zona dels botons: composició en un bitmap petit i una sola còpia
-            if (ov.Width > 0 && ov.Height > 0)
+// botons del dit (àrees) i ⚙ (pantalla AUX): transparents, a sobre de tot (també de l'overhead i del pedestal,
+            // que els dibuixen ells mateixos a la mateixa posició de pantalla); la seva zona també es compon
+            var cornerMain = !_isOverlay ? this : !_isMcduMod ? Parent as A320OverheadControl : null;
+            var cr = cornerMain == null ? Rectangle.Empty
+                   : Rectangle.Intersect(clip, Rectangle.Inflate(Rectangle.Union(cornerMain.AreasRect, cornerMain.AuxRect), 6, 6));
+            bool Has(Rectangle r) => r.Width > 0 && r.Height > 0;
+            if (Has(zr) && Has(cr) && zr.IntersectsWith(cr)) { zr = Rectangle.Union(zr, cr); cr = Rectangle.Empty; }
+            if (Has(ov) && Has(cr) && ov.IntersectsWith(cr)) { ov = Rectangle.Union(ov, cr); cr = Rectangle.Empty; }
+            if (Has(zr) && Has(ov) && ov.IntersectsWith(zr)) { zr = Rectangle.Union(zr, ov); ov = Rectangle.Empty; }
+
+            void Compose(Rectangle r)
             {
-                using var buf = new Bitmap(ov.Width, ov.Height, PixelFormat.Format32bppPArgb);
+                using var buf = new Bitmap(r.Width, r.Height, PixelFormat.Format32bppPArgb);
                 using (var gb = Graphics.FromImage(buf))
                 {
-                    PaintBase(gb, ov, ov.Location);
-                    gb.TranslateTransform(-ov.X, -ov.Y);
-                    DrawZoomButtons(gb, ov);
+                    PaintBase(gb, r, r.Location);
+                    gb.TranslateTransform(-r.X, -r.Y);
+                    DrawHitAreas(gb, r);
+                    DrawKnobZones(gb, r);
+                    if (r.IntersectsWith(btnArea)) DrawZoomButtons(gb, r);
+                    if (cornerMain != null)
+                    {
+                        if (cornerMain.AreasRect.IntersectsWith(r)) cornerMain.DrawAreasButton(gb);
+                        if (cornerMain.AuxRect.IntersectsWith(r)) cornerMain.DrawAuxButton(gb);
+                    }
                 }
-                var oldMode = g.CompositingMode;
+                var om = g.CompositingMode;
                 g.CompositingMode = CompositingMode.SourceCopy;
-                g.DrawImageUnscaled(buf, ov.X, ov.Y);
-                g.CompositingMode = oldMode;
+                g.DrawImageUnscaled(buf, r.X, r.Y);
+                g.CompositingMode = om;
             }
 
-            // 3) zones clicables ressaltades i botó taronja per mostrar-les
+            // 1) tot el que no es compon, directament a pantalla
+            IEnumerable<Rectangle> pieces = new[] { clip };
+            foreach (var ex in new[] { ov, zr, cr })
+                if (Has(ex)) pieces = pieces.SelectMany(p => Subtract(p, ex)).ToList();
+            foreach (var piece in pieces) PaintBase(g, piece, Point.Empty);
+            // 2) zones compostes (botons, zones dels rotatius, botons del dit i ⚙): una sola còpia cadascuna
+            foreach (var r in new[] { ov, zr, cr }) if (Has(r)) Compose(r);
+
+            // 3) zones clicables ressaltades a la resta
+            var stc = g.Save();
+            foreach (var r in new[] { ov, zr, cr }) if (Has(r)) g.ExcludeClip(r);
             DrawHitAreas(g, clip);
-            if (!_isOverlay && AreasRect.IntersectsWith(clip)) DrawAreasButton(g);
+            DrawKnobZones(g, clip);
+            g.Restore(stc);
 
             if (DateTime.UtcNow < _barHideAt && _contentH > Height)
             {
@@ -5154,11 +5273,18 @@ namespace panelAIR1000
         public Point? AreasLocation { get; set; }
         /// <summary>Rectangle del botó "mostrar àrees" (coordenades del control), per posar-hi el ⚙ de l'app a sota.</summary>
         public Rectangle AreasButtonBounds => AreasRect;
+        /// <summary>Botó ⚙ de la pantalla AUX (mode A320): igual que el del dit (mida i aspecte) i 10 px per sota d'ell.</summary>
+        Rectangle AuxRect => new(AreasRect.X, AreasRect.Bottom + 10, AreasRect.Width, AreasRect.Height);
+        /// <summary>S'ha premut el ⚙ (obrir / tancar la pantalla AUX).</summary>
+        public event Action? AuxButtonClicked;
+        bool _auxOpen;
+        /// <summary>La pantalla AUX és oberta: el ⚙ mostra la creu de tancar.</summary>
+        public bool AuxOpen { get => _auxOpen; set { if (_auxOpen == value) return; _auxOpen = value; var ar = Rectangle.Inflate(AuxRect, 6, 6); Invalidate(ar); _ov?.Invalidate(ar); _ped?.Invalidate(ar); } }
         /// <summary>Si es ressalten les zones clicables (compartit pel panell principal i l'overhead).</summary>
         static bool s_showAreas;
         /// <summary>Color del botó "mostrar àrees": taronja, dibuixat molt subtil (poca opacitat) (a joc amb el panell A320).</summary>
-        static readonly Color AreasColor = Color.Orange;
-        Rectangle BtnRect(int b) => b == 1 ? PlusRect : b == 2 ? MinusRect : b == 4 ? AreasRect : b == 5 ? ThRect : b == 6 ? PedRect : b == 7 ? McduRect : PageRect;
+        static readonly Color AreasColor = Color.White;
+        Rectangle BtnRect(int b) => b == 1 ? PlusRect : b == 2 ? MinusRect : b == 4 ? AreasRect : b == 5 ? ThRect : b == 6 ? PedRect : b == 7 ? McduRect : b == 8 ? AuxRect : PageRect;
         Rectangle AllBtnsRect => Rectangle.Union(ModulesGroupRect, LayersGroupRect);
 
         /// <summary>Posició dels botons de zoom (null = posició per defecte a baix a la dreta).</summary>
@@ -5228,7 +5354,7 @@ namespace panelAIR1000
             if (_bmp == null) { Invalidate(); return; }   // no visible: es construirà en mostrar-se
             CancelBackgroundRender();
 
-            int cw = ContentWidth, ch = (int)Math.Ceiling(CurLH * (cw / LW));
+            int cw = ContentWidth, ch = (int)Math.Ceiling(CurLH * (cw / LW * CurA));
             // 1) vista prèvia instantània: la imatge actual escalada (GDI, uns pocs mil·lisegons)
             if (!CreateSurface(cw, ch, out var pH, out var pB, out var pDC, out var pOld))
             {
@@ -5242,7 +5368,7 @@ namespace panelAIR1000
             StretchBlt(pDC, 0, 0, cw, ch, _memDC, 0, 0, _bmp.Width, _contentH, SRCCOPY);
             FreeSurface(_bmp, _memDC, _oldObj, _hDib);
             _bmp = pB; _hDib = pH; _memDC = pDC; _oldObj = pOld;
-            _s = cw / LW;
+            _s = cw / LW * CurA;
             _contentH = ch;
             _offX = (Width - cw) / 2;
             _offY = _isOverlay ? 0 : Math.Max(0, Height - _contentH);
@@ -5394,34 +5520,36 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
             g.SmoothingMode = oldMode;
         }
 
-        int ZoomButtonAt(Point p) => _isOverlay ? 0 : Rectangle.Inflate(AreasRect, 8, 8).Contains(p) ? 4 : PageRect.Contains(p) ? 3 : ThRect.Contains(p) ? 5 : PedRect.Contains(p) ? 6 : McduRect.Contains(p) ? 7 : !AnyOverlayOpen ? 0 : PlusRect.Contains(p) ? 1 : MinusRect.Contains(p) ? 2 : 0;
+        int ZoomButtonAt(Point p) => _isOverlay ? 0 : Rectangle.Inflate(AreasRect, 8, 8).Contains(p) ? 4 : AuxRect.Contains(p) ? 8 : PageRect.Contains(p) ? 3 : ThRect.Contains(p) ? 5 : PedRect.Contains(p) ? 6 : McduRect.Contains(p) ? 7 : !AnyOverlayOpen ? 0 : PlusRect.Contains(p) ? 1 : MinusRect.Contains(p) ? 2 : 0;
 
         void ToggleShowAreas()
         {
             s_showAreas = !s_showAreas;
             Invalidate();
             _ov?.Invalidate();
+            _ped?.Invalidate();       // (també el pedestal i el mòdul MCDU)
+            _mcduMod?.Invalidate();
         }
 
         /// <summary>Ressalta en taronja les zones clicables dels elements (si el botó "mostrar àrees" està actiu).</summary>
         void DrawHitAreas(Graphics g, Rectangle clip)
         {
             if (!s_showAreas) return;
+            // mateix estil que les zones dels rotatius en tocar-los (perímetre blanc arrodonit, farciment blanc suau, + / −)
             var oldMode = g.SmoothingMode;
-            g.SmoothingMode = SmoothingMode.None;
-            using var fill = new SolidBrush(Color.FromArgb(60, Color.Orange));
-            using var pen = new Pen(Color.Orange, 2);
-            float sh = CurShift;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
             foreach (var el in _els)
+            {
+                if (!IsTappable(el)) continue;
+                int zi = -1;
                 foreach (var r in el.HitAreas)
                 {
+                    zi++;
                     // només el que respon de veritat a un toc (fora ombres, indicadors, etc.)
-                    if (!IsTappable(el) || !el.HitTest(new PointF(r.X + r.Width / 2, r.Y + r.Height / 2))) continue;
-                    var sr = Rectangle.Round(new RectangleF(_offX + r.X * _s, _offY - _scrollY + (r.Y - sh) * _s, r.Width * _s, r.Height * _s));
-                    if (!sr.IntersectsWith(clip)) continue;
-                    g.FillRectangle(fill, sr);
-                    g.DrawRectangle(pen, sr);
+                    if (!el.HitTest(new PointF(r.X + r.Width / 2, r.Y + r.Height / 2))) continue;
+                    DrawZone(g, clip, ZoneToScreen(r), el.ZoneSign(zi));
                 }
+            }
             g.SmoothingMode = oldMode;
         }
 
@@ -5443,16 +5571,50 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
             bool on = s_showAreas, pressed = _btnPressed == 4;
             using (var path = Oh.RoundRect(r, r.Width * 0.18f))
             {
-                using (var b = new SolidBrush(on ? Color.FromArgb(pressed ? 110 : 70, AreasColor) : Color.FromArgb(pressed ? 120 : 50, 0, 0, 0))) g.FillPath(b, path);
+                // (transparent: sense farciment; només un vel blanc molt suau quan està actiu o premut)
+                if (on || pressed) using (var b = new SolidBrush(Color.FromArgb(pressed ? 70 : 40, AreasColor))) g.FillPath(b, path);
                 using var p = new Pen(CalibrationMode ? Color.FromArgb(220, 255, 140, 0) : Color.FromArgb(on ? 150 : 80, AreasColor), Math.Max(1.5f, r.Width / 40f));
                 g.DrawPath(p, path);
             }
             using var f = new Font("Segoe UI Emoji", Math.Max(12f, r.Width * 0.5f), FontStyle.Bold, GraphicsUnit.Pixel);
-            using var tb = new SolidBrush(on ? Color.FromArgb(200, 255, 235, 200) : Color.FromArgb(95, AreasColor));
+            using var tb = new SolidBrush(on ? Color.FromArgb(235, 255, 255, 255) : Color.FromArgb(95, AreasColor));
             var oldHint = g.TextRenderingHint;
             g.TextRenderingHint = TextRenderingHint.AntiAlias;
             g.DrawString("👆", f, tb, r.X + r.Width / 2f, r.Y + r.Height / 2f, Oh.Center);
             g.TextRenderingHint = oldHint;
+            g.SmoothingMode = oldMode;
+        }
+
+        /// <summary>⚙ de la pantalla AUX: mateix aspecte que el botó del dit; amb la pantalla AUX oberta, una creu blanca.</summary>
+        void DrawAuxButton(Graphics g)
+        {
+            var r = AuxRect;
+            var oldMode = g.SmoothingMode;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            bool on = _auxOpen, pressed = _btnPressed == 8;
+            using (var path = Oh.RoundRect(r, r.Width * 0.18f))
+            {
+                // (transparent: sense farciment; només un vel blanc molt suau quan està actiu o premut)
+                if (on || pressed) using (var b = new SolidBrush(Color.FromArgb(pressed ? 70 : 40, AreasColor))) g.FillPath(b, path);
+                using var p = new Pen(Color.FromArgb(on ? 150 : 80, AreasColor), Math.Max(1.5f, r.Width / 40f));
+                g.DrawPath(p, path);
+            }
+            if (on)
+            {
+                using var xp = new Pen(Color.FromArgb(235, 255, 255, 255), Math.Max(3f, r.Width / 22f)) { StartCap = LineCap.Round, EndCap = LineCap.Round };
+                float m = r.Width * 0.3f;
+                g.DrawLine(xp, r.X + m, r.Y + m, r.Right - m, r.Bottom - m);
+                g.DrawLine(xp, r.Right - m, r.Y + m, r.X + m, r.Bottom - m);
+            }
+            else
+            {
+                using var f = new Font("Segoe UI Emoji", Math.Max(12f, r.Width * 0.5f), FontStyle.Bold, GraphicsUnit.Pixel);
+                using var tb = new SolidBrush(Color.FromArgb(95, AreasColor));
+                var oldHint = g.TextRenderingHint;
+                g.TextRenderingHint = TextRenderingHint.AntiAlias;
+                g.DrawString("⚙", f, tb, r.X + r.Width / 2f, r.Y + r.Height / 2f, Oh.Center);
+                g.TextRenderingHint = oldHint;
+            }
             g.SmoothingMode = oldMode;
         }
 
@@ -5546,6 +5708,7 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
                 if (Math.Abs(_flingV) < 40 || before == _scrollY) _flingV = 0;
             }
 
+            bool zonesActive = TickKnobZones();
             bool barPending = _barHideAt != DateTime.MinValue;
             if (barPending && DateTime.UtcNow >= _barHideAt)
             {
@@ -5554,7 +5717,7 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
                 Invalidate(new Rectangle(Width - Math.Max(6, Width / 320) - 6, 0, Math.Max(6, Width / 320) + 6, Height));
             }
 
-            if (_animating.Count == 0 && _tests.Count == 0 && _flingV == 0 && !barPending && !_hasPendingScroll && !_down && !_closing && !_opening)
+            if (_animating.Count == 0 && _tests.Count == 0 && _flingV == 0 && !barPending && !zonesActive && !_hasPendingScroll && !_down && !_closing && !_opening)
                 _anim.Stop();
         }
 
@@ -5585,6 +5748,12 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
                 if (!_isOverlay)
                     foreach (var zr in new[] { AllBtnsRect })
                         Invalidate(new Rectangle(zr.X - 3, 0, zr.Width + 6, Height));
+                // (capes: el botó del dit i el ⚙ del panell principal, que dibuixen elles)
+                if (_isOverlay && !_isMcduMod && Parent is A320OverheadControl sm)
+                {
+                    var cr = Rectangle.Union(sm.AreasRect, sm.AuxRect);
+                    Invalidate(new Rectangle(cr.X - 8, 0, cr.Width + 16, Height));
+                }
             }
             else Invalidate();
             if (_isOverlay) UpdateOverlayRegion();
@@ -5607,10 +5776,18 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
             catch { }
         }
 
+        /// <summary>(overhead / pedestal) Botó del dit (4) o ⚙ (8) del panell principal sota el punt (els dibuixa la capa).</summary>
+        int CornerBtnAt(Point p) => _isOverlay && !_isMcduMod && Parent is A320OverheadControl m
+            ? (Rectangle.Inflate(m.AreasRect, 8, 8).Contains(p) ? 4 : m.AuxRect.Contains(p) ? 8 : 0) : 0;
+        int _cornerBtn;
+        /// <summary>Toc al botó del dit o al ⚙ (des del panell principal o des d'una capa).</summary>
+        void CornerClick(int b) { if (b == 4) ToggleShowAreas(); else if (b == 8) AuxButtonClicked?.Invoke(); }
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
             base.OnMouseDown(e);
             if (e.Button != MouseButtons.Left) return;
+            if (CornerBtnAt(e.Location) is int cb && cb != 0) { _cornerBtn = cb; return; }
             int zb = ZoomButtonAt(e.Location);
             if (zb != 0)
             {
@@ -5642,6 +5819,7 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
         {
             if (_bmp == null || ElementAt(pt, out var pp) is not OhElement pe) return;
             _pressEl = pe;
+            TouchKnobZones(pe);
             ElementPressed?.Invoke(pe.Id);
             pe.PressStart(pp);
             if (pe.Animating) { _animating.Add(pe); StartAnim(); }
@@ -5673,7 +5851,7 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
                     {
                         EndPress();
                         _touchPress = true;
-                        if (ZoomButtonAt(pt) == 0 && !_closing && !_opening && !(!_isOverlay && !AnyOverlayOpen && (pt.Y <= EdgePx || pt.Y >= Height - EdgePx)))
+                        if (ZoomButtonAt(pt) == 0 && CornerBtnAt(pt) == 0 && !_closing && !_opening && !(!_isOverlay && !AnyOverlayOpen && (pt.Y <= EdgePx || pt.Y >= Height - EdgePx)))
                             BeginPress(pt);
                     }
                     else EndPress();
@@ -5728,18 +5906,25 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
         {
             base.OnMouseUp(e);
             if (_btnDrag != 0) { _btnDrag = 0; ZoomButtonsMoved?.Invoke(); return; }
+            if (_cornerBtn != 0)
+            {
+                int cb = _cornerBtn; _cornerBtn = 0;
+                if (CornerBtnAt(e.Location) == cb && Parent is A320OverheadControl cm) cm.CornerClick(cb);
+                return;
+            }
             if (_btnPressed != 0)
             {
                 int b = _btnPressed;
                 _btnPressed = 0;
-                Invalidate(Rectangle.Inflate(AllBtnsRect, 16, 16)); Invalidate(Rectangle.Inflate(AreasRect, 6, 6));
+                Invalidate(Rectangle.Inflate(AllBtnsRect, 16, 16)); Invalidate(Rectangle.Inflate(AreasRect, 6, 6)); Invalidate(Rectangle.Inflate(AuxRect, 6, 6));
                 if (ZoomButtonAt(e.Location) == b)
                 {
-                    if (b == 4) ToggleShowAreas();
+                    if (b == 4) CornerClick(4);
                     else if (b == 5) { ThrottleVisible = !ThrottleVisible; ThrottleVisibleChanged?.Invoke(ThrottleVisible); }
                     else if (b == 3) ToggleOverlay();
                     else if (b == 6) TogglePed();
                     else if (b == 7) ToggleMcduMod();
+                    else if (b == 8) CornerClick(8);
                     else if (ZoomTarget is A320OverheadControl zt) { zt.SetZoom(zt._zoom + (b == 1 ? 10 : -10)); InvalidateButtons(); }
                 }
                 return;
@@ -5774,7 +5959,7 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
             ScrollTo(_scrollY - e.Delta * Math.Max(1, Height / 12) / 120);
         }
 
-        PointF ToPanel(Point pt) => new((pt.X - _offX) / _s, (pt.Y - _offY + _scrollY) / _s + CurShift);
+        PointF ToPanel(Point pt) => new((pt.X - _offX) / _s + CurShiftX, (pt.Y - _offY + _scrollY) / _s + CurShift);
 
         OhElement? ElementAt(Point pt, out PointF p)
         {
@@ -5787,7 +5972,7 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
         void TapAt(Point pt)
         {
             if (!EnsureBitmap()) return;
-            ElementAt(pt, out var p)?.Tap(p);
+            if (ElementAt(pt, out var p) is OhElement te) { te.Tap(p); TouchKnobZones(te); }
         }
 
         protected override void OnResize(EventArgs e)
@@ -5925,6 +6110,10 @@ void DrawZoomButtons(Graphics g, Rectangle clip)
                 _page = 2;
                 _pages[2].LH = PedLH;
                 _pages[2].Frame = PedFramePoly;
+                // el marc del pedestal (27,6..1217,4) es mostra amb la mateixa amplada que el de l'overhead (12..1238):
+                // tot el pedestal un 3% més gran (sense deformar) i desplaçat
+                _pages[2].A = PedA;
+                _pages[2].ShiftX = PedShiftX;
                 _ls = 1f;
                 BuildPedestal();
                 _els = _els.OrderBy(e => e.Z).ToList();

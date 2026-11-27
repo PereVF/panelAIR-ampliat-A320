@@ -472,7 +472,7 @@ namespace SimConnect3
         /// <summary>Finestres col·locades per ordre (sense reconèixer): es continuen mirant i poden cedir el forat.</summary>
         private readonly HashSet<IntPtr> _fxTentative = new();
         private long _fxSeq;
-        private const string FenixPopoutText = "In Microsoft Flight Simulator, hold down the right **ALT** key on your keyboard and click the A320 displays one at a time, in this order: PFD, ND, upper ECAM, lower ECAM. panelAIR will place them in the panel.";
+        private const string FenixPopoutText = "In Microsoft Flight Simulator, hold down the right **ALT** key on your keyboard and click the A320 displays one at a time, in this order: PFD, ND, upper ECAM, lower ECAM and the small STBY gauge. panelAIR will place them in the panel.";
 
         /// <summary>
         /// Quina pantalla del Fenix és (0 PFD, 1 ND, 2 ECAM superior, 3 ECAM inferior, 4 ISIS, 5 MCDU; -1 si no se sap, p.ex. negra):

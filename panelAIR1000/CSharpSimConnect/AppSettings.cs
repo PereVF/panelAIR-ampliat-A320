@@ -17,6 +17,8 @@ namespace SimConnect3
         public bool SfsMonitorAutoLaunch { get; set; } = true;
         /// <summary>A320: es mostra el quadrant de gas (botó TH) al panell principal. Per defecte no.</summary>
         public bool A320ThrottleVisible { get; set; } = false;
+        /// <summary>A320: en tocar un rotatiu se'n mostren les zones de toc (menú AUX, OPTIONS). Per defecte sí.</summary>
+        public bool A320KnobZones { get; set; } = true;
 
         private static readonly string SettingsDir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "panelAIR");
