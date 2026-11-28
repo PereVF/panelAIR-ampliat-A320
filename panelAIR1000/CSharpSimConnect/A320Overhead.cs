@@ -4299,6 +4299,18 @@ namespace panelAIR1000
             _ped?.SetSpeedBrake(pos, armed);
         }
 
+        /// <summary>Palanca FLAPS llegida del simulador (0 … 4 = 0, 1, 2, 3, FULL).</summary>
+        public void SetFlaps(int index)
+        {
+            if (_byId.TryGetValue("PED_FLAPS", out var e) && e is OhFlapsLever fl && fl.SetFromSim(index))
+            {
+                DropFast();
+                Redraw(fl.DirtyBounds);
+                if (fl.Animating) { _animating.Add(fl); StartAnim(); }
+            }
+            _ped?.SetFlaps(index);
+        }
+
         /// <summary>Palanca del tren llegida del simulador (true = avall).</summary>
         public void SetGearLever(bool down)
         {
@@ -4816,7 +4828,7 @@ namespace panelAIR1000
         internal void NotifyChanged(OhElement el)
         {
             // arrossegant el SPEED BRAKE: només es redibuixa el pom sobre el fons guardat (fluid, sense repintar tota la zona)
-            if (el is OhSpeedBrake sbk && sbk.Grabbing) RedrawFast(el);
+            if ((el is OhSpeedBrake sbk && sbk.Grabbing) || (el is OhFlapsLever flk && flk.Grabbing)) RedrawFast(el);
             else Redraw(TopDirty(el));
             if (el.Animating) { _animating.Add(el); StartAnim(); }
             ElementChanged?.Invoke(el.Id, el.State);

@@ -549,7 +549,8 @@ namespace panelAIR1000
 
             // ═══════════════ SPEED BRAKE ═══════════════
             Pp(272, 1966, 797, 2330, null, null, Y(2015, 2290), Y(2030, 2290));   // SPEED BRAKE: estrelles grans
-            Lb("SPEED", 443, 2143, 14f); Lb("BRAKE", 443, 2167, 14f);
+            // (Pere, 2026-11-28: el rètol, a 15 px de pantalla del "1/2" de l'esquerra)
+            Lb("SPEED", 558, 2143, 14f); Lb("BRAKE", 558, 2167, 14f);
             _silk.Add(new OhBoxLabel("GND SPLRS ARMED", 668 * k, 1993 * k, 9f, Oh.Silk));
             // serigrafia com a la foto de Pere: fletxa just sota el rètol; la línia baixa arran de la ranura, a RET fa un graó cap
             // enfora i continua fins a FULL, on acaba en L cap a la ranura. Ratlles cap a dins: RET/4, 1/2 (més llarga), 3/4.
@@ -589,7 +590,7 @@ namespace panelAIR1000
 
             // ═══════════════ FLAPS ═══════════════
             Pp(1154, 1975, 1690, 2336, null, null, Y(2025, 2305), Y(2025, 2305));   // FLAPS: estrelles grans
-            Lb("FLAPS", 1471, 2178, 15f);
+            Lb("FLAPS", 1471 - 137f / 3.072f / k, 2178, 15f);   // la F a 20 px (4K) del voltant de la hucha
             Add(new OhFlapsLever("PED_FLAPS", R(1204, 2030, 1364, 2322), new[] { 2046f, 2108f, 2166f, 2230f, 2292f }.Select(y => y * k).ToArray(),
                                  new[] { "0", "1", "2", "3", "FULL" }, 112 * k, 128 * k));
 
@@ -634,7 +635,7 @@ namespace panelAIR1000
             ScL(820, 860, 1165, 860, 820, 1642, 1165, 1642);
             // SPEED BRAKE
             ScS(365, 1992, 375, 2297, 767, 2110, 767, 2218);
-            ScP(522, 2070, 522, 2235);
+            // (Pere, 2026-11-28: sense els 2 cargols "+" de sobre i sota del rètol SPEED BRAKE: abans ScP(522, 2070, 522, 2235))
             // COCKPIT DOOR
             ScS(335, 2375, 583, 2375, 731, 2525);
             // RUD TRIM / PARK BRK
@@ -1802,7 +1803,7 @@ namespace panelAIR1000
             using (var whole = Cone(grip.Y, grip.Bottom))
             {
                 // cara frontal (tot el bloc, la cara de dalt hi va a sobre)
-                using (var fb = new LinearGradientBrush(new RectangleF(grip.X, topF.Bottom - rad - 0.01f, grip.Width, fh + rad + 0.02f), Color.FromArgb(36, 38, 41), Color.FromArgb(6, 6, 7), 90f)) g.FillPath(fb, whole);
+                using (var fb = new LinearGradientBrush(new RectangleF(grip.X, topF.Bottom - rad - 0.01f, grip.Width, fh + rad + 0.02f), Color.FromArgb(28, 30, 36), Color.FromArgb(4, 4, 6), 90f)) g.FillPath(fb, whole);   // (colors del pom del FLAPS)
                 using (var fs = new LinearGradientBrush(new RectangleF(grip.X - 0.01f, 0, grip.Width + 0.02f, 1), Color.Black, Color.Black, 0f)
                 { InterpolationColors = new ColorBlend { Colors = new[] { Color.FromArgb(110, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), Color.FromArgb(130, 0, 0, 0) }, Positions = new[] { 0f, 0.25f, 0.7f, 1f } } })
                     g.FillPath(fs, whole);
@@ -1815,14 +1816,14 @@ namespace panelAIR1000
                 {
                     InterpolationColors = new ColorBlend
                     {
-                        Colors = new[] { Color.FromArgb(24, 25, 28), Color.FromArgb(62, 65, 70), Color.FromArgb(92, 96, 102), Color.FromArgb(46, 48, 52), Color.FromArgb(16, 16, 18) },
-                        Positions = new[] { 0f, 0.26f, 0.44f, 0.72f, 1f }
+                        Colors = new[] { Color.FromArgb(8, 9, 12), Color.FromArgb(26, 30, 40), Color.FromArgb(40, 46, 60), Color.FromArgb(22, 25, 33), Color.FromArgb(6, 6, 8) },
+                        Positions = new[] { 0f, 0.3f, 0.5f, 0.74f, 1f }
                     }
                 }) g.FillPath(gb, tp);
-                using (var hb = new LinearGradientBrush(new RectangleF(topF.X, topF.Y - 0.01f, topF.Width, topF.Height + 0.02f), Color.FromArgb(70 + (int)(30 * _arm), 255, 255, 255), Color.FromArgb(0, 255, 255, 255), 90f)) g.FillPath(hb, tp);
+                using (var hb = new LinearGradientBrush(new RectangleF(topF.X, topF.Y - 0.01f, topF.Width, topF.Height + 0.02f), Color.FromArgb(60 + (int)(30 * _arm), 120, 140, 170), Color.FromArgb(0, 120, 140, 170), 90f)) g.FillPath(hb, tp);
                 using (var pe = new Pen(Color.FromArgb(220, 4, 4, 5), 0.7f)) g.DrawPath(pe, tp);
             }            // aresta entre les dues cares: llum fina
-            using (var ep = new Pen(Color.FromArgb(110, 200, 205, 210), 0.6f)) g.DrawLine(ep, grip.X + rad + tap * 0.7f, topF.Bottom, grip.Right - rad - tap * 0.7f, topF.Bottom);
+            using (var ep = new Pen(Color.FromArgb(120, 140, 160, 185), 0.5f)) g.DrawLine(ep, grip.X + rad + tap * 0.7f, topF.Bottom, grip.Right - rad - tap * 0.7f, topF.Bottom);
         }
     }
     /// <summary>
@@ -1831,29 +1832,45 @@ namespace panelAIR1000
     /// </summary>
     internal sealed class OhFlapsLever : OhElement, IOhDraggable
     {
-        readonly RectangleF _gate; readonly float[] _det; readonly string[] _lab; readonly float _gw, _gh;
+        readonly float[] _det; readonly string[] _lab;
+        readonly FlapsArt.Geo _q;   // dibuix nou (A320FlapsArt.cs); _y / _det = alçada del coll dins la hucha
         public int Index; float _y; bool _grab, _moved; float _grabDy;
         public OhFlapsLever(string id, RectangleF gate, float[] detents, string[] labels, float gripW, float gripH)
         {
-            Id = id; _gate = gate; _det = detents; _lab = labels; _gw = gripW; _gh = gripH;
-            _y = detents[0];
-            float cx = gate.X + gate.Width / 2;
-            Bounds = RectangleF.FromLTRB(gate.X - 2, Math.Min(gate.Y, detents[0] - gripH / 2) - 2, gate.Right + 2, Math.Max(gate.Bottom, detents[^1] + gripH / 2) + 2);
+            Id = id; _lab = labels;
+            _q = FlapsArt.Build(gate, detents, gripW, gripH);
+            _det = _q.Det;
+            _y = _det[0];
+            Bounds = FlapsArt.Extent(_q);
         }
-        public override RectangleF DirtyBounds => RectangleF.Inflate(Bounds, 8, 10);
-        float Cx => _gate.X + _gate.Width / 2;
-        RectangleF Grip(float y) => new(Cx - _gw / 2, y - _gh / 2, _gw, _gh);
+        public override RectangleF DirtyBounds => RectangleF.Inflate(Bounds, 2, 2);
+        RectangleF Grip(float y) => FlapsArt.PomRect(_q, y);
         public override int State => Index;
         public override bool Animating => !_grab && Math.Abs(_y - _det[Index]) > 0.05f;
         public override void Tick(float dt) => _y = Approach(_y, _det[Index], dt * 260f);
-        public bool Grabbing => _grab;
+        // tota l'àrea de la palanca és seva: un toc-i-arrossegar a qualsevol lloc d'aquesta àrea no mou el pedestal
+        public bool Grabbing => _grab || _hold;
+        bool _hold; float _holdY; double _lastSend;
         public override void PressStart(PointF p)
         {
             _grab = RectangleF.Inflate(Grip(_y), 4, 4).Contains(p);
+            _hold = !_grab && Bounds.Contains(p); _holdY = p.Y;
             _moved = false; _grabDy = p.Y - _y;
+        }
+        /// <summary>Posició (0 … 4) llegida del simulador. No es toca mentre l'usuari l'arrossega ni just després
+        /// d'enviar-ne una (el simulador encara pot tornar la d'abans). Retorna true si ha canviat.</summary>
+        public bool SetFromSim(int i)
+        {
+            if (_grab || OhThrottle.Now - _lastSend < 0.6) return false;
+            i = Math.Clamp(i, 0, _det.Length - 1);
+            if (i == Index) return false;
+            Index = i;
+            return true;
         }
         public void DragTo(PointF p)
         {
+            // (fora del pom però dins l'àrea) no mou res; si el dit es desplaça, ja no compta com a toc
+            if (_hold) { if (Math.Abs(p.Y - _holdY) > 3f) _moved = true; return; }
             if (!_grab) return;
             float y = Math.Clamp(p.Y - _grabDy, _det[0], _det[^1]);
             if (!_moved && Math.Abs(y - _y) < 3f) return;
@@ -1864,6 +1881,7 @@ namespace panelAIR1000
         }
         public override void PressEnd()
         {
+            _hold = false;
             if (!_grab) return;
             _grab = false;
             if (!_moved) return;
@@ -1875,7 +1893,7 @@ namespace panelAIR1000
         {
             bool ch = i != Index;
             Index = i;
-            if (ch) Owner.RaiseCommand(Id, "POS:" + i);
+            if (ch) { _lastSend = OhThrottle.Now; Owner.RaiseCommand(Id, "POS:" + i); }
             Changed();
         }
         public override void Tap(PointF p)
@@ -1886,70 +1904,7 @@ namespace panelAIR1000
             if (ni != Index) SetTo(ni);
         }
 
-        public override void Draw(Graphics g)
-        {
-            var gt = _gate;
-            // guia metàl·lica
-            using (var pp = Oh.RoundRect(gt, gt.Width * 0.06f))
-            {
-                Oh.SoftShadow(g, pp, 1.2f, 2.2f, 3f, 130);
-                using (var b = new LinearGradientBrush(new RectangleF(gt.X - 0.01f, gt.Y, gt.Width + 0.02f, gt.Height), Color.Black, Color.Black, 0f)
-                {
-                    InterpolationColors = new ColorBlend
-                    {
-                        Colors = new[] { Color.FromArgb(104, 116, 128), Color.FromArgb(176, 188, 198), Color.FromArgb(132, 146, 158), Color.FromArgb(176, 188, 198), Color.FromArgb(96, 108, 120) },
-                        Positions = new[] { 0f, 0.2f, 0.5f, 0.8f, 1f }
-                    }
-                }) g.FillPath(b, pp);
-                using var pe = new Pen(Color.FromArgb(170, 40, 48, 56), 0.8f); g.DrawPath(pe, pp);
-            }
-            // ranura central
-            float sw = gt.Width * 0.14f;
-            var slot = RectangleF.FromLTRB(Cx - sw / 2, _det[0] - sw * 0.6f, Cx + sw / 2, _det[^1] + sw * 0.6f);
-            using (var sp = Oh.RoundRect(slot, sw / 2))
-            using (var sb = new SolidBrush(Color.FromArgb(12, 13, 15))) g.FillPath(sb, sp);
-            // marques de les posicions (en L, a banda i banda) i rètols
-            float lx0 = gt.X + gt.Width * 0.18f, lx1 = gt.Right - gt.Width * 0.18f;
-            using (var wp = new Pen(Color.FromArgb(235, 240, 244), 1.2f))
-            {
-                g.DrawLine(wp, lx0, _det[0] - 2, lx0, _det[^1]);
-                g.DrawLine(wp, lx1, _det[0] - 2, lx1, _det[^1]);
-                for (int i = 0; i < _det.Length; i++)
-                {
-                    g.DrawLine(wp, lx0, _det[i], lx0 + gt.Width * 0.05f, _det[i]);
-                    g.DrawLine(wp, lx1, _det[i], lx1 - gt.Width * 0.05f, _det[i]);
-                    float fs = _lab[i].Length > 2 ? 7.2f : 8.2f;
-                    Oh.Text(g, _lab[i], gt.Right - gt.Width * 0.08f, _det[i] - 4f, fs, Color.White);
-                    if (i == 0 || i == _det.Length - 1 || i == 3) Oh.Text(g, _lab[i], gt.X + gt.Width * 0.08f, _det[i] - 4f, fs, Color.White);
-                }
-            }
-            // pom: hexàgon arrodonit negre (més ample al mig) amb la tija a sota
-            var gr = Grip(_y);
-            var stem = new RectangleF(Cx - _gw * 0.16f, gr.Y + _gh * 0.6f, _gw * 0.32f, _gh * 0.62f);
-            using (var stp = Oh.RoundRect(stem, _gw * 0.14f))
-            using (var stb = new LinearGradientBrush(new RectangleF(stem.X - 0.01f, 0, stem.Width + 0.02f, 1), Color.FromArgb(10, 10, 12), Color.FromArgb(50, 52, 56), 0f)) g.FillPath(stb, stp);
-            using var hp = new GraphicsPath();
-            float w = gr.Width, h = gr.Height, x = gr.X, y = gr.Y;
-            hp.AddPolygon(new[]
-            {
-                new PointF(x + w * 0.24f, y), new PointF(x + w * 0.76f, y), new PointF(x + w, y + h * 0.32f), new PointF(x + w * 0.92f, y + h * 0.78f),
-                new PointF(x + w * 0.7f, y + h * 0.9f), new PointF(x + w * 0.3f, y + h * 0.9f), new PointF(x + w * 0.08f, y + h * 0.78f), new PointF(x, y + h * 0.32f)
-            });
-            Oh.SoftShadow(g, hp, w * 0.05f, h * 0.08f, w * 0.08f, 170);
-            using (var b = new LinearGradientBrush(new RectangleF(x - 0.01f, 0, w + 0.02f, 1), Color.Black, Color.Black, 0f)
-            {
-                InterpolationColors = new ColorBlend
-                {
-                    Colors = new[] { Color.FromArgb(14, 15, 17), Color.FromArgb(52, 55, 60), Color.FromArgb(78, 82, 88), Color.FromArgb(30, 31, 34), Color.FromArgb(8, 8, 9) },
-                    Positions = new[] { 0f, 0.28f, 0.42f, 0.72f, 1f }
-                }
-            }) g.FillPath(b, hp);
-            // pivot de dalt (ressalt arrodonit)
-            var knob = new RectangleF(Cx - w * 0.14f, y - h * 0.12f, w * 0.28f, h * 0.22f);
-            using (var kp = Oh.RoundRect(knob, w * 0.12f))
-            using (var kb = new LinearGradientBrush(new RectangleF(knob.X - 0.01f, 0, knob.Width + 0.02f, 1), Color.FromArgb(20, 21, 24), Color.FromArgb(90, 94, 100), 0f)) g.FillPath(kb, kp);
-            using (var pe = new Pen(Color.FromArgb(220, 4, 4, 5), 0.7f)) g.DrawPath(pe, hp);
-        }
+        public override void Draw(Graphics g) => FlapsArt.Draw(g, _q, _lab, _y);
     }
 
     /// <summary>PARK BRK: maneta negra amb el rètol i una agulla metàl·lica; gira 90° entre OFF (amunt) i ON (a la dreta).</summary>

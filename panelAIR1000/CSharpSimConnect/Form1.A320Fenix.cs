@@ -151,7 +151,14 @@ namespace SimConnect3
         };
 
         // pantalla+QNH+palanques, llums, selectors, llegendes, rellotge i data
-        const int FenixReadCount = 20 + 17 + 7 + 14 + 4 + 4 + 1;
+        const int FenixReadCount = 20 + 17 + 7 + 14 + 4 + 4 + 1 + 2;
+        /// <summary>
+        /// FLAPS del Fenix (PROVISIONAL, per confirmar amb Pere): es llegeixen dues L-vars candidates i cada canvi
+        /// s'apunta al registre (finestra de lectura en directe); la que es mogui és la bona. S'aplica S_FC_FLAPS (0 … 4).
+        /// </summary>
+        static readonly string[] FenixFlapsCand = { "S_FC_FLAPS", "A_FC_FLAPS" };
+        private readonly double?[] _fxFlapsRaw = new double?[2];
+        private int? _fxFlaps;
         /// <summary>
         /// SPEED BRAKE del Fenix (A_FC_SPEEDBRAKE, mesurat per Pere al simulador): 0 = armat (GND SPLRS), 1 = RET,
         /// 2 = 1/2, 3 = FULL, continu entre RET i FULL. App: posició 0 (RET) … 1 (FULL) → Fenix 1 + 2·posició.
@@ -218,6 +225,7 @@ namespace SimConnect3
             // (agulles: només quan canvien 0,02 o més, és a dir, 20 PSI)
             foreach (var c in FenixGear) { simconnect.AddToDataDefinition(def, "L:" + c, "Number", SIMCONNECT_DATATYPE.FLOAT64, c.StartsWith("N_") ? 0.02f : 0f, SimConnect.SIMCONNECT_UNUSED); n++; }
             simconnect.AddToDataDefinition(def, "L:" + FenixSpeedBrake, "Number", SIMCONNECT_DATATYPE.FLOAT64, 0.01f, SimConnect.SIMCONNECT_UNUSED); n++;
+            foreach (var fc in FenixFlapsCand) { simconnect.AddToDataDefinition(def, "L:" + fc, "Number", SIMCONNECT_DATATYPE.FLOAT64, 0.01f, SimConnect.SIMCONNECT_UNUSED); n++; }
             if (n != FenixReadCount) throw new InvalidOperationException("Fenix: el nombre de L-vars llegides no quadra amb FenixReadCount");
             simconnect.RegisterDataDefineStruct<FenixGlareStruct>(def);
             simconnect.RequestDataOnSimObject((REQUESTS)FenixReadReq, def, SimConnect.SIMCONNECT_OBJECT_ID_USER,
@@ -251,6 +259,13 @@ namespace SimConnect3
                 if (which != "RIGHT") rpn.Append($"{sim} (>L:A_FC_THROTTLE_LEFT_INPUT) ");
                 if (which != "LEFT") rpn.Append($"{sim} (>L:A_FC_THROTTLE_RIGHT_INPUT)");
                 SendGenericRpn(rpn.ToString().Trim());
+                return true;
+            }
+            // FLAPS: posició 0 … 4 (provisional: S_FC_FLAPS)
+            if (id == "PED_FLAPS")
+            {
+                if (cmd.StartsWith("POS:") && int.TryParse(cmd.AsSpan(4), out int fp))
+                    SendGenericRpn($"{Math.Clamp(fp, 0, 4)} (>L:{FenixFlapsCand[0]})");
                 return true;
             }
             // SPEED BRAKE: posició contínua (RET 1 … FULL 3), armar (0) i desarmar (1, RET)
@@ -330,6 +345,17 @@ namespace SimConnect3
                 _fxSpdBrkRaw = sbr;
                 try { System.IO.File.AppendAllText("panelAIR_App_crash.txt", $"\r\n[FENIX SPEEDBRAKE {DateTime.Now:HH:mm:ss}] {FenixSpeedBrake} = {sbr.ToString(System.Globalization.CultureInfo.InvariantCulture)}"); } catch { }
             }
+            // FLAPS (provisional): les dues candidates s'apunten al registre quan canvien
+            for (int fi = 0; fi < FenixFlapsCand.Length; fi++)
+            {
+                double fv = v[k++];
+                if (_fxFlapsRaw[fi] is not double fo || Math.Abs(fo - fv) > 0.001)
+                {
+                    _fxFlapsRaw[fi] = fv;
+                    try { System.IO.File.AppendAllText("panelAIR_App_crash.txt", $"\r\n[FENIX FLAPS {DateTime.Now:HH:mm:ss}] {FenixFlapsCand[fi]} = {fv.ToString(System.Globalization.CultureInfo.InvariantCulture)}"); } catch { }
+                }
+                if (fi == 0) _fxFlaps = (int)Math.Round(Math.Clamp(fv, 0, 4));
+            }
             ApplyFenixState();
         }
 
@@ -351,6 +377,7 @@ namespace SimConnect3
             if (_fxBrakes is var (ba, bl, br)) ov.SetBrakeGauge(ba, bl, br);
             if (_fxGearDown is bool gd) ov.SetGearLever(gd);
             if (_fxSpdBrk is var (sbp, sba)) ov.SetSpeedBrake(sbp, sba);
+            if (_fxFlaps is int fxf) ov.SetFlaps(fxf);
         }
 
         // ── Pantalles pop-out del Fenix: totes es diuen "WASMINSTRUMENT" → s'assignen per ordre de sortida ──
