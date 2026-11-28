@@ -4287,6 +4287,18 @@ namespace panelAIR1000
                 if (si is OhRegPlate rp && rp.Text != reg) { rp.Text = reg; Redraw(rp.Bounds); }
         }
 
+        /// <summary>SPEED BRAKE llegit del simulador: posició (0 RET … 1 FULL) i GND SPLRS armat (és al pedestal).</summary>
+        public void SetSpeedBrake(float pos, bool armed)
+        {
+            if (_byId.TryGetValue("PED_SPEEDBRAKE", out var e) && e is OhSpeedBrake sb && sb.SetFromSim(pos, armed))
+            {
+                DropFast();
+                Redraw(sb.DirtyBounds);
+                if (sb.Animating) { _animating.Add(sb); StartAnim(); }
+            }
+            _ped?.SetSpeedBrake(pos, armed);
+        }
+
         /// <summary>Palanca del tren llegida del simulador (true = avall).</summary>
         public void SetGearLever(bool down)
         {
@@ -4591,6 +4603,14 @@ namespace panelAIR1000
                 using var kp = new GraphicsPath();
                 kp.AddPolygon(ToScreen(PedGearKnob));
                 rg.Union(kp);
+                // els racons on s'estreny també són del pedestal (s'hi pinta la paret: no s'hi veu el que hi ha a sota)
+                if (_page == 2)
+                    foreach (var w in PedWells)
+                    {
+                        using var wp = new GraphicsPath();
+                        wp.AddPolygon(ToScreen(new[] { new PointF(w.Left, w.Top), new PointF(w.Right, w.Top), new PointF(w.Right, w.Bottom), new PointF(w.Left, w.Bottom) }));
+                        rg.Union(wp);
+                    }
             }
             rg.Intersect(ClientRectangle);
             if (Parent is A320OverheadControl main && !_isMcduMod)

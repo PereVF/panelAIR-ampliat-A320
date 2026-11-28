@@ -151,7 +151,14 @@ namespace SimConnect3
         };
 
         // pantalla+QNH+palanques, llums, selectors, llegendes, rellotge i data
-        const int FenixReadCount = 20 + 17 + 7 + 14 + 4 + 4;
+        const int FenixReadCount = 20 + 17 + 7 + 14 + 4 + 4 + 1;
+        /// <summary>
+        /// SPEED BRAKE del Fenix (A_FC_SPEEDBRAKE, mesurat per Pere al simulador): 0 = armat (GND SPLRS), 1 = RET,
+        /// 2 = 1/2, 3 = FULL, continu entre RET i FULL. App: posició 0 (RET) … 1 (FULL) → Fenix 1 + 2·posició.
+        /// </summary>
+        const string FenixSpeedBrake = "A_FC_SPEEDBRAKE";
+        private double? _fxSpdBrkRaw;
+        private (float pos, bool armed)? _fxSpdBrk;
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct FenixGlareStruct
         {
@@ -210,6 +217,7 @@ namespace SimConnect3
             foreach (var c in FenixClock) { simconnect.AddToDataDefinition(def, "L:" + c, "Number", SIMCONNECT_DATATYPE.FLOAT64, 0, SimConnect.SIMCONNECT_UNUSED); n++; }
             // (agulles: només quan canvien 0,02 o més, és a dir, 20 PSI)
             foreach (var c in FenixGear) { simconnect.AddToDataDefinition(def, "L:" + c, "Number", SIMCONNECT_DATATYPE.FLOAT64, c.StartsWith("N_") ? 0.02f : 0f, SimConnect.SIMCONNECT_UNUSED); n++; }
+            simconnect.AddToDataDefinition(def, "L:" + FenixSpeedBrake, "Number", SIMCONNECT_DATATYPE.FLOAT64, 0.01f, SimConnect.SIMCONNECT_UNUSED); n++;
             if (n != FenixReadCount) throw new InvalidOperationException("Fenix: el nombre de L-vars llegides no quadra amb FenixReadCount");
             simconnect.RegisterDataDefineStruct<FenixGlareStruct>(def);
             simconnect.RequestDataOnSimObject((REQUESTS)FenixReadReq, def, SimConnect.SIMCONNECT_OBJECT_ID_USER,
@@ -243,6 +251,16 @@ namespace SimConnect3
                 if (which != "RIGHT") rpn.Append($"{sim} (>L:A_FC_THROTTLE_LEFT_INPUT) ");
                 if (which != "LEFT") rpn.Append($"{sim} (>L:A_FC_THROTTLE_RIGHT_INPUT)");
                 SendGenericRpn(rpn.ToString().Trim());
+                return true;
+            }
+            // SPEED BRAKE: posició contínua (RET 1 … FULL 3), armar (0) i desarmar (1, RET)
+            if (id == "PED_SPEEDBRAKE")
+            {
+                var ic = System.Globalization.CultureInfo.InvariantCulture;
+                if (cmd.StartsWith("POS:") && float.TryParse(cmd.AsSpan(4), System.Globalization.NumberStyles.Float, ic, out float sp))
+                    SendGenericRpn($"{(1 + 2 * Math.Clamp(sp, 0f, 1f)).ToString("0.###", ic)} (>L:{FenixSpeedBrake})");
+                else if (cmd == "ARM") SendGenericRpn($"0 (>L:{FenixSpeedBrake})");
+                else if (cmd == "DISARM") SendGenericRpn($"1 (>L:{FenixSpeedBrake})");
                 return true;
             }
             if (cmd.StartsWith("POS:") && int.TryParse(cmd.AsSpan(4), out int pos))
@@ -304,6 +322,14 @@ namespace SimConnect3
             _fxUtcBlink = blink;
             _fxBrakes = ((float)v[k++], (float)v[k++], (float)v[k++]);
             _fxGearDown = v[k++] > 0.5;
+            // SPEED BRAKE: 0 armat, 1 RET … 3 FULL (s'apunta també al registre, per a la finestra de lectura en directe)
+            double sbr = v[k++];
+            _fxSpdBrk = sbr < 0.5 ? (0f, true) : ((float)Math.Clamp((sbr - 1) / 2, 0, 1), false);
+            if (_fxSpdBrkRaw is not double old || Math.Abs(old - sbr) > 0.001)
+            {
+                _fxSpdBrkRaw = sbr;
+                try { System.IO.File.AppendAllText("panelAIR_App_crash.txt", $"\r\n[FENIX SPEEDBRAKE {DateTime.Now:HH:mm:ss}] {FenixSpeedBrake} = {sbr.ToString(System.Globalization.CultureInfo.InvariantCulture)}"); } catch { }
+            }
             ApplyFenixState();
         }
 
@@ -324,6 +350,7 @@ namespace SimConnect3
             if (_fxClock is var (fc, fu, fe)) ov.SetClock(fc, fu, fe, _fxUtcBlink);
             if (_fxBrakes is var (ba, bl, br)) ov.SetBrakeGauge(ba, bl, br);
             if (_fxGearDown is bool gd) ov.SetGearLever(gd);
+            if (_fxSpdBrk is var (sbp, sba)) ov.SetSpeedBrake(sbp, sba);
         }
 
         // ── Pantalles pop-out del Fenix: totes es diuen "WASMINSTRUMENT" → s'assignen per ordre de sortida ──
@@ -394,10 +421,13 @@ namespace SimConnect3
                     int kind;
                     using (var bmp = XPlaneWindows.Capture(h)) kind = bmp == null ? -1 : ClassifyFenix(bmp);
                     if (kind < 0) continue;
+                    // ND segur (GS / TAS a dalt a l'esquerra): és el ND sense cap dubte, encara que abans s'hagués pres per MCDU
+                    bool ndSure = kind == FxNdSure;
+                    if (ndSure) kind = 1;
                     // una MCDU ja reconeguda no surt mai cap al forat del ND: "ND" només és el cas per defecte (p.ex. una
                     // pàgina plena de text on les files queden enganxades) i una MCDU no s'ha de veure mai al MFD. Només en
-                    // surt si ara té una signatura clara d'una altra pantalla (PFD, ISIS o ECAM).
-                    if (kind == 1 && placed && (cur == FxMcduSlot || cur == FxMcdu2Slot)) kind = cur;
+                    // surt si ara té una signatura clara d'una altra pantalla (PFD, ISIS, ECAM o el GS / TAS del ND).
+                    if (!ndSure && kind == 1 && placed && (cur == FxMcduSlot || cur == FxMcdu2Slot)) kind = cur;
                     _fxLastKind[h] = kind;
                     // MCDU: dos forats (esquerra / dreta). Si ja és en un dels dos, hi continua; si no, va al primer lliure
                     if (kind == FxMcduSlot)
@@ -410,12 +440,12 @@ namespace SimConnect3
                             if (leftTaken) kind = FxMcdu2Slot;
                         }
                     }
-                    if (placed && cur == kind) { if (kind != 1) _fxTentative.Remove(h); _fxMismatch.Remove(h); continue; }
+                    if (placed && cur == kind) { if (kind != 1 || ndSure) _fxTentative.Remove(h); _fxMismatch.Remove(h); continue; }
                     if (placed && !tentative)
                     {
                         int n = _fxMismatch.GetValueOrDefault(h) + 1;
                         _fxMismatch[h] = n;
-                        if (n < (kind == 1 ? 3 : 2)) continue;
+                        if (!ndSure && n < (kind == 1 ? 3 : 2)) continue;
                         _fxSlots.Remove(h); _fxMismatch.Remove(h);   // ja no sembla el seu forat: es torna a col·locar
                     }
                     IntPtr holder = IntPtr.Zero;
@@ -427,7 +457,7 @@ namespace SimConnect3
                         _fxSlots.Remove(holder); _fxTentative.Remove(holder);                           // la provisional cedeix el forat
                     }
                     _fxSlots[h] = kind;
-                    if (kind == 1) _fxTentative.Add(h); else _fxTentative.Remove(h);
+                    if (kind == 1 && !ndSure) _fxTentative.Add(h); else _fxTentative.Remove(h);
                 }
                 // 2) si al cap de 6 s alguna no s'ha pogut reconèixer (p.ex. un PC on la captura surt negra), es col·loca
                 //    per ordre d'aparició al primer forat lliure, seguint l'ordre que demana l'avís (PFD, ND, ECAM sup., ECAM inf.)
@@ -481,6 +511,42 @@ namespace SimConnect3
         ///  - ECAM superior (EWD): línia horitzontal clara llarga al 55-78% (separació entre motors i missatges);
         ///  - ND: la resta (pantalla amb contingut però sense cap d'aquestes línies llargues).
         /// </summary>
+        /// <summary>Resultat de ClassifyFenix: el ND segur (porta el GS / TAS a dalt a l'esquerra). Es col·loca com el ND (1).</summary>
+        private const int FxNdSure = 9;
+
+        /// <summary>
+        /// El ND és l'única pantalla amb "GS 0 TAS ---" a dalt a l'esquerra (Pere): text blanc (GS), valor verd, text blanc
+        /// (TAS), valor verd. Es busca una fila del racó de dalt a l'esquerra que, d'esquerra a dreta, passi per blanc → verd
+        /// → blanc → verd. (Les files de la barra de títol de Windows, clares, no hi compten.)
+        /// </summary>
+        private static bool HasNdGsTas(byte[] px, int stride, int w, int h)
+        {
+            int xe = (int)(w * 0.45), ye = (int)(h * 0.22);
+            int rows = 0;
+            for (int y = 0; y < ye; y++)
+            {
+                int light = 0;
+                for (int x = 0; x < xe; x++)
+                {
+                    int i = y * stride + x * 4;
+                    if (Math.Min(px[i], Math.Min(px[i + 1], px[i + 2])) > 140) light++;
+                }
+                if (light > xe * 0.35) continue;   // barra de títol (fons clar)
+                int stage = 0;                      // 0 → busca blanc, 1 → verd, 2 → blanc, 3 → verd, 4 = trobat
+                for (int x = 0; x < xe && stage < 4; x++)
+                {
+                    int i = y * stride + x * 4;
+                    int bl = px[i], gr = px[i + 1], rd = px[i + 2];
+                    // (la lletra és fina i petita: a la captura el "blanc" surt gris, mesurat ~70-130 per canal)
+                    bool white = Math.Min(rd, Math.Min(gr, bl)) > 55 && Math.Max(rd, Math.Max(gr, bl)) - Math.Min(rd, Math.Min(gr, bl)) < 45;
+                    bool green = gr > 90 && gr > rd * 1.3f && gr > bl * 1.1f;
+                    if ((stage % 2 == 0 && white) || (stage % 2 == 1 && green)) stage++;
+                }
+                if (stage >= 4 && ++rows >= 1) return true;
+            }
+            return false;
+        }
+
         private static int ClassifyFenix(System.Drawing.Bitmap b)
         {
             int w = b.Width, h = b.Height;
@@ -529,6 +595,8 @@ namespace SimConnect3
             if ((double)(sky + ground) / tot > 0.03 && (double)sky / tot > 0.005 && (double)ground / tot > 0.005) return 0;
             if (sd >= 0.85) return 3;
             if (ewd >= 0.5) return 2;
+            // ND segur: GS / TAS a dalt a l'esquerra (un cop descartats PFD, ISIS i ECAM, que també poden tenir blanc i verd)
+            if (HasNdGsTas(px, stride, w, h)) return FxNdSure;
             // MCDU: només text, en files separades per franges fosques; cada bloc de files enceses fa com a molt l'alçada
             // d'una línia de text (mesurat a la pàgina MCDU MENU: 3 blocs, el més alt el 8,7% de l'alçada). El ND té arcs
             // que travessen moltes files seguides (blocs molt alts). Franja fosca: almenys l'1% de l'alçada.

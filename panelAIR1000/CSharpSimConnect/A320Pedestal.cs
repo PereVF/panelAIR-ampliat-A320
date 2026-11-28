@@ -40,11 +40,18 @@ namespace panelAIR1000
         static float McduRowY(int row) => 65 + McduScrDy + McduTextInsetY + (row + 0.5f) * McduRowH;
 
         static readonly PointF[] PedFramePoly = MakePedFrame();
+        /// <summary>Racons a banda i banda on el pedestal s'estreny (sota la part ampla, fins a baix): s'hi pinta la paret.</summary>
+        static readonly RectangleF[] PedWells =
+        {
+            RectangleF.FromLTRB(SideL0 * PedK - 14f, 1930 * PedK + 14f, 272 * PedK - 14f, 3100 * PedK + 14f),
+            RectangleF.FromLTRB(1696 * PedK + 14f, 1930 * PedK + 14f, SideR1 * PedK + 14f, 3100 * PedK + 14f),
+        };
         /// <summary>
         /// Escala i desplaçament amb què es mostra el pedestal perquè el seu marc (de SideL0 − 14 a SideR1 + 14, unitats
         /// lògiques) ocupi a la pantalla el mateix que el de l'overhead (de 12 a 1238).
         /// </summary>
-        const float OvhFrameL = 12f, OvhFrameR = 1238f;
+        // (2026-11-28, Pere: el pedestal ocupa tota l'amplada de la pantalla; abans igual que l'overhead, 12 … 1238)
+        const float OvhFrameL = 0f, OvhFrameR = LW;
         const float PedFrameL = SideL0 * PedK - 14f, PedFrameR = SideR1 * PedK + 14f;
         const float PedA = (OvhFrameR - OvhFrameL) / (PedFrameR - PedFrameL);
         const float PedShiftX = PedFrameL - OvhFrameL / PedA;
@@ -536,6 +543,9 @@ namespace panelAIR1000
             Add(new OhAnnunciator("PED_ENG_FIRE_1", R(848, 1846, 912, 1914), "FIRE", "FAULT"));
             Add(new OhAnnunciator("PED_ENG_FIRE_2", R(1078, 1846, 1142, 1914), "FIRE", "FAULT"));
             Lb("1", 880, 1932, 10f); Lb("2", 1110, 1932, 10f);
+
+            // racons on el pedestal s'estreny: paret, esglaó, paret i fosc (no es veu el que hi ha a sota)
+            _silk.Add(new OhPedSideWell(PedWells[0], true)); _silk.Add(new OhPedSideWell(PedWells[1], false));
 
             // ═══════════════ SPEED BRAKE ═══════════════
             Pp(272, 1966, 797, 2330, null, null, Y(2015, 2290), Y(2030, 2290));   // SPEED BRAKE: estrelles grans
@@ -1444,6 +1454,114 @@ namespace panelAIR1000
     }
 
     /// <summary>
+    /// Racó on el pedestal s'estreny (a banda i banda, sota la part ampla): en lloc de deixar veure el que hi ha a sota,
+    /// la cara vertical de sota la part ampla vista des de la cua: una primera paret curta, un esglaó i una segona paret;
+    /// la resta, fosc (el mateix to que la franja de sota la tauleta i els recolzapeus del panell principal).
+    /// </summary>
+    internal sealed class OhPedSideWell : OhSilk
+    {
+        // Disseny aprovat per Pere a la URL (2026-11-28), mesures en px de la pantalla 4K convertides a unitats (÷ 3,072):
+        //  - fosc, amb la cantonada oberta (on la vora de fora del marc gira cap a l'horitzontal) de radi 12 i la tancada
+        //    (on comença la columna estreta) amb el radi original del marc, 2,5;
+        //  - paret: cara de sota del tram on la part ampla passa a l'estreta, vista des de la cua. A dalt, la vora del
+        //    perímetre (l'arc i l'horitzontal); a l'esquerra, una ratlla inclinada (busca a les 23 minuts) que surt tangent
+        //    a l'arc (+1 px, triat amb el lliscador); a baix, una horitzontal a 25 px fins a la columna.
+        readonly RectangleF _r; readonly bool _left;
+        const float R = 12f, R2 = 2.5f, Px = 1f / 3.072f;
+        const float WallH = 25 * Px, Offset = 1 * Px;
+        static TextureBrush? _grain;
+        public OhPedSideWell(RectangleF r, bool left)
+        {
+            _r = r; _left = left;
+            Bounds = RectangleF.FromLTRB(r.Left - 1, r.Top - R - 1, r.Right + 1, r.Bottom + 1);
+        }
+
+        static TextureBrush Grain()
+        {
+            if (_grain != null) return _grain;
+            var bmp = new Bitmap(64, 64, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+            var rnd = new Random(1234);
+            for (int y = 0; y < 64; y++)
+                for (int x = 0; x < 64; x++)
+                {
+                    int n = rnd.Next(-5, 6);
+                    // (±5 nivells, com a la URL: sobre un to ~45, un blanc / negre a alfa n×1,2 en fa ~±5)
+                    bmp.SetPixel(x, y, n >= 0 ? Color.FromArgb((int)(n * 1.2f), 255, 255, 255) : Color.FromArgb((int)(-n * 1.2f) * 6, 0, 0, 0));
+                }
+            return _grain = new TextureBrush(bmp);
+        }
+
+        public override void Draw(Graphics g)
+        {
+            float T = _r.Top, B = _r.Bottom + 1, sg = _left ? 1 : -1;
+            float ox = _left ? _r.Left : _r.Right, ix = _left ? _r.Right : _r.Left;
+            float X(float d) => ox + sg * d;
+            using var db = new SolidBrush(Color.FromArgb(0x16, 0x1a, 0x1f));
+            // 1) el fosc en una sola forma: cantonada oberta (radi gran), vora de dalt, cantonada tancada (radi del marc)
+            using (var gp = new GraphicsPath())
+            {
+                if (_left)
+                {
+                    gp.AddArc(ox, T - 2 * R, 2 * R, 2 * R, 180, -90);
+                    gp.AddLine(ox + R, T, ix - R2, T);
+                    gp.AddArc(ix - 2 * R2, T, 2 * R2, 2 * R2, 270, 90);
+                    gp.AddLine(ix, T + R2, ix, B);
+                    gp.AddLine(ix, B, ox - 1, B);
+                    gp.AddLine(ox - 1, B, ox - 1, T - R);
+                }
+                else
+                {
+                    gp.AddArc(ox - 2 * R, T - 2 * R, 2 * R, 2 * R, 0, 90);
+                    gp.AddLine(ox - R, T, ix + R2, T);
+                    gp.AddArc(ix, T, 2 * R2, 2 * R2, 270, -90);
+                    gp.AddLine(ix, T + R2, ix, B);
+                    gp.AddLine(ix, B, ox + 1, B);
+                    gp.AddLine(ox + 1, B, ox + 1, T - R);
+                }
+                gp.CloseFigure();
+                g.FillPath(db, gp);
+            }
+            // 2) paret
+            float ang = 138f * MathF.PI / 180f, tanA = MathF.Sin(ang) / -MathF.Cos(ang);
+            float q0x = R - R * MathF.Cos(42f * MathF.PI / 180f), q0y = T - R + R * MathF.Sin(ang);
+            float p0 = q0x + Offset, p1 = p0 + (T + WallH - q0y) * tanA, pin = Math.Abs(ix - ox);
+            using var wp = new GraphicsPath();
+            wp.AddLine(X(p0), q0y, X(p1), T + WallH);
+            wp.AddLine(X(p1), T + WallH, X(pin), T + WallH);
+            wp.AddLine(X(pin), T + WallH, X(pin), T + R2);
+            if (_left) wp.AddArc(ix - 2 * R2, T, 2 * R2, 2 * R2, 0, -90); else wp.AddArc(ix, T, 2 * R2, 2 * R2, 180, 90);
+            wp.AddLine(X(pin - R2), T, X(R), T);
+            if (_left) wp.AddArc(ox, T - 2 * R, 2 * R, 2 * R, 90, 48); else wp.AddArc(ox - 2 * R, T - 2 * R, 2 * R, 2 * R, 90, -48);
+            wp.CloseFigure();
+            // ombra curta de la paret cap al fosc
+            var shR = RectangleF.FromLTRB(Math.Min(X(p1), X(pin)), T + WallH, Math.Max(X(p1), X(pin)), T + WallH + 12 * Px);
+            using (var shb = new LinearGradientBrush(new RectangleF(shR.X, shR.Y - 0.01f, Math.Max(0.1f, shR.Width), shR.Height + 0.02f),
+                       Color.FromArgb(110, 0, 0, 0), Color.FromArgb(0, 0, 0, 0), 90f))
+                g.FillRectangle(shb, shR);
+            // cara: to del marc a l'ombra, més clar a dalt i més fosc a baix
+            using (var fb = new LinearGradientBrush(new RectangleF(0, q0y - 0.01f, 10, T + WallH - q0y + 0.02f),
+                       Color.FromArgb(52, 63, 75), Color.FromArgb(30, 37, 45), 90f))
+                g.FillPath(fb, wp);
+            // llum suau prop de l'aresta inclinada
+            var lrect = RectangleF.FromLTRB(Math.Min(X(p0), X(p1 + 40 * Px)), q0y - 0.5f, Math.Max(X(p0), X(p1 + 40 * Px)), T + WallH + 0.5f);
+            using (var lb = new LinearGradientBrush(new RectangleF(lrect.X - 0.01f, lrect.Y, lrect.Width + 0.02f, lrect.Height),
+                       Color.FromArgb(_left ? 34 : 0, 170, 185, 200), Color.FromArgb(_left ? 0 : 34, 170, 185, 200), 0f))
+            {
+                var st = g.Save(); g.SetClip(lrect, CombineMode.Intersect);
+                g.FillPath(lb, wp);
+                g.Restore(st);
+            }
+            // textura: gra fi a la mida dels píxels de la pantalla
+            var tb = Grain();
+            tb.ResetTransform(); tb.ScaleTransform(1f / Math.Max(0.01f, Oh.PixelScale), 1f / Math.Max(0.01f, Oh.PixelScale));
+            g.FillPath(tb, wp);
+            // lluentors: aresta fina a la ratlla inclinada i, més suau, a la de baix
+            using (var e1 = new Pen(Color.FromArgb(150, 125, 140, 156), 1.3f * Px)) g.DrawLine(e1, X(p0), q0y + 0.5f * Px, X(p1), T + WallH);
+            using (var e2 = new Pen(Color.FromArgb(90, 110, 124, 140), 1f * Px)) g.DrawLine(e2, X(p1), T + WallH - 0.5f * Px, X(pin) - sg * Px, T + WallH - 0.5f * Px);
+        }
+    }
+
+    /// <summary>
     /// SPEED BRAKE: palanca que llisca per una ranura (RET a dalt, FULL a baix). S'arrossega amb el dit; tocar el pom a
     /// RET l'arma (GND SPLRS ARMED: el pom puja); tocar per sobre / per sota del pom el mou a RET / 1/2 / FULL.
     /// </summary>
@@ -1467,6 +1585,18 @@ namespace panelAIR1000
         // tota l'àrea del recorregut és de la palanca: un toc-i-arrossegar a qualsevol lloc d'aquesta àrea no mou el pedestal
         public bool Grabbing => _grab || _hold;
         bool _hold; float _holdY;
+        /// <summary>
+        /// Posició (0 RET … 1 FULL) i armat llegits del simulador. No es toca mentre l'usuari l'arrossega ni just després
+        /// d'enviar-ne una (el simulador encara pot tornar el valor d'abans). Retorna true si ha canviat.
+        /// </summary>
+        public bool SetFromSim(float pos, bool armed)
+        {
+            if (_grab || OhThrottle.Now - _lastSend < 0.6) return false;
+            pos = Math.Clamp(pos, 0f, 1f);
+            if (Math.Abs(pos - Pos) < 0.005f && armed == Armed) return false;
+            Pos = pos; Armed = armed;
+            return true;
+        }
         /// <summary>(només per a renders de prova) no dibuixa l'anell blanc.</summary>
         internal static bool HideRing;
 
@@ -1508,11 +1638,15 @@ namespace panelAIR1000
             {
                 if (Pos > 0.02f) return;
                 Armed = !Armed;
+                _lastSend = OhThrottle.Now;
                 Owner.RaiseCommand(Id, Armed ? "ARM" : "DISARM");
                 Changed();
                 return;
             }
-            Pos = p.Y < Y(Pos) ? (Pos > 0.5f ? 0.5f : 0f) : (Pos < 0.5f ? 0.5f : 1f);
+            // cada toc mou un 25% (a la ratlla de serigrafia següent: RET, 1/4, 1/2, 3/4, FULL)
+            Pos = p.Y < Y(Pos)
+                ? Math.Max(0f, MathF.Ceiling(Pos * 4f - 0.01f) / 4f - 0.25f)
+                : Math.Min(1f, MathF.Floor(Pos * 4f + 0.01f) / 4f + 0.25f);
             Armed = false;
             Send(); Changed();
         }

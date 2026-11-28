@@ -113,6 +113,8 @@ namespace SimConnect3
             "A32NX_GEAR_LEVER_POSITION_REQUEST",
             // 46 posició animada de la palanca 3D (0 amunt … 1 avall): diu si la palanca de la VC s'ha mogut de debò
             "A32NX_GEAR_HANDLE_POSITION",
+            // 47-48 SPEED BRAKE (API del FBW): posició de la palanca (0 RET … 1 FULL) i GND SPLRS armat (0/1)
+            "A32NX_SPOILERS_HANDLE_POSITION", "A32NX_SPOILERS_ARMED",
         };
         /// <summary>Variables de simulació (amb unitat) que es llegeixen després dels selectors: A/SKID (1 = ON) i hora UTC (s).</summary>
         static readonly (string name, string unit)[] MsfsA320SimVars =
@@ -123,7 +125,7 @@ namespace SimConnect3
         };
 
         // lectura: pantalla + llums + selectors + variables de simulació, tot en un sol bloc de nombres
-        const int MsfsA320ReadCount = 47 + 17 + 4 + 6;
+        const int MsfsA320ReadCount = 49 + 17 + 4 + 6;
 
         /// <summary>
         /// DATE del rellotge al FBW: el FBW canvia entre hora i data a cada ordre i no té cap LVAR que ho digui. L'app envia
@@ -191,6 +193,7 @@ namespace SimConnect3
         private (float accu, float left, float right)? _msBrakes;                        // indicador triple (milers de PSI)
         private bool? _msGearDown;                                                       // palanca del tren
         private bool? _msGearAnimDown;                                                   // palanca 3D (amb marge del 5%)
+        private (float pos, bool armed)? _msSpdBrk;                                      // SPEED BRAKE
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         struct A320GlareStruct
         {
@@ -370,6 +373,16 @@ namespace SimConnect3
                 }
                 // palanca del tren: ordres estàndard que el FBW intercepta (a terra, el bloqueig de la palanca la frena)
                 if (id == "MIP_GEAR_LEVER" && (cmd == "UP" || cmd == "DOWN")) { SendGenericRpn(cmd == "UP" ? "(>K:GEAR_UP)" : "(>K:GEAR_DOWN)"); return true; }
+                // SPEED BRAKE (API del FBW): posició amb SPOILERS_SET (0 … 16384); armar / desarmar amb el toggle, només si cal
+                if (id == "PED_SPEEDBRAKE")
+                {
+                    if (cmd.StartsWith("POS:") && float.TryParse(cmd.AsSpan(4), System.Globalization.NumberStyles.Float,
+                            System.Globalization.CultureInfo.InvariantCulture, out float sp))
+                        SendGenericRpn($"{(int)Math.Round(Math.Clamp(sp, 0f, 1f) * 16384)} (>K:SPOILERS_SET)");
+                    else if (cmd == "ARM") SendGenericRpn("(L:A32NX_SPOILERS_ARMED) ! if{ (>K:SPOILERS_ARM_TOGGLE) }");
+                    else if (cmd == "DISARM") SendGenericRpn("(L:A32NX_SPOILERS_ARMED) if{ (>K:SPOILERS_ARM_TOGGLE) }");
+                    return true;
+                }
                 if (id == "MIP_BRK_FAN" && cmd == "PUSH") { SendGenericRpn("(L:A32NX_BRAKE_FAN_BTN_PRESSED) ! (>L:A32NX_BRAKE_FAN_BTN_PRESSED)"); return true; }
                 if (id == "MIP_THROTTLE")
                 {
@@ -458,6 +471,7 @@ namespace SimConnect3
             _msGearAnimDown = ad;
             _msGearDown = ad;
             _msClock = (chrTxt, MsUtcText(), etTxt);
+            _msSpdBrk = ((float)v[47], v[48] > 0.5);
             ApplyMsfsA320State();
         }
 
@@ -481,6 +495,7 @@ namespace SimConnect3
                 if (_msClock is var (mc, mu, me)) ov.SetClock(mc, mu, me);
                 if (_msBrakes is var (ba, bl, br)) ov.SetBrakeGauge(ba, bl, br);
                 if (_msGearDown is bool gd) ov.SetGearLever(gd);
+                if (_msSpdBrk is var (sbp, sba)) ov.SetSpeedBrake(sbp, sba);
             }
         }
     }

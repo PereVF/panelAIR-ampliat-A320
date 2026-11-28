@@ -4986,7 +4986,10 @@ namespace SimConnect3
                 }
 
                 // (provisional: oberta en mode complet per un A320 detectat en DEMO, no es verifica el maquinari)
-                if (!A320ForcedFull && (!hasPanel || !hasMonitor || !hasRotAIR))
+                // PROVISIONAL (2026-11-28, Pere): pont per desenvolupar sense el tàctil / RotAIR connectats → no surt
+                // "verification failed" ni el límit de 10 minuts. TREURE abans de distribuir l'app.
+                const bool SkipHwVerification = true;
+                if (!SkipHwVerification && !A320ForcedFull && (!hasPanel || !hasMonitor || !hasRotAIR))
                 {
                     var screen4K = Screen.AllScreens.FirstOrDefault(s => !s.Primary && s.Bounds.Width == 3840 && s.Bounds.Height == 2160)
                         ?? Screen.AllScreens.First(s => s.Bounds.Width == 3840 && s.Bounds.Height == 2160);
